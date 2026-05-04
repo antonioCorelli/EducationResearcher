@@ -1,13 +1,14 @@
 # Architecture Plan
 
 Source PRD: `docs/v1-prd-and-data-model.md`  
-Repo status: early planning repo with documentation only; no app framework, package files, source tree, or test suite exists yet.
+Repo status: foundation scaffold with npm workspaces, a React/Vite web app, a Fastify service API, baseline lint/typecheck/test/build commands, and minimal CI.
 
 ## Stack Decisions
 
 The following implementation decisions are confirmed for the first scaffold:
 
 - **Frontend framework:** React, TypeScript, and Vite.
+- **Package manager and layout:** npm workspaces with `apps/web` and `apps/service`.
 - **Frontend hosting/deploy:** AWS Amplify.
 - **Researcher/admin auth:** Amazon Cognito.
 - **Service API:** Node.js, TypeScript, and Fastify.
@@ -203,7 +204,6 @@ Real providers should be selected through environment configuration and accessed
 ## Open Architecture Decisions
 
 - DynamoDB physical data model, index strategy, and local development approach.
-- Package manager and monorepo/workspace layout.
 - Infrastructure-as-code approach for Amplify, Cognito, App Runner, DynamoDB, S3, and supporting IAM.
 - Signed URL and access policy details for S3 audio/export artifacts.
 - Cognito role/group claim mapping for researcher and admin users.
