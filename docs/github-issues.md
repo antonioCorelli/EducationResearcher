@@ -49,7 +49,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 **Type:** chore  
 **Priority:** P0  
-**Labels:** service, frontend, docs, testing, mvp  
+**Labels:** service, frontend, docs, testing, mvp, priority:P0
 **Depends on:** None
 
 **Problem**
@@ -77,7 +77,7 @@ Verify local startup, health check, and baseline CI commands.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** data, service, mvp  
+**Labels:** data, service, mvp, priority:P0
 **Depends on:** [Foundation] Scaffold web app, service, and development conventions
 
 **Problem**
@@ -105,7 +105,7 @@ Run migrations from empty database and verify rollback/reset behavior if support
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, frontend, security, mvp  
+**Labels:** service, frontend, security, mvp, priority:P0
 **Depends on:** [Foundation] Scaffold web app, service, and development conventions
 
 **Problem**
@@ -133,7 +133,7 @@ Test authenticated, unauthenticated, researcher, and admin route access.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, security, testing, mvp  
+**Labels:** service, security, testing, mvp, priority:P0
 **Depends on:** [Foundation] Define database schema and migration workflow; [Foundation] Implement researcher authentication and role model
 
 **Problem**
@@ -161,7 +161,7 @@ Use two researcher fixtures and verify neither can read or mutate the other's st
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P0
 **Depends on:** [Foundation] Enforce study-scoped authorization helpers
 
 **Problem**
@@ -190,7 +190,7 @@ Test creation defaults, edits, validation, and unauthorized access.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, security, mvp  
+**Labels:** frontend, service, data, security, mvp, priority:P0
 **Depends on:** [Researcher Setup] Create and edit study shell
 
 **Problem**
@@ -219,7 +219,7 @@ Test version creation and run references before and after consent edits.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P0
 **Depends on:** [Researcher Setup] Create and edit study shell
 
 **Problem**
@@ -249,7 +249,7 @@ Test grouped and ungrouped rendering data, versioning, ordering, and run referen
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, ai, mvp  
+**Labels:** frontend, service, data, ai, mvp, priority:P0
 **Depends on:** [Researcher Setup] Create and edit study shell
 
 **Problem**
@@ -279,7 +279,7 @@ Test versioning, validation, examples, and preservation of prior scoring referen
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P0
 **Depends on:** [Researcher Setup] Create and edit study shell
 
 **Problem**
@@ -307,7 +307,7 @@ Test duplicate code rejection within a study and allowance across different stud
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P1
 **Depends on:** [Participant Runs] Create participant slots manually
 
 **Problem**
@@ -335,7 +335,7 @@ Test valid import, duplicate import, malformed files, and generated code collisi
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, security, mvp  
+**Labels:** frontend, service, data, security, mvp, priority:P0
 **Depends on:** [Researcher Setup] Configure versioned consent; [Researcher Setup] Configure versioned long-form survey; [Researcher Setup] Configure versioned scoring objectives and rubrics; [Participant Runs] Create participant slots manually
 
 **Problem**
@@ -364,7 +364,7 @@ Test config references, multiple runs per slot, and participant self-reset denia
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, frontend, security, mvp  
+**Labels:** service, frontend, security, mvp, priority:P0
 **Depends on:** [Participant Runs] Create researcher-authorized runs
 
 **Problem**
@@ -392,7 +392,7 @@ Test invalid, expired/stale, cross-run, completed, and valid token access.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, data, testing, mvp  
+**Labels:** service, data, testing, mvp, priority:P0
 **Depends on:** [Participant Runs] Create researcher-authorized runs
 
 **Problem**
@@ -421,7 +421,7 @@ Unit test all allowed and disallowed transitions.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, security, mvp  
+**Labels:** frontend, service, data, security, mvp, priority:P0
 **Depends on:** [Participant Runs] Generate secure participant run access links; [Participant Runs] Implement run state machine
 
 **Problem**
@@ -450,7 +450,7 @@ Test both consent methods and verify rendered snapshot persistence.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P0
 **Depends on:** [Participant Flow] Capture participant consent record
 
 **Problem**
@@ -480,7 +480,7 @@ Test required validation, duplicate submission, stale blocking, and versioned re
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** frontend, mvp  
+**Labels:** frontend, mvp, priority:P1
 **Depends on:** [Participant Runs] Generate secure participant run access links; [Participant Flow] Render and submit long-form survey
 
 **Problem**
@@ -508,7 +508,7 @@ E2E test direct navigation to each blocked state.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, ai, data, mvp  
+**Labels:** service, ai, data, mvp, priority:P0
 **Depends on:** [Participant Flow] Render and submit long-form survey; [Researcher Setup] Configure versioned scoring objectives and rubrics
 
 **Problem**
@@ -537,7 +537,7 @@ Use mocked AI responses for valid, invalid, and provider-failure cases.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, ai, data, mvp  
+**Labels:** service, ai, data, mvp, priority:P0
 **Depends on:** [Foundation] Define database schema and migration workflow
 
 **Problem**
@@ -565,7 +565,7 @@ Verify seeded persona and run references.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, ai, testing, mvp  
+**Labels:** service, ai, testing, mvp, priority:P0
 **Depends on:** [Foundation] Scaffold web app, service, and development conventions
 
 **Problem**
@@ -593,7 +593,7 @@ Unit test success, malformed output, retryable error, and non-retryable error ca
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, data, voice, mvp  
+**Labels:** service, data, voice, mvp, priority:P0
 **Depends on:** [Participant Runs] Implement run state machine; [AI Orchestration] Generate and persist survey gap map
 
 **Problem**
@@ -622,7 +622,7 @@ Test lifecycle transitions, stale blocking, and multiple sessions per run.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, voice, mvp  
+**Labels:** frontend, voice, mvp, priority:P0
 **Depends on:** [Interview] Implement interview session lifecycle
 
 **Problem**
@@ -651,7 +651,7 @@ Use component and E2E tests to verify hidden data is absent from participant UI.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, frontend, voice, ai, mvp  
+**Labels:** service, frontend, voice, ai, mvp, priority:P0
 **Depends on:** [Interview] Build sparse participant voice UI; [AI Orchestration] Define fixed V1 interviewer persona prompt version
 
 **Problem**
@@ -680,7 +680,7 @@ Run scripted provider/fake-provider tests for prompt inputs, connection events, 
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, data, voice, mvp  
+**Labels:** service, data, voice, mvp, priority:P0
 **Depends on:** [Interview] Integrate realtime voice interview provider
 
 **Problem**
@@ -709,7 +709,7 @@ Use fake provider transcripts/audio metadata to verify persistence and citation 
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, voice, ops, mvp  
+**Labels:** frontend, service, voice, ops, mvp, priority:P0
 **Depends on:** [Interview] Implement interview session lifecycle; [Interview] Persist transcript turns and audio asset metadata
 
 **Problem**
@@ -738,7 +738,7 @@ Simulate microphone failure, disconnect, provider error, and transcription outag
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, data, testing, mvp  
+**Labels:** service, data, testing, mvp, priority:P0
 **Depends on:** [Participant Runs] Implement run state machine
 
 **Problem**
@@ -767,7 +767,7 @@ Use time-controlled tests for before, at, and after freshness deadline.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, ai, data, mvp  
+**Labels:** service, ai, data, mvp, priority:P0
 **Depends on:** [Interview] Persist transcript turns and audio asset metadata; [Run Freshness] Enforce freshness window and stale scoring trigger; [AI Orchestration] Build AI provider abstraction and structured output validation
 
 **Problem**
@@ -796,7 +796,7 @@ Use mocked AI scoring outputs for completed, no-interview, stale, partial, and c
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, data, ai, mvp  
+**Labels:** service, data, ai, mvp, priority:P0
 **Depends on:** [Scoring] Implement automatic scoring job
 
 **Problem**
@@ -825,7 +825,7 @@ Test citation lookup, cross-study denial, missing source handling, and audio spa
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P0
 **Depends on:** [Scoring] Persist citations and resolve evidence sources
 
 **Problem**
@@ -854,7 +854,7 @@ Test completed, stale, partial, and technical interruption score displays.
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** frontend, service, data, security, mvp  
+**Labels:** frontend, service, data, security, mvp, priority:P1
 **Depends on:** [Scoring] Persist citations and resolve evidence sources
 
 **Problem**
@@ -883,7 +883,7 @@ Test authorization, citation navigation, signed URL generation, and audit log cr
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** frontend, service, ai, data, beta  
+**Labels:** frontend, service, ai, data, beta, priority:P1
 **Depends on:** [Scoring] Implement automatic scoring job; [Researcher Setup] Configure versioned scoring objectives and rubrics
 
 **Problem**
@@ -912,7 +912,7 @@ Test rescoring after objective edits and preservation of old scores.
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** frontend, service, data, mvp  
+**Labels:** frontend, service, data, mvp, priority:P1
 **Depends on:** [Participant Runs] Implement run state machine; [Scoring] Implement automatic scoring job
 
 **Problem**
@@ -941,7 +941,7 @@ Test status display for all major run states.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, export, data, mvp  
+**Labels:** service, export, data, mvp, priority:P0
 **Depends on:** [Scoring] Build researcher score review view
 
 **Problem**
@@ -970,7 +970,7 @@ Snapshot-test CSV output with special characters, missing interview evidence, an
 
 **Type:** feature  
 **Priority:** P3  
-**Labels:** service, export, data, post-mvp  
+**Labels:** service, export, data, post-mvp, priority:P3
 **Depends on:** [Exports] Generate CSV export for scores
 
 **Problem**
@@ -998,7 +998,7 @@ Test JSON structure and authorization.
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** service, ops, data, mvp  
+**Labels:** service, ops, data, mvp, priority:P1
 **Depends on:** [Foundation] Define database schema and migration workflow
 
 **Problem**
@@ -1026,7 +1026,7 @@ Test telemetry creation and researcher access denial.
 
 **Type:** feature  
 **Priority:** P0  
-**Labels:** service, security, data, mvp  
+**Labels:** service, security, data, mvp, priority:P0
 **Depends on:** [Foundation] Enforce study-scoped authorization helpers
 
 **Problem**
@@ -1054,7 +1054,7 @@ Test audit records for representative create, read, export, delete, and admin ac
 
 **Type:** feature  
 **Priority:** P1  
-**Labels:** service, data, security, ops, beta  
+**Labels:** service, data, security, ops, beta, priority:P1
 **Depends on:** [Operations] Add audit logging for sensitive actions; [Interview] Persist transcript turns and audio asset metadata
 
 **Problem**
@@ -1083,7 +1083,7 @@ Test access after deletion and retention candidate selection.
 
 **Type:** feature  
 **Priority:** P2  
-**Labels:** frontend, service, security, ops, beta  
+**Labels:** frontend, service, security, ops, beta, priority:P2
 **Depends on:** [Operations] Record operational telemetry; [Operations] Add audit logging for sensitive actions
 
 **Problem**
@@ -1111,7 +1111,7 @@ Test researcher denial, admin access, and audit logs.
 
 **Type:** test  
 **Priority:** P0  
-**Labels:** testing, frontend, service, ai, voice, mvp  
+**Labels:** testing, frontend, service, ai, voice, mvp, priority:P0
 **Depends on:** [Exports] Generate CSV export for scores
 
 **Problem**
@@ -1140,7 +1140,7 @@ This issue is itself a test deliverable; verify it fails on known broken paths.
 
 **Type:** docs  
 **Priority:** P1  
-**Labels:** docs, ops, mvp  
+**Labels:** docs, ops, mvp, priority:P1
 **Depends on:** [Foundation] Scaffold web app, service, and development conventions
 
 **Problem**
