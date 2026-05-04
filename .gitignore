@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+!apps/**/.env.example
+.codex/
+.grill/
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+npm-debug.log*

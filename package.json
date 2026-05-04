@@ -1,0 +1,29 @@
+{
+  "name": "education-researcher",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:service": "npm run dev --workspace @education-researcher/service",
+    "dev:web": "npm run dev --workspace @education-researcher/web",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.27.0",
+    "eslint": "9.27.0",
+    "globals": "15.14.0",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.29.1",
+    "vitest": "3.2.4"
+  },
+  "engines": {
+    "node": ">=20.16.0",
+    "npm": ">=10.0.0"
+  }
+}

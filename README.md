@@ -11,12 +11,16 @@ For product context, start with:
 
 ## Current Repo Status
 
-This repository is currently documentation-only. The app, service, package manifests, test configuration, and deployment files have not been scaffolded yet.
+This repository now has a foundation scaffold for local development:
 
-Issue #41 records implementation decisions and operating assumptions so the foundation scaffold can follow a shared target architecture.
+- `apps/web`: React, TypeScript, and Vite health/status page.
+- `apps/service`: Node.js, TypeScript, and Fastify API with a `/health` route.
+- Root npm workspace scripts for linting, typechecking, testing, and building.
+- Minimal GitHub Actions CI workflow.
 
 ## Chosen Stack
 
+- **Package manager:** npm workspaces.
 - **Frontend:** React, TypeScript, and Vite.
 - **Frontend hosting/deploy:** AWS Amplify.
 - **Researcher/admin authentication:** Amazon Cognito.
@@ -29,30 +33,57 @@ AI and realtime voice model providers are still open decisions. They must be wra
 
 ## Local Setup
 
-Until the foundation scaffold lands, local setup is limited to cloning the repository and reviewing the planning documents:
+Clone the repository and install dependencies:
 
 ```bash
 git clone https://github.com/antonioCorelli/EducationResearcher.git
 cd EducationResearcher
+npm install
 ```
 
-After the scaffold is added, the README should be updated with exact package manager commands, environment file setup, and verified startup/test commands from a fresh checkout.
+Copy the example environment file before local development:
 
-## Planned Command Contract
+```bash
+cp .env.example .env
+```
 
-The foundation scaffold should provide documented commands for:
+On Windows PowerShell:
 
-- Installing dependencies.
-- Running the React/Vite frontend locally.
-- Running the Fastify service API locally.
-- Running both frontend and service together.
-- Linting.
-- Typechecking.
-- Running unit tests.
-- Running integration or end-to-end tests with fake providers.
-- Building production artifacts.
+```powershell
+Copy-Item .env.example .env
+```
 
-Do not assume command names until package manifests exist. When commands are added, verify them from a fresh checkout and replace this section with the exact commands.
+## Command Contract
+
+Run the web app locally:
+
+```bash
+npm run dev:web
+```
+
+Run the service API locally in a second terminal:
+
+```bash
+npm run dev:service
+```
+
+The web app defaults to `http://127.0.0.1:5173`. The service API defaults to `http://127.0.0.1:4000`, with its health check at `http://127.0.0.1:4000/health`.
+
+Run baseline checks:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Run package-specific commands when needed:
+
+```bash
+npm run dev --workspace @education-researcher/web
+npm run dev --workspace @education-researcher/service
+```
 
 ## Provider Modes
 

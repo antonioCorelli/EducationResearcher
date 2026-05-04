@@ -5,6 +5,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 ## Decisions Made
 
 - Frontend framework: React, TypeScript, and Vite.
+- Package manager and repo layout: npm workspaces with `apps/web` and `apps/service`.
 - Frontend hosting/deploy: AWS Amplify.
 - Researcher/admin auth provider: Amazon Cognito.
 - Service API stack: Node.js, TypeScript, and Fastify.
@@ -29,8 +30,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 ## Technical Questions
 
-- What package manager should the repo use?
-- Should the app be a monolith with server routes/workers, or separate frontend, service, and worker packages?
+- Should background workers live in `apps/service` initially or become a separate workspace package?
 - What DynamoDB table design, key strategy, and local development mode should be used?
 - What infrastructure-as-code approach should define Amplify, Cognito, App Runner, DynamoDB, S3, and IAM?
 - How should signed S3 access be generated, scoped, expired, and audited for audio and exports?
