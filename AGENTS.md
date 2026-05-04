@@ -4,6 +4,8 @@ This file provides guidance for AI coding agents working in this repository.
 
 For product and feature context, read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). It distills the V1 PRD and data model and should be used when planning feature tasks.
 
+Github repo is antonioCorelli/EducationResearcher
+
 ## Project Mindset
 
 Build high-quality, maintainable software. Prefer simple, explicit solutions over clever ones. Make changes that are easy for a human developer to review, test, and extend.

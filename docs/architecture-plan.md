@@ -1,7 +1,21 @@
 # Architecture Plan
 
 Source PRD: `docs/v1-prd-and-data-model.md`  
-Repo status: early planning repo with `docs/` only; no app framework, README, package files, AGENTS.md, or source tree exists yet.
+Repo status: early planning repo with documentation only; no app framework, package files, source tree, or test suite exists yet.
+
+## Stack Decisions
+
+The following implementation decisions are confirmed for the first scaffold:
+
+- **Frontend framework:** React, TypeScript, and Vite.
+- **Frontend hosting/deploy:** AWS Amplify.
+- **Researcher/admin auth:** Amazon Cognito.
+- **Service API:** Node.js, TypeScript, and Fastify.
+- **Service hosting/deploy:** AWS App Runner.
+- **Primary AWS data services:** DynamoDB for application records and run state, S3 for interview audio assets and generated exports.
+- **Local/test provider mode:** fake providers are required from day one for auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
+
+AI and realtime voice model providers remain open decisions. They should be integrated only through adapter boundaries so local development, tests, and early demos can use deterministic fakes.
 
 ## Recommendation
 
@@ -11,15 +25,15 @@ This fits the PRD because the core product behavior is not just screens; it is d
 
 ## Major Components
 
-- **Researcher web app:** authenticated study setup, participant/run management, review, evidence drilldown, and export.
-- **Participant web app:** token-scoped consent, survey, voice interview, pause/resume, recovery, and thank-you flow.
-- **Service API:** typed endpoints for studies, configuration versions, slots, runs, artifacts, scoring, exports, and admin support.
+- **Researcher web app:** React/Vite authenticated study setup, participant/run management, review, evidence drilldown, and export, deployed with AWS Amplify.
+- **Participant web app:** React/Vite token-scoped consent, survey, voice interview, pause/resume, recovery, and thank-you flow, deployed with AWS Amplify.
+- **Service API:** Node.js/TypeScript/Fastify endpoints for studies, configuration versions, slots, runs, artifacts, scoring, exports, and admin support, deployed with AWS App Runner.
 - **Run orchestration service:** explicit state transitions, freshness enforcement, technical interruption handling, and scoring triggers.
 - **AI orchestration layer:** gap map pass, interview pass/session integration, scoring pass, model metadata, prompt versioning, schema validation, retries, and error categorization.
 - **Realtime voice adapter:** browser audio capture/playback, transcription, voice response, turn handling, connection state, and resume behavior.
 - **Background worker:** gap map generation, scoring, stale-run sweeps, CSV generation, retention/deletion jobs, and operational cleanup.
-- **Relational database:** authoritative study, run, artifact metadata, versioning, citations, audit logs, and telemetry records.
-- **Object storage:** interview audio assets and any generated export files.
+- **DynamoDB:** authoritative study, run, artifact metadata, versioning, citations, audit logs, and telemetry records.
+- **S3 object storage:** interview audio assets and any generated export files.
 - **Admin/support surface:** privileged support tooling for operational events and carefully audited raw artifact access.
 
 ## Frontend Responsibilities
@@ -78,7 +92,9 @@ This fits the PRD because the core product behavior is not just screens; it is d
 
 ## Data And Storage Needs
 
-Use a relational database for the logical model in the PRD, with these groups:
+Use DynamoDB as the primary physical data store for the logical model in the PRD. The logical entities still matter, but the physical model should be designed around access patterns, tenant isolation, study/run scoping, immutable version references, and auditability.
+
+The data model includes these groups:
 
 - **Identity and access:** `users`, `study_memberships`.
 - **Study setup:** `studies`, `participant_slots`.
@@ -87,7 +103,7 @@ Use a relational database for the logical model in the PRD, with these groups:
 - **Scoring:** `scoring_runs`, `objective_scores`, `evidence_citations`.
 - **Operations:** `operational_events`, `audit_logs`.
 
-Use object storage for:
+Use S3 object storage for:
 
 - Interview audio files.
 - Optional generated CSV export files.
@@ -98,18 +114,33 @@ Important data properties:
 - Configuration used by a run must be immutable by reference or snapshotted.
 - Citations must be stable and resolve back to raw evidence even after rescoring.
 - Object storage keys should be study/run scoped but not guessable.
+- DynamoDB keys and secondary indexes should make study-scoped authorization practical and hard to bypass.
 - Soft deletion may be useful for researcher deletion workflows, but retention jobs must eventually purge governed data according to policy.
 
 ## External Integrations
 
-- **Authentication provider:** researcher/admin login, role claims, and session management.
-- **AI model provider:** gap map and scoring generation with structured output support.
-- **Realtime voice AI provider:** voice-to-voice interview, transcription, audio playback, and connection state.
-- **Object storage provider:** audio and export storage with signed access.
+- **AWS Amplify:** frontend hosting/deploy for the React/Vite app.
+- **Amazon Cognito:** researcher/admin login, role claims, and session management.
+- **AWS App Runner:** hosted container runtime for the Fastify service API.
+- **DynamoDB:** study, run, versioned configuration, artifact metadata, scoring, telemetry, and audit records.
+- **S3:** audio and export storage with signed access.
+- **AI model provider:** gap map and scoring generation with structured output support; final provider not yet selected.
+- **Realtime voice AI provider:** voice-to-voice interview, transcription, audio playback, and connection state; final provider not yet selected.
 - **Observability provider:** logs, metrics, traces, and alerting.
 - **Email or link distribution provider:** optional if V1 sends participant links rather than relying on researcher distribution.
 
-Provider choices are not specified in the PRD and should be finalized before implementation.
+Provider choices not listed above remain open and should be finalized before real participant data is processed.
+
+## Fake Provider Modes
+
+Fake providers are required from day one for local development, automated tests, and deterministic demos:
+
+- **Fake auth/session:** simulate Cognito researcher/admin identities and role claims without requiring live AWS login.
+- **Fake AI gap map/scoring:** return deterministic structured outputs, malformed outputs, and safe provider-error categories.
+- **Fake voice interview:** simulate transcript turns, audio metadata, connection state, recoverable interruption, technical interruption, and completion.
+- **Fake storage:** avoid production AWS writes in local/test flows while preserving the same service-level contract used by S3-backed storage.
+
+Real providers should be selected through environment configuration and accessed only through adapters. Tests should default to fake providers.
 
 ## Security Considerations
 
@@ -158,21 +189,24 @@ Provider choices are not specified in the PRD and should be finalized before imp
 
 ## Deployment Assumptions
 
-- A single web application can serve researcher and participant routes for V1.
-- A relational database and object storage are required from the beginning.
+- A single React/Vite web application can serve researcher and participant routes for V1.
+- AWS Amplify hosts and deploys the frontend.
+- AWS App Runner hosts and deploys the Fastify service API.
+- Cognito manages researcher/admin authentication.
+- DynamoDB and S3 are required from the beginning.
 - Background workers or scheduled jobs are required before participant flows are production-ready.
 - Secrets for AI, voice, auth, storage, and observability providers must be environment-managed.
 - Production should separate local development, staging, and production data.
 - Retention and deletion jobs should run in production with dry-run or audit mode support before destructive purge.
-- The repo still needs app scaffolding, environment conventions, CI, and deployment documentation.
+- The repo still needs app scaffolding, package management, environment conventions, CI, and deployment documentation.
 
 ## Open Architecture Decisions
 
-- Framework and language for the web app and service.
-- Database vendor and migration tool.
-- Object storage provider and signed URL approach.
-- Authentication provider and role model.
+- DynamoDB physical data model, index strategy, and local development approach.
+- Package manager and monorepo/workspace layout.
+- Infrastructure-as-code approach for Amplify, Cognito, App Runner, DynamoDB, S3, and supporting IAM.
+- Signed URL and access policy details for S3 audio/export artifacts.
+- Cognito role/group claim mapping for researcher and admin users.
 - AI and realtime voice providers.
 - Whether V1 includes study collaborators or only owner/admin access.
-- Whether early implementation uses simulated voice interviews before real voice-to-voice integration.
 - How participant links are generated and distributed.

@@ -2,6 +2,16 @@
 
 Source PRD: `docs/v1-prd-and-data-model.md`
 
+## Decisions Made
+
+- Frontend framework: React, TypeScript, and Vite.
+- Frontend hosting/deploy: AWS Amplify.
+- Researcher/admin auth provider: Amazon Cognito.
+- Service API stack: Node.js, TypeScript, and Fastify.
+- Service API hosting/deploy: AWS App Runner.
+- Primary AWS storage direction: DynamoDB for application data/state and S3 for audio assets and generated exports.
+- Fake providers are required from day one for local development and deterministic tests, including auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
+
 ## Product Questions
 
 - Which user segment is the first pilot: individual researchers, research labs, courses, or institutions?
@@ -19,14 +29,13 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 ## Technical Questions
 
-- What web framework, language, and package manager should the repo use?
+- What package manager should the repo use?
 - Should the app be a monolith with server routes/workers, or separate frontend, service, and worker packages?
-- Which relational database and migration tool should be used?
-- Which object storage provider should hold interview audio and exports?
-- Which auth provider should manage researcher/admin accounts?
+- What DynamoDB table design, key strategy, and local development mode should be used?
+- What infrastructure-as-code approach should define Amplify, Cognito, App Runner, DynamoDB, S3, and IAM?
+- How should signed S3 access be generated, scoped, expired, and audited for audio and exports?
 - Which AI model provider should handle gap map and scoring passes?
 - Which realtime voice provider should handle voice-to-voice interviews?
-- Should early development support a simulated interview provider before real voice integration?
 - How should background jobs be implemented for gap maps, scoring, stale sweeps, exports, retention, and deletion?
 - What schema validation library should be used for AI structured outputs?
 - How should service request IDs be generated and propagated across frontend, service, workers, and providers?
