@@ -4,6 +4,8 @@ This file provides guidance for AI coding agents working in this repository.
 
 For product and feature context, read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). It distills the V1 PRD and data model and should be used when planning feature tasks.
 
+For the shared glossary of product and technical concept names, read [SHARED_LANGUAGE.md](SHARED_LANGUAGE.md).
+
 Github repo is antonioCorelli/EducationResearcher
 
 ## Project Mindset

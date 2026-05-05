@@ -1,0 +1,20 @@
+{
+  "name": "@education-researcher/infra",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "synth": "npm run build --workspace @education-researcher/data-schema && cdk synth --app \"npx tsx src/app.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@education-researcher/data-schema": "0.0.0",
+    "aws-cdk-lib": "^2.193.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1009.0",
+    "tsx": "^4.19.4"
+  }
+}

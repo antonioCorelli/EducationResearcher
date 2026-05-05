@@ -4,12 +4,18 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "packages/*",
     "apps/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
+    "db:create": "npm run db:create --workspace @education-researcher/data-schema",
+    "db:local": "npm run db:local --workspace @education-researcher/data-schema",
+    "db:reset": "npm run db:reset --workspace @education-researcher/data-schema",
+    "db:seed": "npm run db:seed --workspace @education-researcher/data-schema",
     "dev:service": "npm run dev --workspace @education-researcher/service",
     "dev:web": "npm run dev --workspace @education-researcher/web",
+    "infra:synth": "npm run synth --workspace @education-researcher/infra",
     "lint": "eslint .",
     "test": "vitest run",
     "typecheck": "npm run typecheck --workspaces"
