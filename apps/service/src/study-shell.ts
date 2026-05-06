@@ -18,6 +18,7 @@ export interface StudyShell {
   readonly title: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
+  readonly activeConsentVersionId?: string;
   readonly activePersonaVersionId: string;
   readonly persona: {
     readonly id: string;
@@ -61,6 +62,7 @@ interface StudyShellItem {
   readonly title: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
+  readonly activeConsentVersionId?: string;
   readonly activePersonaVersionId: string;
   readonly status: "active";
   readonly createdAt: string;
@@ -397,6 +399,7 @@ function toStudyShellItem(study: StudyShell): StudyShellItem {
     title: study.title,
     defaultFreshnessDays: study.defaultFreshnessDays,
     defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes,
+    ...(study.activeConsentVersionId ? { activeConsentVersionId: study.activeConsentVersionId } : {}),
     activePersonaVersionId: study.activePersonaVersionId,
     status: study.status,
     createdAt: study.createdAt,
@@ -411,6 +414,7 @@ function toStudyShell(item: StudyShellItem): StudyShell {
     title: item.title,
     defaultFreshnessDays: item.defaultFreshnessDays,
     defaultMaxInterviewMinutes: item.defaultMaxInterviewMinutes,
+    activeConsentVersionId: item.activeConsentVersionId,
     activePersonaVersionId: item.activePersonaVersionId,
     persona: toLockedPersona(),
     status: item.status,

@@ -126,7 +126,8 @@ textarea:focus {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   min-height: 44px;
   border-radius: 6px;
   padding: 10px 16px;
@@ -149,6 +150,17 @@ textarea:focus {
   border: 1px solid #bdc9c2;
   background: #ffffff;
   color: #172033;
+}
+
+.danger-button {
+  border: 1px solid #9a3412;
+  background: #c2410c;
+  color: #ffffff;
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .form-error {
@@ -216,7 +228,8 @@ dd {
 }
 
 .study-list-panel,
-.study-form {
+.study-form,
+.setup-stack {
   display: grid;
   gap: 16px;
 }
@@ -299,6 +312,114 @@ h2 {
   color: #1f5b49;
   font-size: 0.78rem;
   text-transform: uppercase;
+}
+
+.consent-form {
+  border-top: 1px solid #e3e9e5;
+  padding-top: 18px;
+}
+
+.version-pill {
+  border: 1px solid #bdc9c2;
+  border-radius: 999px;
+  background: #f8faf8;
+  color: #485466;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.preview-version-pill {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.method-fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.method-fieldset legend {
+  width: 100%;
+  margin-bottom: 8px;
+  color: #2c3648;
+  font-weight: 700;
+}
+
+.radio-option {
+  display: flex;
+  min-height: 44px;
+  flex: 1 1 190px;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-weight: 700;
+}
+
+.radio-option input {
+  width: auto;
+}
+
+.version-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.version-chip {
+  border: 1px solid #d7e0da;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #566173;
+  cursor: pointer;
+  padding: 4px 9px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.version-chip:hover,
+.selected-version-chip {
+  border-color: #172033;
+  color: #172033;
+}
+
+.active-version-chip {
+  border-color: #2f6f5a;
+  background: #f4faf7;
+  color: #1f5b49;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(23 32 51 / 42%);
+  padding: 24px;
+  z-index: 10;
+}
+
+.confirm-dialog {
+  display: grid;
+  width: min(100%, 440px);
+  gap: 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgb(24 33 47 / 18%);
+  padding: 24px;
+}
+
+.confirm-dialog p {
+  margin: 0;
+  color: #485466;
 }
 
 .form-actions {

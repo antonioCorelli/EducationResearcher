@@ -7,6 +7,13 @@ import {
   type SessionUser
 } from "./auth.js";
 import {
+  ConsentService,
+  createConfiguredConsentVersionStore,
+  toSafeConsentValidationResponse,
+  type ConsentVersionStore,
+  type SaveConsentInput
+} from "./consent.js";
+import {
   StudyAuthorizationService,
   toSafeAuthorizationResponse
 } from "./authorization.js";
@@ -22,6 +29,7 @@ import {
 
 interface BuildServerOptions extends FastifyServerOptions {
   readonly authProvider?: AuthProvider;
+  readonly consentVersionStore?: ConsentVersionStore;
   readonly corsOrigin?: string | string[];
   readonly studyShellStore?: StudyShellStore;
 }
@@ -129,6 +137,61 @@ function coerceUpdateStudyShellInput(body: unknown): UpdateStudyShellInput {
   }
 }
 
+function coerceSaveConsentInput(body: unknown): SaveConsentInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Consent settings are required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if ("id" in record || "versionNumber" in record || "isActive" in record || "studyId" in record) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Consent version metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    consentText: record.consentText,
+    consentMethod: record.consentMethod
+  } as SaveConsentInput;
+}
+
+function coerceRestoreConsentInput(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Consent version number is required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (typeof record.versionNumber !== "number") {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Consent version number is required."
+      }
+    };
+  }
+
+  return record.versionNumber;
+}
+
 function coerceOptionalInteger(value: unknown, label: string) {
   if (value === undefined) {
     return undefined;
@@ -153,9 +216,16 @@ function toStudyBodyError(error: unknown) {
 }
 
 export function buildServer(options: BuildServerOptions = {}) {
-  const { authProvider, corsOrigin = true, studyShellStore = createConfiguredStudyShellStore(), ...fastifyOptions } = options;
+  const {
+    authProvider,
+    consentVersionStore = createConfiguredConsentVersionStore(),
+    corsOrigin = true,
+    studyShellStore = createConfiguredStudyShellStore(),
+    ...fastifyOptions
+  } = options;
   let resolvedAuthProvider = authProvider;
   const studyShellService = new StudyShellService(studyShellStore);
+  const consentService = new ConsentService(consentVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
   const server = Fastify({
     logger: true,
@@ -163,6 +233,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   });
 
   void server.register(cors, {
+    methods: ["GET", "POST", "PATCH", "PUT", "OPTIONS"],
     origin: corsOrigin
   });
 
@@ -302,6 +373,101 @@ export function buildServer(options: BuildServerOptions = {}) {
       } catch (error) {
         const safeResponse =
           toSafeAuthorizationResponse(error) ?? toSafeStudyShellValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/consent",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read");
+
+        return consentService.listForStudy(request.params.studyId);
+      } catch (error) {
+        const safeAuthorization = toSafeAuthorizationResponse(error);
+
+        if (safeAuthorization) {
+          return reply.code(safeAuthorization.statusCode).send(safeAuthorization.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.put<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/consent",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const study = await studyShellStore.getById(request.params.studyId);
+
+        if (!study) {
+          const safeAuthorization = toSafeAuthorizationResponse(new Error());
+          return reply.code(safeAuthorization?.statusCode ?? 403).send(
+            safeAuthorization?.body ?? {
+              error: "Forbidden",
+              message: "You are not authorized to access this study resource."
+            }
+          );
+        }
+
+        const consentVersion = await consentService.saveConsent(study, coerceSaveConsentInput(request.body));
+
+        return reply.code(201).send({
+          consentVersion
+        });
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ?? toSafeConsentValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/consent/restore",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const study = await studyShellStore.getById(request.params.studyId);
+
+        if (!study) {
+          const safeAuthorization = toSafeAuthorizationResponse(new Error());
+          return reply.code(safeAuthorization?.statusCode ?? 403).send(
+            safeAuthorization?.body ?? {
+              error: "Forbidden",
+              message: "You are not authorized to access this study resource."
+            }
+          );
+        }
+
+        const consentVersion = await consentService.restoreConsentVersion(
+          study,
+          coerceRestoreConsentInput(request.body)
+        );
+
+        return {
+          consentVersion
+        };
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ?? toSafeConsentValidationResponse(error) ?? toSafeInlineErrorResponse(error);
 
         if (safeResponse) {
           return reply.code(safeResponse.statusCode).send(safeResponse.body);

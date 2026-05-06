@@ -437,10 +437,28 @@ export const DATA_DOMAIN_TABLES = [
         description: "Captured participant consent for a run.",
         partitionKeyPattern: "RUN#<run_id>",
         sortKeyPattern: "CONSENT_RECORD#<consent_record_id>",
-        requiredAttributes: ["id", "runId", "consentVersionId", "consentMethod", "renderedConsentSnapshot"],
+        requiredAttributes: [
+          "id",
+          "studyId",
+          "participantSlotId",
+          "runId",
+          "consentVersionId",
+          "consentMethod",
+          "renderedConsentSnapshot"
+        ],
         statusAttributes: [],
         timestampAttributes: ["acceptedAt", "createdAt"],
         references: [
+          {
+            attribute: "studyId",
+            references: "study",
+            relationship: "Study where consent was accepted."
+          },
+          {
+            attribute: "participantSlotId",
+            references: "participant_slot",
+            relationship: "Participant slot that accepted consent."
+          },
           {
             attribute: "runId",
             references: "run",
