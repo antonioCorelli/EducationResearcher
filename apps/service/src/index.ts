@@ -1,5 +1,10 @@
 import { fileURLToPath } from "node:url";
+import { config } from "dotenv";
 import { buildServer } from "./server.js";
+
+config({
+  path: fileURLToPath(new URL("../.env", import.meta.url))
+});
 
 const DEFAULT_PORT = 4000;
 
