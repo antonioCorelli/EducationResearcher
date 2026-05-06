@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
+import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
 
@@ -66,6 +67,7 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
     title: "Fixture Study",
     defaultFreshnessDays: 14,
     defaultMaxInterviewMinutes: 45,
+    activeConsentVersionId: undefined,
     activePersonaVersionId: "persona_version_v1_default_001",
     persona: {
       id: "persona_version_v1_default_001",
@@ -365,6 +367,344 @@ describe("researcher study shell routes", () => {
       error: "Forbidden",
       message: "You are not authorized to access this study resource."
     });
+
+    await server.close();
+  });
+});
+
+describe("researcher consent routes", () => {
+  it("allows browser preflight for consent saves", async () => {
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false });
+    const response = await server.inject({
+      method: "OPTIONS",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "access-control-request-method": "PUT"
+      }
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-methods"]).toContain("PUT");
+
+    await server.close();
+  });
+
+  it("creates initial consent content and marks it active for the study", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const consentStore = new InMemoryConsentVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: "Participants may choose whether to continue.",
+        consentMethod: "checkmark"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      consentVersion: {
+        studyId: "study_fixture_001",
+        versionNumber: 1,
+        consentText: "Participants may choose whether to continue.",
+        consentMethod: "checkmark",
+        isActive: true
+      }
+    });
+
+    const study = await store.getById("study_fixture_001");
+    expect(study?.activeConsentVersionId).toBe(response.json().consentVersion.id);
+
+    await server.close();
+  });
+
+  it("creates a new active version when active consent is edited", async () => {
+    const initialConsent: ConsentVersion = {
+      id: "consent_version_001",
+      studyId: "study_fixture_001",
+      versionNumber: 1,
+      consentText: "Original consent text.",
+      consentMethod: "checkmark",
+      isActive: true,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    };
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        activeConsentVersionId: initialConsent.id
+      })
+    ]);
+    const consentStore = new InMemoryConsentVersionStore([initialConsent]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+    const runConsentVersionId = initialConsent.id;
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: "Updated consent text.",
+        consentMethod: "electronic_signature"
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      consentVersion: {
+        studyId: "study_fixture_001",
+        versionNumber: 2,
+        consentText: "Updated consent text.",
+        consentMethod: "electronic_signature",
+        isActive: true
+      }
+    });
+    expect(runConsentVersionId).toBe("consent_version_001");
+
+    const versions = await consentStore.listByStudy("study_fixture_001");
+    expect(versions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "consent_version_001", isActive: false, versionNumber: 1 }),
+        expect.objectContaining({ consentText: "Updated consent text.", isActive: true, versionNumber: 2 })
+      ])
+    );
+
+    await server.close();
+  });
+
+  it("restores a previous consent version and removes later versions", async () => {
+    const consentVersions: ConsentVersion[] = [
+      {
+        id: "consent_version_001",
+        studyId: "study_fixture_001",
+        versionNumber: 1,
+        consentText: "Original consent text.",
+        consentMethod: "checkmark",
+        isActive: false,
+        createdAt: "2026-05-06T12:00:00.000Z"
+      },
+      {
+        id: "consent_version_002",
+        studyId: "study_fixture_001",
+        versionNumber: 2,
+        consentText: "Middle consent text.",
+        consentMethod: "electronic_signature",
+        isActive: false,
+        createdAt: "2026-05-06T12:05:00.000Z"
+      },
+      {
+        id: "consent_version_003",
+        studyId: "study_fixture_001",
+        versionNumber: 3,
+        consentText: "Current consent text.",
+        consentMethod: "checkmark",
+        isActive: true,
+        createdAt: "2026-05-06T12:10:00.000Z"
+      }
+    ];
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        activeConsentVersionId: "consent_version_003"
+      })
+    ]);
+    const consentStore = new InMemoryConsentVersionStore(consentVersions);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/consent/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        versionNumber: 1
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      consentVersion: {
+        id: "consent_version_001",
+        versionNumber: 1,
+        consentText: "Original consent text.",
+        consentMethod: "checkmark",
+        isActive: true
+      }
+    });
+
+    const versions = await consentStore.listByStudy("study_fixture_001");
+    expect(versions).toEqual([expect.objectContaining({ id: "consent_version_001", isActive: true })]);
+    expect((await store.getById("study_fixture_001"))?.activeConsentVersionId).toBe("consent_version_001");
+
+    await server.close();
+  });
+
+  it("validates restore version input and tenant access", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const consentStore = new InMemoryConsentVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+    const invalidInput = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/consent/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        versionNumber: "1"
+      }
+    });
+    const missingVersion = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/consent/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        versionNumber: 9
+      }
+    });
+    const crossTenant = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/consent/restore",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        versionNumber: 1
+      }
+    });
+
+    expect(invalidInput.statusCode).toBe(400);
+    expect(invalidInput.json()).toEqual({
+      error: "Bad Request",
+      message: "Consent version number is required."
+    });
+    expect(missingVersion.statusCode).toBe(400);
+    expect(missingVersion.json()).toEqual({
+      error: "Bad Request",
+      message: "Consent version was not found."
+    });
+    expect(crossTenant.statusCode).toBe(403);
+
+    await server.close();
+  });
+
+  it("lists consent versions for an authorized researcher", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const consentStore = new InMemoryConsentVersionStore([
+      {
+        id: "consent_version_001",
+        studyId: "study_fixture_001",
+        versionNumber: 1,
+        consentText: "Consent text.",
+        consentMethod: "checkmark",
+        isActive: true,
+        createdAt: "2026-05-06T12:00:00.000Z"
+      }
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      activeConsentVersion: {
+        id: "consent_version_001",
+        versionNumber: 1
+      },
+      consentVersions: [
+        {
+          id: "consent_version_001",
+          versionNumber: 1
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("validates consent text, method, service-owned metadata, and tenant access", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false, studyShellStore: store });
+    const invalidMethod = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: "Valid text.",
+        consentMethod: "wet_signature"
+      }
+    });
+    const metadataAttempt = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: "Valid text.",
+        consentMethod: "checkmark",
+        versionNumber: 99
+      }
+    });
+    const crossTenant = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        consentText: "Valid text.",
+        consentMethod: "checkmark"
+      }
+    });
+
+    expect(invalidMethod.statusCode).toBe(400);
+    expect(invalidMethod.json()).toEqual({
+      error: "Bad Request",
+      message: "Consent method must be checkmark or electronic signature."
+    });
+    expect(metadataAttempt.statusCode).toBe(400);
+    expect(metadataAttempt.json()).toEqual({
+      error: "Bad Request",
+      message: "Consent version metadata is assigned by the service."
+    });
+    expect(crossTenant.statusCode).toBe(403);
 
     await server.close();
   });

@@ -23,12 +23,25 @@ interface StudyShell {
   readonly title: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
+  readonly activeConsentVersionId?: string;
   readonly activePersonaVersionId: string;
   readonly persona: {
     readonly label: string;
     readonly stylePrompt: string;
     readonly locked: true;
   };
+}
+
+type ConsentMethod = "checkmark" | "electronic_signature";
+
+interface ConsentVersion {
+  readonly id: string;
+  readonly studyId: string;
+  readonly versionNumber: number;
+  readonly consentText: string;
+  readonly consentMethod: ConsentMethod;
+  readonly isActive: boolean;
+  readonly createdAt: string;
 }
 
 type SessionState =
@@ -39,6 +52,11 @@ type SessionState =
 type StudiesState =
   | { readonly status: "idle" | "loading" }
   | { readonly status: "ready"; readonly studies: StudyShell[] }
+  | { readonly status: "error"; readonly message: string };
+
+type ConsentState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly activeConsentVersion?: ConsentVersion; readonly consentVersions: ConsentVersion[] }
   | { readonly status: "error"; readonly message: string };
 
 function getCurrentPath() {
@@ -73,6 +91,23 @@ async function fetchStudies(accessToken: string) {
   return (await response.json()) as { studies: StudyShell[] };
 }
 
+async function fetchConsent(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/consent`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to load consent.");
+  }
+
+  return (await response.json()) as {
+    activeConsentVersion?: ConsentVersion;
+    consentVersions: ConsentVersion[];
+  };
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -82,12 +117,19 @@ export function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenStorageKey));
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
+  const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
   const [studyTitle, setStudyTitle] = useState("");
   const [freshnessDays, setFreshnessDays] = useState(14);
   const [maxInterviewMinutes, setMaxInterviewMinutes] = useState(45);
   const [studyError, setStudyError] = useState("");
   const [isSavingStudy, setIsSavingStudy] = useState(false);
+  const [consentText, setConsentText] = useState("");
+  const [consentMethod, setConsentMethod] = useState<ConsentMethod>("checkmark");
+  const [consentError, setConsentError] = useState("");
+  const [isSavingConsent, setIsSavingConsent] = useState(false);
+  const [selectedConsentVersionNumber, setSelectedConsentVersionNumber] = useState<number | null>(null);
+  const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
 
   const isParticipantRoute = path.startsWith("/participant");
 
@@ -129,6 +171,21 @@ export function App() {
       })
       .catch(() => setStudiesState({ status: "error", message: "Unable to load studies." }));
   }, [accessToken, session.status]);
+
+  useEffect(() => {
+    if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
+      setConsentState({ status: "idle" });
+      return;
+    }
+
+    setConsentState({ status: "loading" });
+    fetchConsent(accessToken, selectedStudyId)
+      .then((consent) => {
+        setConsentState({ status: "ready", ...consent });
+        loadConsentForm(consent.activeConsentVersion);
+      })
+      .catch(() => setConsentState({ status: "error", message: "Unable to load consent." }));
+  }, [accessToken, selectedStudyId, session.status]);
 
   function navigate(nextPath: string) {
     window.history.pushState(null, "", nextPath);
@@ -197,6 +254,12 @@ export function App() {
     setFreshnessDays(14);
     setMaxInterviewMinutes(45);
     setStudyError("");
+    setConsentText("");
+    setConsentMethod("checkmark");
+    setConsentError("");
+    setConsentState({ status: "idle" });
+    setSelectedConsentVersionNumber(null);
+    setIsRestoreDialogOpen(false);
   }
 
   function loadStudyForm(study: StudyShell) {
@@ -205,6 +268,14 @@ export function App() {
     setFreshnessDays(study.defaultFreshnessDays);
     setMaxInterviewMinutes(study.defaultMaxInterviewMinutes);
     setStudyError("");
+  }
+
+  function loadConsentForm(consentVersion: ConsentVersion | undefined) {
+    setConsentText(consentVersion?.consentText ?? "");
+    setConsentMethod(consentVersion?.consentMethod ?? "checkmark");
+    setConsentError("");
+    setSelectedConsentVersionNumber(consentVersion?.versionNumber ?? null);
+    setIsRestoreDialogOpen(false);
   }
 
   async function reloadStudies(token: string, nextSelectedStudyId: string) {
@@ -260,6 +331,108 @@ export function App() {
     }
   }
 
+  async function handleSaveConsent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setConsentError("");
+
+    const selectedConsentVersion =
+      consentState.status === "ready"
+        ? consentState.consentVersions.find((version) => version.versionNumber === selectedConsentVersionNumber)
+        : undefined;
+
+    if (selectedConsentVersion && !selectedConsentVersion.isActive) {
+      setIsRestoreDialogOpen(true);
+      return;
+    }
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setConsentError("Select a study before configuring consent.");
+      return;
+    }
+
+    setIsSavingConsent(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/consent`, {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          consentText,
+          consentMethod
+        })
+      });
+      const payload = (await response.json()) as { consentVersion?: ConsentVersion; message?: string };
+
+      if (!response.ok || !payload.consentVersion) {
+        throw new Error(payload.message ?? "Unable to save consent.");
+      }
+
+      const consent = await fetchConsent(token, selectedStudyId);
+      setConsentState({ status: "ready", ...consent });
+      loadConsentForm(consent.activeConsentVersion);
+      await reloadStudies(token, selectedStudyId);
+    } catch (error) {
+      setConsentError(error instanceof Error ? error.message : "Unable to save consent.");
+    } finally {
+      setIsSavingConsent(false);
+    }
+  }
+
+  function handleSelectConsentVersion(consentVersion: ConsentVersion) {
+    setSelectedConsentVersionNumber(consentVersion.versionNumber);
+    setConsentText(consentVersion.consentText);
+    setConsentMethod(consentVersion.consentMethod);
+    setConsentError("");
+    setIsRestoreDialogOpen(false);
+  }
+
+  async function handleConfirmRestoreConsent() {
+    setConsentError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId || selectedConsentVersionNumber === null) {
+      setConsentError("Select a previous consent version before restoring.");
+      setIsRestoreDialogOpen(false);
+      return;
+    }
+
+    setIsSavingConsent(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/consent/restore`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          versionNumber: selectedConsentVersionNumber
+        })
+      });
+      const payload = (await response.json()) as { consentVersion?: ConsentVersion; message?: string };
+
+      if (!response.ok || !payload.consentVersion) {
+        throw new Error(payload.message ?? "Unable to restore consent.");
+      }
+
+      const consent = await fetchConsent(token, selectedStudyId);
+      setConsentState({ status: "ready", ...consent });
+      loadConsentForm(consent.activeConsentVersion);
+      await reloadStudies(token, selectedStudyId);
+    } catch (error) {
+      setConsentError(error instanceof Error ? error.message : "Unable to restore consent.");
+    } finally {
+      setIsSavingConsent(false);
+      setIsRestoreDialogOpen(false);
+    }
+  }
+
   if (isParticipantRoute) {
     return (
       <main className="app-shell participant-shell">
@@ -289,6 +462,11 @@ export function App() {
   if (session.status === "signed-in") {
     const studies = studiesState.status === "ready" ? studiesState.studies : [];
     const selectedStudy = studies.find((study) => study.id === selectedStudyId);
+    const selectedConsentVersion =
+      consentState.status === "ready"
+        ? consentState.consentVersions.find((version) => version.versionNumber === selectedConsentVersionNumber)
+        : undefined;
+    const isPreviewingPreviousConsent = Boolean(selectedConsentVersion && !selectedConsentVersion.isActive);
 
     return (
       <main className="app-shell researcher-shell">
@@ -327,67 +505,177 @@ export function App() {
                 ))}
               </div>
             </div>
-            <form className="study-form" onSubmit={handleSaveStudy}>
-              <div className="section-heading">
-                <h2>{selectedStudy ? "Edit study shell" : "Create study shell"}</h2>
-              </div>
-              <label>
-                Study title
-                <input
-                  maxLength={160}
-                  name="study-title"
-                  onChange={(event) => setStudyTitle(event.target.value)}
-                  required
-                  type="text"
-                  value={studyTitle}
-                />
-              </label>
-              <div className="settings-grid">
+            <div className="setup-stack">
+              <form className="study-form" onSubmit={handleSaveStudy}>
+                <div className="section-heading">
+                  <h2>{selectedStudy ? "Edit study shell" : "Create study shell"}</h2>
+                </div>
                 <label>
-                  Freshness days
+                  Study title
                   <input
-                    max={365}
-                    min={1}
-                    name="freshness-days"
-                    onChange={(event) => setFreshnessDays(event.target.valueAsNumber)}
+                    maxLength={160}
+                    name="study-title"
+                    onChange={(event) => setStudyTitle(event.target.value)}
                     required
-                    type="number"
-                    value={freshnessDays}
+                    type="text"
+                    value={studyTitle}
                   />
                 </label>
+                <div className="settings-grid">
+                  <label>
+                    Freshness days
+                    <input
+                      max={365}
+                      min={1}
+                      name="freshness-days"
+                      onChange={(event) => setFreshnessDays(event.target.valueAsNumber)}
+                      required
+                      type="number"
+                      value={freshnessDays}
+                    />
+                  </label>
+                  <label>
+                    Interview cap minutes
+                    <input
+                      max={180}
+                      min={1}
+                      name="max-interview-minutes"
+                      onChange={(event) => setMaxInterviewMinutes(event.target.valueAsNumber)}
+                      required
+                      type="number"
+                      value={maxInterviewMinutes}
+                    />
+                  </label>
+                </div>
                 <label>
-                  Interview cap minutes
-                  <input
-                    max={180}
-                    min={1}
-                    name="max-interview-minutes"
-                    onChange={(event) => setMaxInterviewMinutes(event.target.valueAsNumber)}
-                    required
-                    type="number"
-                    value={maxInterviewMinutes}
+                  Interviewer persona
+                  <textarea readOnly value={selectedStudy?.persona.stylePrompt ?? "Ask calm, neutral, one-at-a-time follow-up questions."} />
+                </label>
+                <div className="locked-row">
+                  <span>{selectedStudy?.persona.label ?? "V1 default research interviewer"}</span>
+                  <strong>Locked</strong>
+                </div>
+                {studyError ? <p className="form-error">{studyError}</p> : null}
+                <div className="form-actions">
+                  <button className="primary-button" disabled={isSavingStudy} type="submit">
+                    {isSavingStudy ? "Saving" : selectedStudy ? "Save changes" : "Create study"}
+                  </button>
+                  <button className="secondary-button" type="button" onClick={() => navigate("/participant/demo")}>
+                    Participant demo
+                  </button>
+                </div>
+              </form>
+              <form className="study-form consent-form" onSubmit={handleSaveConsent}>
+                <div className="section-heading">
+                  <h2>Consent</h2>
+                  {selectedConsentVersion ? (
+                    <span className={isPreviewingPreviousConsent ? "version-pill preview-version-pill" : "version-pill"}>
+                      Version {selectedConsentVersion.versionNumber}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="muted-copy">
+                  Capture the text and acceptance method shown to participants. Confirm legal or institutional requirements outside this tool.
+                </p>
+                <fieldset className="method-fieldset" disabled={!selectedStudy}>
+                  <legend>Consent method</legend>
+                  <label className="radio-option">
+                    <input
+                      checked={consentMethod === "checkmark"}
+                      disabled={isPreviewingPreviousConsent}
+                      name="consent-method"
+                      onChange={() => setConsentMethod("checkmark")}
+                      type="radio"
+                      value="checkmark"
+                    />
+                    Checkmark
+                  </label>
+                  <label className="radio-option">
+                    <input
+                      checked={consentMethod === "electronic_signature"}
+                      disabled={isPreviewingPreviousConsent}
+                      name="consent-method"
+                      onChange={() => setConsentMethod("electronic_signature")}
+                      type="radio"
+                      value="electronic_signature"
+                    />
+                    Electronic signature
+                  </label>
+                </fieldset>
+                <label>
+                  Consent text
+                  <textarea
+                    disabled={!selectedStudy || isPreviewingPreviousConsent}
+                    maxLength={12000}
+                    name="consent-text"
+                    onChange={(event) => setConsentText(event.target.value)}
+                    placeholder={selectedStudy ? "Enter participant-facing consent text" : "Create or select a study first"}
+                    required={Boolean(selectedStudy)}
+                    value={consentText}
                   />
                 </label>
-              </div>
-              <label>
-                Interviewer persona
-                <textarea readOnly value={selectedStudy?.persona.stylePrompt ?? "Ask calm, neutral, one-at-a-time follow-up questions."} />
-              </label>
-              <div className="locked-row">
-                <span>{selectedStudy?.persona.label ?? "V1 default research interviewer"}</span>
-                <strong>Locked</strong>
-              </div>
-              {studyError ? <p className="form-error">{studyError}</p> : null}
-              <div className="form-actions">
-                <button className="primary-button" disabled={isSavingStudy} type="submit">
-                  {isSavingStudy ? "Saving" : selectedStudy ? "Save changes" : "Create study"}
-                </button>
-                <button className="secondary-button" type="button" onClick={() => navigate("/participant/demo")}>
-                  Participant demo
-                </button>
-              </div>
-            </form>
+                {consentState.status === "loading" ? <p className="muted-copy">Loading consent</p> : null}
+                {consentState.status === "error" ? <p className="form-error">{consentState.message}</p> : null}
+                {consentState.status === "ready" && consentState.consentVersions.length > 0 ? (
+                  <div className="version-history" aria-label="Consent versions">
+                    {consentState.consentVersions.map((version) => (
+                      <button
+                        className={[
+                          "version-chip",
+                          version.isActive ? "active-version-chip" : "",
+                          version.versionNumber === selectedConsentVersionNumber ? "selected-version-chip" : ""
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        key={version.id}
+                        onClick={() => handleSelectConsentVersion(version)}
+                        type="button"
+                      >
+                        v{version.versionNumber}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {consentError ? <p className="form-error">{consentError}</p> : null}
+                <div className="form-actions">
+                  <button
+                    className={isPreviewingPreviousConsent ? "danger-button" : "primary-button"}
+                    disabled={!selectedStudy || isSavingConsent}
+                    type="submit"
+                  >
+                    {isSavingConsent
+                      ? isPreviewingPreviousConsent
+                        ? "Restoring version"
+                        : "Saving consent"
+                      : isPreviewingPreviousConsent
+                        ? "Restore Version"
+                        : consentState.status === "ready" && consentState.activeConsentVersion
+                          ? "Create new version"
+                          : "Save consent"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </section>
+        {isRestoreDialogOpen && selectedConsentVersion ? (
+          <div className="dialog-backdrop" role="presentation">
+            <div aria-labelledby="restore-consent-title" aria-modal="true" className="confirm-dialog" role="dialog">
+              <h2 id="restore-consent-title">Restore consent version {selectedConsentVersion.versionNumber}?</h2>
+              <p>
+                You cannot undo this action. Versions after version {selectedConsentVersion.versionNumber} will be removed, and this version will become current.
+              </p>
+              <div className="form-actions">
+                <button className="danger-button" disabled={isSavingConsent} onClick={handleConfirmRestoreConsent} type="button">
+                  Restore Version
+                </button>
+                <button className="secondary-button" disabled={isSavingConsent} onClick={() => setIsRestoreDialogOpen(false)} type="button">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
     );
   }

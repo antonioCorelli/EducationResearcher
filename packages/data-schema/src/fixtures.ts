@@ -228,6 +228,8 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
     gsi3sk: "CONSENT_RECORD#2026-05-04T12:05:00.000Z#consent_record_001",
     attributes: {
       id: "consent_record_001",
+      studyId: "study_formative_001",
+      participantSlotId: "slot_fixture_001",
       runId: "run_fixture_001",
       consentVersionId: "consent_version_001",
       consentMethod: "checkmark",

@@ -101,4 +101,23 @@ describe("data domain schema", () => {
       personaVersionId: "persona_version_v1_default_001"
     });
   });
+
+  it("captures versioned consent fields and participant acceptance references", () => {
+    const consentVersion = getEntityDefinition("consent_version")?.definition;
+    const consentRecord = getEntityDefinition("consent_record")?.definition;
+    const fixtureConsentRecord = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "consent_record");
+
+    expect(consentVersion?.requiredAttributes).toEqual(
+      expect.arrayContaining(["versionNumber", "consentText", "consentMethod", "isActive"])
+    );
+    expect(consentRecord?.requiredAttributes).toEqual(
+      expect.arrayContaining(["studyId", "participantSlotId", "runId", "consentVersionId", "renderedConsentSnapshot"])
+    );
+    expect(fixtureConsentRecord?.attributes).toMatchObject({
+      studyId: "study_formative_001",
+      participantSlotId: "slot_fixture_001",
+      runId: "run_fixture_001",
+      consentVersionId: "consent_version_001"
+    });
+  });
 });
