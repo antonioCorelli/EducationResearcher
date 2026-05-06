@@ -135,6 +135,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       surveyGroupId: "survey_group_001",
       prompt: "Describe a moment when the lesson changed your thinking.",
       required: true,
+      questionType: "long_text",
       sortOrder: 1,
       createdAt
     }

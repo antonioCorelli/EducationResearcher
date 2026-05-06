@@ -53,7 +53,7 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-Local development defaults `STUDY_SHELL_STORE=memory` so the researcher study shell flow works without DynamoDB Local. Set `STUDY_SHELL_STORE=dynamodb` when you want the service to persist study shells to the local Study Setup Table.
+Local development defaults `STUDY_SHELL_STORE=memory`, `CONSENT_VERSION_STORE=memory`, and `SURVEY_VERSION_STORE=memory` so the researcher setup flow works without DynamoDB Local. Set a store variable to `dynamodb` when you want that slice to persist to its local DynamoDB table.
 
 ## Command Contract
 

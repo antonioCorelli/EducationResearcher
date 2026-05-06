@@ -247,6 +247,12 @@ h2 {
   line-height: 1.25;
 }
 
+h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+
 .compact-button {
   min-height: 36px;
   padding: 6px 12px;
@@ -314,7 +320,8 @@ h2 {
   text-transform: uppercase;
 }
 
-.consent-form {
+.consent-form,
+.survey-form {
   border-top: 1px solid #e3e9e5;
   padding-top: 18px;
 }
@@ -378,14 +385,21 @@ h2 {
   border-radius: 999px;
   background: #ffffff;
   color: #566173;
-  cursor: pointer;
   padding: 4px 9px;
   font-size: 0.78rem;
   font-weight: 800;
 }
 
-.version-chip:hover,
 .selected-version-chip {
+  border-color: #172033;
+  color: #172033;
+}
+
+button.version-chip {
+  cursor: pointer;
+}
+
+button.version-chip:hover {
   border-color: #172033;
   color: #172033;
 }
@@ -394,6 +408,52 @@ h2 {
   border-color: #2f6f5a;
   background: #f4faf7;
   color: #1f5b49;
+}
+
+.survey-item-list,
+.survey-item-editor,
+.survey-group-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.survey-item-list {
+  gap: 14px;
+}
+
+.survey-item-editor {
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.survey-item-toolbar,
+.survey-item-actions,
+.survey-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.survey-item-toolbar {
+  justify-content: space-between;
+}
+
+.survey-add-row {
+  justify-content: flex-start;
+}
+
+.question-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.survey-group-editor {
+  background: #fbfcfa;
 }
 
 .dialog-backdrop {
@@ -451,7 +511,8 @@ h2 {
   .session-list div,
   .topline,
   .study-workspace,
-  .settings-grid {
+  .settings-grid,
+  .question-row {
     grid-template-columns: 1fr;
   }
 

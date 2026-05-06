@@ -102,6 +102,19 @@ describe("data domain schema", () => {
     });
   });
 
+  it("declares survey questions as required long-form text", () => {
+    const surveyQuestion = getEntityDefinition("survey_question")?.definition;
+    const fixtureSurveyQuestion = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "survey_question");
+
+    expect(surveyQuestion?.requiredAttributes).toEqual(
+      expect.arrayContaining(["prompt", "required", "questionType", "sortOrder"])
+    );
+    expect(fixtureSurveyQuestion?.attributes).toMatchObject({
+      required: true,
+      questionType: "long_text"
+    });
+  });
+
   it("captures versioned consent fields and participant acceptance references", () => {
     const consentVersion = getEntityDefinition("consent_version")?.definition;
     const consentRecord = getEntityDefinition("consent_record")?.definition;
