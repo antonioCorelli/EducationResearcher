@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-export type ResearcherRole = "researcher";
+export type ResearcherRole = "researcher" | "admin";
 
 export interface SessionUser {
   readonly id: string;
