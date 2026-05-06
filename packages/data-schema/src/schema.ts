@@ -283,7 +283,7 @@ export const DATA_DOMAIN_TABLES = [
         description: "Required long-form free-text question.",
         partitionKeyPattern: "SURVEY_VERSION#<survey_version_id>",
         sortKeyPattern: "QUESTION#<sort_order>#<survey_question_id>",
-        requiredAttributes: ["id", "surveyVersionId", "prompt", "required", "sortOrder"],
+        requiredAttributes: ["id", "surveyVersionId", "prompt", "required", "questionType", "sortOrder"],
         statusAttributes: [],
         timestampAttributes: ["createdAt"],
         immutableAfterReference: true,

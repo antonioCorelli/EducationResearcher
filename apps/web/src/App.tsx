@@ -24,6 +24,7 @@ interface StudyShell {
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
+  readonly activeSurveyVersionId?: string;
   readonly activePersonaVersionId: string;
   readonly persona: {
     readonly label: string;
@@ -44,6 +45,49 @@ interface ConsentVersion {
   readonly createdAt: string;
 }
 
+interface SurveyQuestion {
+  readonly id: string;
+  readonly surveyVersionId: string;
+  readonly surveyGroupId?: string;
+  readonly prompt: string;
+  readonly required: true;
+  readonly questionType: "long_text";
+  readonly sortOrder: number;
+  readonly createdAt: string;
+}
+
+interface SurveyGroup {
+  readonly id: string;
+  readonly surveyVersionId: string;
+  readonly title: string;
+  readonly sortOrder: number;
+  readonly questions: readonly SurveyQuestion[];
+  readonly createdAt: string;
+}
+
+interface SurveyVersion {
+  readonly id: string;
+  readonly studyId: string;
+  readonly versionNumber: number;
+  readonly isActive: boolean;
+  readonly layoutItems?: readonly SurveyLayoutItem[];
+  readonly groups: readonly SurveyGroup[];
+  readonly ungroupedQuestions: readonly SurveyQuestion[];
+  readonly createdAt: string;
+}
+
+type SurveyLayoutItem =
+  | {
+      readonly type: "question";
+      readonly sortOrder: number;
+      readonly question: SurveyQuestion;
+    }
+  | {
+      readonly type: "group";
+      readonly sortOrder: number;
+      readonly group: SurveyGroup;
+    };
+
 type SessionState =
   | { readonly status: "checking" }
   | { readonly status: "signed-out" }
@@ -58,6 +102,22 @@ type ConsentState =
   | { readonly status: "idle" | "loading" }
   | { readonly status: "ready"; readonly activeConsentVersion?: ConsentVersion; readonly consentVersions: ConsentVersion[] }
   | { readonly status: "error"; readonly message: string };
+
+type SurveyState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly activeSurveyVersion?: SurveyVersion; readonly surveyVersions: SurveyVersion[] }
+  | { readonly status: "error"; readonly message: string };
+
+type SurveyDraftItem =
+  | {
+      readonly type: "question";
+      readonly prompt: string;
+    }
+  | {
+      readonly type: "group";
+      readonly title: string;
+      readonly questions: readonly string[];
+    };
 
 function getCurrentPath() {
   return window.location.pathname;
@@ -108,6 +168,23 @@ async function fetchConsent(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchSurvey(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/survey`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to load survey.");
+  }
+
+  return (await response.json()) as {
+    activeSurveyVersion?: SurveyVersion;
+    surveyVersions: SurveyVersion[];
+  };
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -118,6 +195,7 @@ export function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenStorageKey));
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
+  const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
   const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
   const [studyTitle, setStudyTitle] = useState("");
   const [freshnessDays, setFreshnessDays] = useState(14);
@@ -130,6 +208,9 @@ export function App() {
   const [isSavingConsent, setIsSavingConsent] = useState(false);
   const [selectedConsentVersionNumber, setSelectedConsentVersionNumber] = useState<number | null>(null);
   const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
+  const [surveyItems, setSurveyItems] = useState<readonly SurveyDraftItem[]>([{ type: "question", prompt: "" }]);
+  const [surveyError, setSurveyError] = useState("");
+  const [isSavingSurvey, setIsSavingSurvey] = useState(false);
 
   const isParticipantRoute = path.startsWith("/participant");
 
@@ -185,6 +266,21 @@ export function App() {
         loadConsentForm(consent.activeConsentVersion);
       })
       .catch(() => setConsentState({ status: "error", message: "Unable to load consent." }));
+  }, [accessToken, selectedStudyId, session.status]);
+
+  useEffect(() => {
+    if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
+      setSurveyState({ status: "idle" });
+      return;
+    }
+
+    setSurveyState({ status: "loading" });
+    fetchSurvey(accessToken, selectedStudyId)
+      .then((survey) => {
+        setSurveyState({ status: "ready", ...survey });
+        loadSurveyForm(survey.activeSurveyVersion);
+      })
+      .catch(() => setSurveyState({ status: "error", message: "Unable to load survey." }));
   }, [accessToken, selectedStudyId, session.status]);
 
   function navigate(nextPath: string) {
@@ -260,6 +356,9 @@ export function App() {
     setConsentState({ status: "idle" });
     setSelectedConsentVersionNumber(null);
     setIsRestoreDialogOpen(false);
+    setSurveyState({ status: "idle" });
+    setSurveyItems([{ type: "question", prompt: "" }]);
+    setSurveyError("");
   }
 
   function loadStudyForm(study: StudyShell) {
@@ -276,6 +375,46 @@ export function App() {
     setConsentError("");
     setSelectedConsentVersionNumber(consentVersion?.versionNumber ?? null);
     setIsRestoreDialogOpen(false);
+  }
+
+  function loadSurveyForm(surveyVersion: SurveyVersion | undefined) {
+    const layoutItems =
+      surveyVersion?.layoutItems ??
+      [
+        ...(surveyVersion?.ungroupedQuestions.map(
+          (question): SurveyLayoutItem => ({
+            type: "question",
+            sortOrder: question.sortOrder,
+            question
+          })
+        ) ?? []),
+        ...(surveyVersion?.groups.map(
+          (group): SurveyLayoutItem => ({
+            type: "group",
+            sortOrder: group.sortOrder,
+            group
+          })
+        ) ?? [])
+      ].sort((left, right) => left.sortOrder - right.sortOrder);
+
+    setSurveyItems(
+      layoutItems.length > 0
+        ? layoutItems.map((item): SurveyDraftItem =>
+            item.type === "question"
+              ? {
+                  type: "question",
+                  prompt: item.question.prompt
+                }
+              : {
+                  type: "group",
+                  title: item.group.title,
+                  questions:
+                    item.group.questions.length > 0 ? item.group.questions.map((question) => question.prompt) : [""]
+                }
+          )
+        : [{ type: "question", prompt: "" }]
+    );
+    setSurveyError("");
   }
 
   async function reloadStudies(token: string, nextSelectedStudyId: string) {
@@ -383,6 +522,153 @@ export function App() {
     }
   }
 
+  function addSurveyQuestion() {
+    setSurveyItems((items) => [...items, { type: "question", prompt: "" }]);
+  }
+
+  function addSurveyGroup() {
+    setSurveyItems((items) => [...items, { type: "group", title: "", questions: [""] }]);
+  }
+
+  function moveSurveyItem(index: number, direction: -1 | 1) {
+    setSurveyItems((items) => {
+      const nextIndex = index + direction;
+
+      if (nextIndex < 0 || nextIndex >= items.length) {
+        return items;
+      }
+
+      const nextItems = [...items];
+      [nextItems[index], nextItems[nextIndex]] = [nextItems[nextIndex], nextItems[index]];
+      return nextItems;
+    });
+  }
+
+  function updateSurveyQuestion(index: number, value: string) {
+    setSurveyItems((items) =>
+      items.map((item, itemIndex) => (itemIndex === index && item.type === "question" ? { ...item, prompt: value } : item))
+    );
+  }
+
+  function removeSurveyItem(index: number) {
+    setSurveyItems((items) => {
+      const nextItems = items.filter((_, itemIndex) => itemIndex !== index);
+      return nextItems.length > 0 ? nextItems : [{ type: "question", prompt: "" }];
+    });
+  }
+
+  function updateSurveyGroupTitle(index: number, title: string) {
+    setSurveyItems((items) =>
+      items.map((item, itemIndex) => (itemIndex === index && item.type === "group" ? { ...item, title } : item))
+    );
+  }
+
+  function updateGroupedQuestion(itemIndex: number, questionIndex: number, prompt: string) {
+    setSurveyItems((items) =>
+      items.map((item, currentItemIndex) =>
+        currentItemIndex === itemIndex && item.type === "group"
+          ? {
+              ...item,
+              questions: item.questions.map((question, currentQuestionIndex) =>
+                currentQuestionIndex === questionIndex ? prompt : question
+              )
+            }
+          : item
+      )
+    );
+  }
+
+  function addGroupedQuestion(itemIndex: number) {
+    setSurveyItems((items) =>
+      items.map((item, currentItemIndex) =>
+        currentItemIndex === itemIndex && item.type === "group"
+          ? { ...item, questions: [...item.questions, ""] }
+          : item
+      )
+    );
+  }
+
+  function removeGroupedQuestion(itemIndex: number, questionIndex: number) {
+    setSurveyItems((items) =>
+      items.map((item, currentItemIndex) => {
+        if (currentItemIndex !== itemIndex || item.type !== "group") {
+          return item;
+        }
+
+        const nextQuestions = item.questions.filter((_, currentQuestionIndex) => currentQuestionIndex !== questionIndex);
+
+        return {
+          ...item,
+          questions: nextQuestions.length > 0 ? nextQuestions : [""]
+        };
+      })
+    );
+  }
+
+  async function handleSaveSurvey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSurveyError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setSurveyError("Select a study before configuring the survey.");
+      return;
+    }
+
+    setIsSavingSurvey(true);
+
+    try {
+      const items = surveyItems
+        .map((item) =>
+          item.type === "question"
+            ? ({
+                type: "question",
+                question: {
+                  prompt: item.prompt.trim()
+                }
+              } as const)
+            : ({
+                type: "group",
+                group: {
+                  title: item.title.trim(),
+                  questions: item.questions
+                    .map((prompt) => prompt.trim())
+                    .filter(Boolean)
+                    .map((prompt) => ({ prompt }))
+                }
+              } as const)
+        )
+        .filter((item) =>
+          item.type === "question" ? item.question.prompt : item.group.title || item.group.questions.length > 0
+        );
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/survey`, {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          items
+        })
+      });
+      const payload = (await response.json()) as { surveyVersion?: SurveyVersion; message?: string };
+
+      if (!response.ok || !payload.surveyVersion) {
+        throw new Error(payload.message ?? "Unable to save survey.");
+      }
+
+      const survey = await fetchSurvey(token, selectedStudyId);
+      setSurveyState({ status: "ready", ...survey });
+      loadSurveyForm(survey.activeSurveyVersion);
+      await reloadStudies(token, selectedStudyId);
+    } catch (error) {
+      setSurveyError(error instanceof Error ? error.message : "Unable to save survey.");
+    } finally {
+      setIsSavingSurvey(false);
+    }
+  }
+
   function handleSelectConsentVersion(consentVersion: ConsentVersion) {
     setSelectedConsentVersionNumber(consentVersion.versionNumber);
     setConsentText(consentVersion.consentText);
@@ -467,6 +753,7 @@ export function App() {
         ? consentState.consentVersions.find((version) => version.versionNumber === selectedConsentVersionNumber)
         : undefined;
     const isPreviewingPreviousConsent = Boolean(selectedConsentVersion && !selectedConsentVersion.isActive);
+    const activeSurveyVersion = surveyState.status === "ready" ? surveyState.activeSurveyVersion : undefined;
 
     return (
       <main className="app-shell researcher-shell">
@@ -652,6 +939,171 @@ export function App() {
                         : consentState.status === "ready" && consentState.activeConsentVersion
                           ? "Create new version"
                           : "Save consent"}
+                  </button>
+                </div>
+              </form>
+              <form className="study-form survey-form" onSubmit={handleSaveSurvey}>
+                <div className="section-heading">
+                  <h2>Survey</h2>
+                  {activeSurveyVersion ? <span className="version-pill">Version {activeSurveyVersion.versionNumber}</span> : null}
+                </div>
+                <p className="muted-copy">
+                  Configure required long-form prompts. Standalone questions and titled groups can be ordered together.
+                </p>
+                <div className="survey-item-list">
+                  {surveyItems.map((item, itemIndex) =>
+                    item.type === "question" ? (
+                      <div className="survey-item-editor" key={`survey-question-${itemIndex}`}>
+                        <div className="survey-item-toolbar">
+                          <h3>Question {itemIndex + 1}</h3>
+                          <div className="survey-item-actions">
+                            <button
+                              aria-label={`Move question ${itemIndex + 1} up`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || itemIndex === 0}
+                              onClick={() => moveSurveyItem(itemIndex, -1)}
+                              type="button"
+                            >
+                              Up
+                            </button>
+                            <button
+                              aria-label={`Move question ${itemIndex + 1} down`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || itemIndex === surveyItems.length - 1}
+                              onClick={() => moveSurveyItem(itemIndex, 1)}
+                              type="button"
+                            >
+                              Down
+                            </button>
+                            <button
+                              aria-label={`Remove question ${itemIndex + 1}`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || surveyItems.length === 1}
+                              onClick={() => removeSurveyItem(itemIndex)}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <label>
+                          Prompt
+                          <textarea
+                            disabled={!selectedStudy}
+                            maxLength={1000}
+                            onChange={(event) => updateSurveyQuestion(itemIndex, event.target.value)}
+                            placeholder={selectedStudy ? "Ask for a sentence-to-paragraph response" : "Create or select a study first"}
+                            value={item.prompt}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="survey-item-editor survey-group-editor" key={`survey-group-${itemIndex}`}>
+                        <div className="survey-item-toolbar">
+                          <h3>Group {itemIndex + 1}</h3>
+                          <div className="survey-item-actions">
+                            <button
+                              aria-label={`Move group ${itemIndex + 1} up`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || itemIndex === 0}
+                              onClick={() => moveSurveyItem(itemIndex, -1)}
+                              type="button"
+                            >
+                              Up
+                            </button>
+                            <button
+                              aria-label={`Move group ${itemIndex + 1} down`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || itemIndex === surveyItems.length - 1}
+                              onClick={() => moveSurveyItem(itemIndex, 1)}
+                              type="button"
+                            >
+                              Down
+                            </button>
+                            <button
+                              aria-label={`Remove group ${itemIndex + 1}`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy}
+                              onClick={() => removeSurveyItem(itemIndex)}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <label>
+                          Group title
+                          <input
+                            disabled={!selectedStudy}
+                            maxLength={120}
+                            onChange={(event) => updateSurveyGroupTitle(itemIndex, event.target.value)}
+                            placeholder="Visible group title"
+                            type="text"
+                            value={item.title}
+                          />
+                        </label>
+                        {item.questions.map((prompt, questionIndex) => (
+                          <div className="question-row" key={`group-${itemIndex}-question-${questionIndex}`}>
+                            <label>
+                              Group question {questionIndex + 1}
+                              <textarea
+                                disabled={!selectedStudy}
+                                maxLength={1000}
+                                onChange={(event) => updateGroupedQuestion(itemIndex, questionIndex, event.target.value)}
+                                placeholder="Ask for a long-form response"
+                                value={prompt}
+                              />
+                            </label>
+                            <button
+                              aria-label={`Remove group ${itemIndex + 1} question ${questionIndex + 1}`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || item.questions.length === 1}
+                              onClick={() => removeGroupedQuestion(itemIndex, questionIndex)}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          className="secondary-button compact-button"
+                          disabled={!selectedStudy}
+                          onClick={() => addGroupedQuestion(itemIndex)}
+                          type="button"
+                        >
+                          Add group question
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+                <div className="survey-add-row">
+                  <button className="secondary-button compact-button" disabled={!selectedStudy} onClick={addSurveyQuestion} type="button">
+                    Add question
+                  </button>
+                  <button className="secondary-button compact-button" disabled={!selectedStudy} onClick={addSurveyGroup} type="button">
+                    Add group
+                  </button>
+                </div>
+                {surveyState.status === "loading" ? <p className="muted-copy">Loading survey</p> : null}
+                {surveyState.status === "error" ? <p className="form-error">{surveyState.message}</p> : null}
+                {surveyState.status === "ready" && surveyState.surveyVersions.length > 0 ? (
+                  <div className="version-history" aria-label="Survey versions">
+                    {surveyState.surveyVersions.map((version) => (
+                      <span className={version.isActive ? "version-chip active-version-chip" : "version-chip"} key={version.id}>
+                        v{version.versionNumber}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {surveyError ? <p className="form-error">{surveyError}</p> : null}
+                <div className="form-actions">
+                  <button className="primary-button" disabled={!selectedStudy || isSavingSurvey} type="submit">
+                    {isSavingSurvey
+                      ? "Saving survey"
+                      : surveyState.status === "ready" && surveyState.activeSurveyVersion
+                        ? "Create new version"
+                        : "Save survey"}
                   </button>
                 </div>
               </form>

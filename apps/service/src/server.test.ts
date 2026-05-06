@@ -3,6 +3,7 @@ import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
+import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
 
 const researcher: SessionUser = {
   id: "user_researcher_001",
@@ -68,6 +69,7 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
     defaultFreshnessDays: 14,
     defaultMaxInterviewMinutes: 45,
     activeConsentVersionId: undefined,
+    activeSurveyVersionId: undefined,
     activePersonaVersionId: "persona_version_v1_default_001",
     persona: {
       id: "persona_version_v1_default_001",
@@ -703,6 +705,379 @@ describe("researcher consent routes", () => {
     expect(metadataAttempt.json()).toEqual({
       error: "Bad Request",
       message: "Consent version metadata is assigned by the service."
+    });
+    expect(crossTenant.statusCode).toBe(403);
+
+    await server.close();
+  });
+});
+
+describe("researcher survey routes", () => {
+  it("allows browser preflight for survey saves", async () => {
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false });
+    const response = await server.inject({
+      method: "OPTIONS",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "access-control-request-method": "PUT"
+      }
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-methods"]).toContain("PUT");
+
+    await server.close();
+  });
+
+  it("creates grouped and ungrouped long-form survey questions", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const surveyStore = new InMemorySurveyVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store,
+      surveyVersionStore: surveyStore
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        questions: [{ prompt: "  What do you already know about fractions?  " }],
+        groups: [
+          {
+            title: "Reflection",
+            questions: [{ prompt: "Describe a moment when your thinking changed." }]
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      surveyVersion: {
+        studyId: "study_fixture_001",
+        versionNumber: 1,
+        isActive: true,
+        ungroupedQuestions: [
+          {
+            prompt: "What do you already know about fractions?",
+            required: true,
+            questionType: "long_text",
+            sortOrder: 1
+          }
+        ],
+        groups: [
+          {
+            title: "Reflection",
+            sortOrder: 2,
+            questions: [
+              {
+                prompt: "Describe a moment when your thinking changed.",
+                required: true,
+                questionType: "long_text",
+                sortOrder: 1
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const study = await store.getById("study_fixture_001");
+    expect(study?.activeSurveyVersionId).toBe(response.json().surveyVersion.id);
+
+    await server.close();
+  });
+
+  it("preserves interleaved question, group, question survey layout", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const surveyStore = new InMemorySurveyVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store,
+      surveyVersionStore: surveyStore
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        items: [
+          {
+            type: "question",
+            question: {
+              prompt: "First standalone question."
+            }
+          },
+          {
+            type: "group",
+            group: {
+              title: "Middle group",
+              questions: [
+                {
+                  prompt: "Grouped question."
+                }
+              ]
+            }
+          },
+          {
+            type: "question",
+            question: {
+              prompt: "Second standalone question."
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      surveyVersion: {
+        layoutItems: [
+          {
+            type: "question",
+            sortOrder: 1,
+            question: {
+              prompt: "First standalone question.",
+              sortOrder: 1
+            }
+          },
+          {
+            type: "group",
+            sortOrder: 2,
+            group: {
+              title: "Middle group",
+              sortOrder: 2,
+              questions: [
+                {
+                  prompt: "Grouped question.",
+                  sortOrder: 1
+                }
+              ]
+            }
+          },
+          {
+            type: "question",
+            sortOrder: 3,
+            question: {
+              prompt: "Second standalone question.",
+              sortOrder: 3
+            }
+          }
+        ]
+      }
+    });
+
+    await server.close();
+  });
+
+  it("creates a new active survey version without mutating an existing run reference", async () => {
+    const initialQuestion = {
+      id: "survey_question_001",
+      surveyVersionId: "survey_version_001",
+      prompt: "Original question.",
+      required: true,
+      questionType: "long_text",
+      sortOrder: 1,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    } as const;
+    const initialSurvey: SurveyVersion = {
+      id: "survey_version_001",
+      studyId: "study_fixture_001",
+      versionNumber: 1,
+      isActive: true,
+      layoutItems: [
+        {
+          type: "question",
+          sortOrder: 1,
+          question: initialQuestion
+        }
+      ],
+      groups: [],
+      ungroupedQuestions: [initialQuestion],
+      createdAt: "2026-05-06T12:00:00.000Z"
+    };
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        activeSurveyVersionId: initialSurvey.id
+      })
+    ]);
+    const surveyStore = new InMemorySurveyVersionStore([initialSurvey]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store,
+      surveyVersionStore: surveyStore
+    });
+    const runSurveyVersionId = initialSurvey.id;
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        questions: [{ prompt: "Updated ungrouped question." }]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      surveyVersion: {
+        studyId: "study_fixture_001",
+        versionNumber: 2,
+        isActive: true,
+        ungroupedQuestions: [
+          {
+            prompt: "Updated ungrouped question."
+          }
+        ]
+      }
+    });
+    expect(runSurveyVersionId).toBe("survey_version_001");
+
+    const versions = await surveyStore.listByStudy("study_fixture_001");
+    expect(versions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "survey_version_001", isActive: false, versionNumber: 1 }),
+        expect.objectContaining({ isActive: true, versionNumber: 2 })
+      ])
+    );
+    expect((await store.getById("study_fixture_001"))?.activeSurveyVersionId).toBe(response.json().surveyVersion.id);
+
+    await server.close();
+  });
+
+  it("lists survey versions for an authorized researcher", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const fixtureQuestion = {
+      id: "survey_question_001",
+      surveyVersionId: "survey_version_001",
+      prompt: "Question text.",
+      required: true,
+      questionType: "long_text",
+      sortOrder: 1,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    } as const;
+    const surveyStore = new InMemorySurveyVersionStore([
+      {
+        id: "survey_version_001",
+        studyId: "study_fixture_001",
+        versionNumber: 1,
+        isActive: true,
+        layoutItems: [
+          {
+            type: "question",
+            sortOrder: 1,
+            question: fixtureQuestion
+          }
+        ],
+        groups: [],
+        ungroupedQuestions: [fixtureQuestion],
+        createdAt: "2026-05-06T12:00:00.000Z"
+      }
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store,
+      surveyVersionStore: surveyStore
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      activeSurveyVersion: {
+        id: "survey_version_001",
+        versionNumber: 1,
+        ungroupedQuestions: [
+          {
+            prompt: "Question text."
+          }
+        ]
+      },
+      surveyVersions: [
+        {
+          id: "survey_version_001",
+          versionNumber: 1
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("validates required questions, long-form type, service-owned metadata, and tenant access", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false, studyShellStore: store });
+    const missingQuestion = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        questions: []
+      }
+    });
+    const invalidType = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        questions: [{ prompt: "Question text.", questionType: "multiple_choice" }]
+      }
+    });
+    const metadataAttempt = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        questions: [{ id: "survey_question_client", prompt: "Question text." }]
+      }
+    });
+    const crossTenant = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        questions: [{ prompt: "Question text." }]
+      }
+    });
+
+    expect(missingQuestion.statusCode).toBe(400);
+    expect(missingQuestion.json()).toEqual({
+      error: "Bad Request",
+      message: "Add at least one required long-form question."
+    });
+    expect(invalidType.statusCode).toBe(400);
+    expect(invalidType.json()).toEqual({
+      error: "Bad Request",
+      message: "Survey questions must be long-form text only."
+    });
+    expect(metadataAttempt.statusCode).toBe(400);
+    expect(metadataAttempt.json()).toEqual({
+      error: "Bad Request",
+      message: "Survey question metadata is assigned by the service."
     });
     expect(crossTenant.statusCode).toBe(403);
 
