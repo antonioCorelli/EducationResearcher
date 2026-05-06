@@ -1,6 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { getTableByKey, tableNameForEnvironment } from "@education-researcher/data-schema";
 import type { SessionUser } from "./auth.js";
 import type { StudyAccessRecord, StudyAuthorizationStore } from "./authorization.js";
 
@@ -383,13 +382,7 @@ function toLockedPersona(): StudyShell["persona"] {
 }
 
 function getStudySetupTableName(environment = process.env.EDUCATION_RESEARCHER_ENV ?? "local") {
-  const table = getTableByKey("studySetup");
-
-  if (!table) {
-    throw new Error("Study Setup Table is not defined in the data schema.");
-  }
-
-  return tableNameForEnvironment(table, environment);
+  return `education-researcher-${environment}-study-setup`;
 }
 
 function toStudyShellItem(study: StudyShell): StudyShellItem {
