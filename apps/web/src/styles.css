@@ -20,7 +20,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -97,7 +98,8 @@ label {
   font-weight: 700;
 }
 
-input {
+input,
+textarea {
   width: 100%;
   border: 1px solid #bdc9c2;
   border-radius: 6px;
@@ -106,7 +108,18 @@ input {
   padding: 12px 14px;
 }
 
-input:focus {
+textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+textarea[readonly] {
+  background: #f8faf8;
+  color: #485466;
+}
+
+input:focus,
+textarea:focus {
   border-color: #2f6f5a;
   box-shadow: 0 0 0 3px rgb(47 111 90 / 18%);
   outline: none;
@@ -187,6 +200,113 @@ dd {
   width: min(100%, 460px);
 }
 
+.researcher-shell {
+  place-items: start center;
+}
+
+.researcher-workspace {
+  width: min(100%, 1080px);
+}
+
+.study-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.36fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.study-list-panel,
+.study-form {
+  display: grid;
+  gap: 16px;
+}
+
+.section-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.compact-button {
+  min-height: 36px;
+  padding: 6px 12px;
+}
+
+.study-list {
+  display: grid;
+  gap: 8px;
+}
+
+.study-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 64px;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #172033;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.study-row:hover,
+.selected-study-row {
+  border-color: #2f6f5a;
+  background: #f4faf7;
+}
+
+.study-row span {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.study-row small,
+.muted-copy {
+  color: #566173;
+}
+
+.muted-copy {
+  margin: 0;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.locked-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #f8faf8;
+  padding: 10px 12px;
+  color: #485466;
+}
+
+.locked-row strong {
+  color: #1f5b49;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 20px;
@@ -208,7 +328,9 @@ dd {
   }
 
   .session-list div,
-  .topline {
+  .topline,
+  .study-workspace,
+  .settings-grid {
     grid-template-columns: 1fr;
   }
 

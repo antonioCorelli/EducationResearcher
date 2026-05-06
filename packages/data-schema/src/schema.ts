@@ -153,8 +153,6 @@ export const DATA_DOMAIN_TABLES = [
           "title",
           "defaultFreshnessDays",
           "defaultMaxInterviewMinutes",
-          "activeConsentVersionId",
-          "activeSurveyVersionId",
           "activePersonaVersionId"
         ],
         statusAttributes: ["status"],
