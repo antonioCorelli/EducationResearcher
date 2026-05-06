@@ -230,7 +230,8 @@ For each task:
 6. Run focused tests.
 7. Run broader validation when reasonable.
 8. Review the diff.
-9. Summarize what changed, what was tested, and any remaining risks.
+9. For coding issues with demoable behavior, prepare a short demo path the user can run locally.
+10. Summarize what changed, what was tested, any demo instructions, and any remaining risks.
 
 ## Final Response Expectations
 
@@ -238,8 +239,11 @@ When reporting back, include:
 
 - What changed.
 - What tests or checks were run.
+- For coding issues with something demoable, a concise demo section with instructions the user can run locally, such as `npm ...`, where to go in the app, and what new behavior to try.
 - Any assumptions made.
 - Any follow-up work that may be useful.
+
+Demo instructions should be text only. Do not provide pictures or videos as the demo.
 
 Be honest if tests could not be run or if something remains uncertain.
 
