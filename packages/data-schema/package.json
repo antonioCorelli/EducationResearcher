@@ -1,0 +1,27 @@
+{
+  "name": "@education-researcher/data-schema",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "db:create": "tsx src/local-dynamodb.ts create",
+    "db:local": "docker run --rm -p 8000:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -sharedDb",
+    "db:reset": "tsx src/local-dynamodb.ts reset",
+    "db:seed": "tsx src/local-dynamodb.ts seed",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.812.0",
+    "@aws-sdk/lib-dynamodb": "^3.812.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4"
+  }
+}

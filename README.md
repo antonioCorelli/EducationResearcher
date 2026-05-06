@@ -78,6 +78,26 @@ npm test
 npm run build
 ```
 
+## Database Workflow
+
+The initial DynamoDB model uses a table per data domain and is defined in `packages/data-schema`. AWS CDK table definitions live in `apps/infra`.
+
+Start DynamoDB Local:
+
+```bash
+npm run db:local
+```
+
+Create local tables, reset them with first-build-slice fixture data, or synthesize the CDK data stack:
+
+```bash
+npm run db:create
+npm run db:reset
+npm run infra:synth
+```
+
+See `docs/database-migration-workflow.md` for table names, fixture coverage, and migration workflow details.
+
 Run package-specific commands when needed:
 
 ```bash

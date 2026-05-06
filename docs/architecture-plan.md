@@ -15,6 +15,9 @@ The following implementation decisions are confirmed for the first scaffold:
 - **Service hosting/deploy:** AWS App Runner.
 - **Primary AWS data services:** DynamoDB for application records and run state, S3 for interview audio assets and generated exports.
 - **Local/test provider mode:** fake providers are required from day one for auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
+- **DynamoDB physical model:** table per data domain, defined through a shared TypeScript schema contract.
+- **Infrastructure as code:** AWS CDK.
+- **Local database workflow:** DynamoDB Local with create, reset, and seed commands.
 
 AI and realtime voice model providers remain open decisions. They should be integrated only through adapter boundaries so local development, tests, and early demos can use deterministic fakes.
 
@@ -93,16 +96,18 @@ This fits the PRD because the core product behavior is not just screens; it is d
 
 ## Data And Storage Needs
 
-Use DynamoDB as the primary physical data store for the logical model in the PRD. The logical entities still matter, but the physical model should be designed around access patterns, tenant isolation, study/run scoping, immutable version references, and auditability.
+Use DynamoDB as the primary physical data store for the logical model in the PRD. The first physical model uses table-per-domain boundaries so the schema stays close to the shared product language while leaving room for access-pattern-specific keys and indexes. The logical entities still matter, but the physical model should be designed around access patterns, tenant isolation, study/run scoping, immutable version references, and auditability.
 
-The data model includes these groups:
+The initial data domain tables are:
 
-- **Identity and access:** `users`, `study_memberships`.
-- **Study setup:** `studies`, `participant_slots`.
-- **Versioned configuration:** `consent_versions`, `survey_versions`, `survey_groups`, `survey_questions`, `objective_versions`, `objective_grade_examples`, `interviewer_persona_versions`.
-- **Run state:** `runs`, `consent_records`, `survey_responses`, `gap_maps`, `interview_sessions`, `interview_turns`, `interview_audio_assets`.
-- **Scoring:** `scoring_runs`, `objective_scores`, `evidence_citations`.
-- **Operations:** `operational_events`, `audit_logs`.
+- **Identity Access Table:** `user` records for researchers and authorized admin engineers.
+- **Study Setup Table:** `study` and `participant_slot` records.
+- **Versioned Configuration Table:** `consent_version`, `survey_version`, `survey_group`, `survey_question`, `objective_version`, `objective_grade_example`, and `interviewer_persona_version` records.
+- **Run Lifecycle Table:** `run`, `consent_record`, `survey_response`, `gap_map`, `interview_session`, `interview_turn`, and `interview_audio_asset` records.
+- **Evidence Scoring Table:** `scoring_run`, `objective_score`, and `evidence_citation` records.
+- **Operations Table:** `operational_event` and `audit_log` records.
+
+Study memberships, participant access tokens, and retention/deletion fields are deferred until their product behavior is finalized.
 
 Use S3 object storage for:
 
@@ -117,6 +122,7 @@ Important data properties:
 - Object storage keys should be study/run scoped but not guessable.
 - DynamoDB keys and secondary indexes should make study-scoped authorization practical and hard to bypass.
 - Soft deletion may be useful for researcher deletion workflows, but retention jobs must eventually purge governed data according to policy.
+- The schema contract in `packages/data-schema` is the source of truth for table names, primary keys, secondary indexes, entity relationship references, and local fixtures.
 
 ## External Integrations
 
@@ -203,8 +209,8 @@ Real providers should be selected through environment configuration and accessed
 
 ## Open Architecture Decisions
 
-- DynamoDB physical data model, index strategy, and local development approach.
-- Infrastructure-as-code approach for Amplify, Cognito, App Runner, DynamoDB, S3, and supporting IAM.
+- CDK stack boundaries for Amplify, Cognito, App Runner, S3, and supporting IAM.
+- DynamoDB index refinements after service access patterns are implemented.
 - Signed URL and access policy details for S3 audio/export artifacts.
 - Cognito role/group claim mapping for researcher and admin users.
 - AI and realtime voice providers.

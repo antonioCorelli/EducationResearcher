@@ -12,6 +12,10 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 - Service API hosting/deploy: AWS App Runner.
 - Primary AWS storage direction: DynamoDB for application data/state and S3 for audio assets and generated exports.
 - Fake providers are required from day one for local development and deterministic tests, including auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
+- DynamoDB physical data model: table per data domain.
+- Local database mode: DynamoDB Local with create, reset, and seed commands.
+- Migration workflow: AWS CDK table/index definitions plus a versioned schema contract and fixture workflow.
+- Infrastructure-as-code approach: AWS CDK.
 
 ## Product Questions
 
@@ -31,8 +35,8 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 ## Technical Questions
 
 - Should background workers live in `apps/service` initially or become a separate workspace package?
-- What DynamoDB table design, key strategy, and local development mode should be used?
-- What infrastructure-as-code approach should define Amplify, Cognito, App Runner, DynamoDB, S3, and IAM?
+- What key and index refinements are needed as service access patterns become concrete?
+- What CDK stack boundaries should define Amplify, Cognito, App Runner, S3, and IAM?
 - How should signed S3 access be generated, scoped, expired, and audited for audio and exports?
 - Which AI model provider should handle gap map and scoring passes?
 - Which realtime voice provider should handle voice-to-voice interviews?
