@@ -33,6 +33,15 @@ interface StudyShell {
   };
 }
 
+type StudySetupTab = "shell" | "consent" | "survey" | "objectives";
+
+const studySetupTabs: readonly { readonly id: StudySetupTab; readonly label: string }[] = [
+  { id: "shell", label: "Study shell" },
+  { id: "consent", label: "Consent information" },
+  { id: "survey", label: "Survey information" },
+  { id: "objectives", label: "Scoring objectives" }
+];
+
 type ConsentMethod = "checkmark" | "electronic_signature";
 
 interface ConsentVersion {
@@ -278,6 +287,7 @@ export function App() {
   const [maxInterviewMinutes, setMaxInterviewMinutes] = useState(45);
   const [studyError, setStudyError] = useState("");
   const [isSavingStudy, setIsSavingStudy] = useState(false);
+  const [activeStudySetupTab, setActiveStudySetupTab] = useState<StudySetupTab>("shell");
   const [consentText, setConsentText] = useState("");
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>("checkmark");
   const [consentError, setConsentError] = useState("");
@@ -449,6 +459,7 @@ export function App() {
 
   function resetStudyForm() {
     setSelectedStudyId(null);
+    setActiveStudySetupTab("shell");
     setStudyTitle("");
     setFreshnessDays(14);
     setMaxInterviewMinutes(45);
@@ -1111,7 +1122,30 @@ export function App() {
               </div>
             </div>
             <div className="setup-stack">
-              <form className="study-form" onSubmit={handleSaveStudy}>
+              <div className="study-setup-tabs" aria-label="Study setup sections" role="tablist">
+                {studySetupTabs.map((tab) => (
+                  <button
+                    aria-controls={`study-setup-panel-${tab.id}`}
+                    aria-selected={activeStudySetupTab === tab.id}
+                    className={activeStudySetupTab === tab.id ? "setup-tab active-setup-tab" : "setup-tab"}
+                    id={`study-setup-tab-${tab.id}`}
+                    key={tab.id}
+                    onClick={() => setActiveStudySetupTab(tab.id)}
+                    role="tab"
+                    type="button"
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <form
+                aria-labelledby="study-setup-tab-shell"
+                className="study-form study-setup-panel"
+                hidden={activeStudySetupTab !== "shell"}
+                id="study-setup-panel-shell"
+                onSubmit={handleSaveStudy}
+                role="tabpanel"
+              >
                 <div className="section-heading">
                   <h2>{selectedStudy ? "Edit study shell" : "Create study shell"}</h2>
                 </div>
@@ -1170,9 +1204,16 @@ export function App() {
                   </button>
                 </div>
               </form>
-              <form className="study-form consent-form" onSubmit={handleSaveConsent}>
+              <form
+                aria-labelledby="study-setup-tab-consent"
+                className="study-form study-setup-panel"
+                hidden={activeStudySetupTab !== "consent"}
+                id="study-setup-panel-consent"
+                onSubmit={handleSaveConsent}
+                role="tabpanel"
+              >
                 <div className="section-heading">
-                  <h2>Consent</h2>
+                  <h2>Consent information</h2>
                   {selectedConsentVersion ? (
                     <span className={isPreviewingPreviousConsent ? "version-pill preview-version-pill" : "version-pill"}>
                       Version {selectedConsentVersion.versionNumber}
@@ -1260,9 +1301,16 @@ export function App() {
                   </button>
                 </div>
               </form>
-              <form className="study-form survey-form" onSubmit={handleSaveSurvey}>
+              <form
+                aria-labelledby="study-setup-tab-survey"
+                className="study-form study-setup-panel"
+                hidden={activeStudySetupTab !== "survey"}
+                id="study-setup-panel-survey"
+                onSubmit={handleSaveSurvey}
+                role="tabpanel"
+              >
                 <div className="section-heading">
-                  <h2>Survey</h2>
+                  <h2>Survey information</h2>
                   {activeSurveyVersion ? <span className="version-pill">Version {activeSurveyVersion.versionNumber}</span> : null}
                 </div>
                 <p className="muted-copy">
@@ -1425,7 +1473,14 @@ export function App() {
                   </button>
                 </div>
               </form>
-              <form className="study-form objectives-form" onSubmit={handleSaveObjectives}>
+              <form
+                aria-labelledby="study-setup-tab-objectives"
+                className="study-form study-setup-panel"
+                hidden={activeStudySetupTab !== "objectives"}
+                id="study-setup-panel-objectives"
+                onSubmit={handleSaveObjectives}
+                role="tabpanel"
+              >
                 <div className="section-heading">
                   <h2>Scoring objectives</h2>
                   {activeObjectiveVersions.length > 0 ? (
