@@ -322,11 +322,42 @@ h3 {
   text-transform: uppercase;
 }
 
-.consent-form,
-.survey-form,
-.objectives-form {
-  border-top: 1px solid #e3e9e5;
-  padding-top: 18px;
+.study-setup-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-bottom: 1px solid #d7e0da;
+}
+
+.setup-tab {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: #566173;
+  padding: 9px 12px 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.setup-tab:hover,
+.active-setup-tab {
+  border-color: #d7e0da;
+  background: #ffffff;
+  color: #172033;
+}
+
+.active-setup-tab {
+  color: #1f5b49;
+}
+
+.study-setup-panel {
+  padding-top: 4px;
+}
+
+.study-setup-panel[hidden] {
+  display: none;
 }
 
 .version-pill {
@@ -559,6 +590,7 @@ button.version-chip:hover {
   .topline,
   .study-workspace,
   .settings-grid,
+  .study-setup-tabs,
   .question-row,
   .rubric-grid,
   .grade-label-row,
@@ -569,6 +601,17 @@ button.version-chip:hover {
   .topline {
     display: grid;
     align-items: start;
+  }
+
+  .study-setup-tabs {
+    border-bottom: 0;
+  }
+
+  .setup-tab {
+    width: 100%;
+    border: 1px solid #d7e0da;
+    border-radius: 6px;
+    text-align: left;
   }
 }
 
