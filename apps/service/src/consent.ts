@@ -79,6 +79,15 @@ export class ConsentService {
     const parsedInput = parseConsentInput(input);
     const versions = await this.consentVersionStore.listByStudy(study.id);
     const activeVersion = versions.find((version) => version.isActive);
+
+    if (
+      activeVersion &&
+      activeVersion.consentText === parsedInput.consentText &&
+      activeVersion.consentMethod === parsedInput.consentMethod
+    ) {
+      throw new ConsentValidationError("Consent is unchanged from the active version.");
+    }
+
     const nextVersionNumber = versions.reduce((highest, version) => Math.max(highest, version.versionNumber), 0) + 1;
     const consentVersion: ConsentVersion = {
       id: this.createConsentVersionId(),
