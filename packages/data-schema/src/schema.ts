@@ -314,6 +314,7 @@ export const DATA_DOMAIN_TABLES = [
           "description",
           "gradeScale",
           "evidenceRequirements",
+          "sortOrder",
           "isActive"
         ],
         statusAttributes: ["isActive"],

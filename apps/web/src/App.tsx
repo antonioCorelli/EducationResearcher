@@ -76,6 +76,31 @@ interface SurveyVersion {
   readonly createdAt: string;
 }
 
+interface ObjectiveGradeExample {
+  readonly id: string;
+  readonly objectiveVersionId: string;
+  readonly gradeLabel: string;
+  readonly exampleText: string;
+  readonly sortOrder: number;
+  readonly createdAt: string;
+}
+
+interface ObjectiveVersion {
+  readonly id: string;
+  readonly studyId: string;
+  readonly objectiveKey: string;
+  readonly versionNumber: number;
+  readonly title: string;
+  readonly description: string;
+  readonly customScoringPrompt?: string;
+  readonly gradeScale: readonly string[];
+  readonly gradeExamples: readonly ObjectiveGradeExample[];
+  readonly evidenceRequirements: string;
+  readonly sortOrder: number;
+  readonly isActive: boolean;
+  readonly createdAt: string;
+}
+
 type SurveyLayoutItem =
   | {
       readonly type: "question";
@@ -108,6 +133,15 @@ type SurveyState =
   | { readonly status: "ready"; readonly activeSurveyVersion?: SurveyVersion; readonly surveyVersions: SurveyVersion[] }
   | { readonly status: "error"; readonly message: string };
 
+type ObjectiveState =
+  | { readonly status: "idle" | "loading" }
+  | {
+      readonly status: "ready";
+      readonly activeObjectiveVersions: ObjectiveVersion[];
+      readonly objectiveVersions: ObjectiveVersion[];
+    }
+  | { readonly status: "error"; readonly message: string };
+
 type SurveyDraftItem =
   | {
       readonly type: "question";
@@ -119,8 +153,32 @@ type SurveyDraftItem =
       readonly questions: readonly string[];
     };
 
+interface ObjectiveDraft {
+  readonly objectiveKey?: string;
+  readonly title: string;
+  readonly description: string;
+  readonly customScoringPrompt: string;
+  readonly gradeLabels: readonly string[];
+  readonly gradeExamples: readonly {
+    readonly gradeLabel: string;
+    readonly exampleText: string;
+  }[];
+  readonly evidenceRequirements: string;
+}
+
 function getCurrentPath() {
   return window.location.pathname;
+}
+
+function createEmptyObjectiveDraft(): ObjectiveDraft {
+  return {
+    title: "",
+    description: "",
+    customScoringPrompt: "",
+    gradeLabels: ["1", "2", "3", "4"],
+    gradeExamples: [],
+    evidenceRequirements: ""
+  };
 }
 
 async function fetchSession(accessToken: string) {
@@ -185,6 +243,23 @@ async function fetchSurvey(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchObjectives(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/objectives`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to load objectives.");
+  }
+
+  return (await response.json()) as {
+    activeObjectiveVersions: ObjectiveVersion[];
+    objectiveVersions: ObjectiveVersion[];
+  };
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -196,6 +271,7 @@ export function App() {
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
+  const [objectiveState, setObjectiveState] = useState<ObjectiveState>({ status: "idle" });
   const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
   const [studyTitle, setStudyTitle] = useState("");
   const [freshnessDays, setFreshnessDays] = useState(14);
@@ -211,6 +287,18 @@ export function App() {
   const [surveyItems, setSurveyItems] = useState<readonly SurveyDraftItem[]>([{ type: "question", prompt: "" }]);
   const [surveyError, setSurveyError] = useState("");
   const [isSavingSurvey, setIsSavingSurvey] = useState(false);
+  const [objectiveDrafts, setObjectiveDrafts] = useState<readonly ObjectiveDraft[]>([
+    {
+      title: "",
+      description: "",
+      customScoringPrompt: "",
+      gradeLabels: ["1", "2", "3", "4"],
+      gradeExamples: [],
+      evidenceRequirements: ""
+    }
+  ]);
+  const [objectiveError, setObjectiveError] = useState("");
+  const [isSavingObjectives, setIsSavingObjectives] = useState(false);
 
   const isParticipantRoute = path.startsWith("/participant");
 
@@ -281,6 +369,21 @@ export function App() {
         loadSurveyForm(survey.activeSurveyVersion);
       })
       .catch(() => setSurveyState({ status: "error", message: "Unable to load survey." }));
+  }, [accessToken, selectedStudyId, session.status]);
+
+  useEffect(() => {
+    if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
+      setObjectiveState({ status: "idle" });
+      return;
+    }
+
+    setObjectiveState({ status: "loading" });
+    fetchObjectives(accessToken, selectedStudyId)
+      .then((objectives) => {
+        setObjectiveState({ status: "ready", ...objectives });
+        loadObjectiveForm(objectives.activeObjectiveVersions);
+      })
+      .catch(() => setObjectiveState({ status: "error", message: "Unable to load objectives." }));
   }, [accessToken, selectedStudyId, session.status]);
 
   function navigate(nextPath: string) {
@@ -359,6 +462,9 @@ export function App() {
     setSurveyState({ status: "idle" });
     setSurveyItems([{ type: "question", prompt: "" }]);
     setSurveyError("");
+    setObjectiveState({ status: "idle" });
+    setObjectiveDrafts([createEmptyObjectiveDraft()]);
+    setObjectiveError("");
   }
 
   function loadStudyForm(study: StudyShell) {
@@ -415,6 +521,28 @@ export function App() {
         : [{ type: "question", prompt: "" }]
     );
     setSurveyError("");
+  }
+
+  function loadObjectiveForm(objectiveVersions: readonly ObjectiveVersion[]) {
+    setObjectiveDrafts(
+      objectiveVersions.length > 0
+        ? [...objectiveVersions]
+            .sort((left, right) => left.sortOrder - right.sortOrder)
+            .map((objective): ObjectiveDraft => ({
+              objectiveKey: objective.objectiveKey,
+              title: objective.title,
+              description: objective.description,
+              customScoringPrompt: objective.customScoringPrompt ?? "",
+              gradeLabels: objective.gradeScale,
+              gradeExamples: objective.gradeExamples.map((example) => ({
+                gradeLabel: example.gradeLabel,
+                exampleText: example.exampleText
+              })),
+              evidenceRequirements: objective.evidenceRequirements
+            }))
+        : [createEmptyObjectiveDraft()]
+    );
+    setObjectiveError("");
   }
 
   async function reloadStudies(token: string, nextSelectedStudyId: string) {
@@ -669,6 +797,195 @@ export function App() {
     }
   }
 
+  function addObjective() {
+    setObjectiveDrafts((objectives) => [...objectives, createEmptyObjectiveDraft()]);
+  }
+
+  function removeObjective(index: number) {
+    setObjectiveDrafts((objectives) => {
+      const nextObjectives = objectives.filter((_, objectiveIndex) => objectiveIndex !== index);
+      return nextObjectives.length > 0 ? nextObjectives : [createEmptyObjectiveDraft()];
+    });
+  }
+
+  function moveObjective(index: number, direction: -1 | 1) {
+    setObjectiveDrafts((objectives) => {
+      const nextIndex = index + direction;
+
+      if (nextIndex < 0 || nextIndex >= objectives.length) {
+        return objectives;
+      }
+
+      const nextObjectives = [...objectives];
+      [nextObjectives[index], nextObjectives[nextIndex]] = [nextObjectives[nextIndex], nextObjectives[index]];
+      return nextObjectives;
+    });
+  }
+
+  function updateObjective(index: number, patch: Partial<ObjectiveDraft>) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, objectiveIndex) => (objectiveIndex === index ? { ...objective, ...patch } : objective))
+    );
+  }
+
+  function updateObjectiveGradeLabel(objectiveIndex: number, gradeIndex: number, label: string) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, currentObjectiveIndex) =>
+        currentObjectiveIndex === objectiveIndex
+          ? {
+              ...objective,
+              gradeLabels: objective.gradeLabels.map((gradeLabel, currentGradeIndex) =>
+                currentGradeIndex === gradeIndex ? label : gradeLabel
+              )
+            }
+          : objective
+      )
+    );
+  }
+
+  function addObjectiveGradeLabel(objectiveIndex: number) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, currentObjectiveIndex) =>
+        currentObjectiveIndex === objectiveIndex
+          ? { ...objective, gradeLabels: [...objective.gradeLabels, ""] }
+          : objective
+      )
+    );
+  }
+
+  function removeObjectiveGradeLabel(objectiveIndex: number, gradeIndex: number) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, currentObjectiveIndex) => {
+        if (currentObjectiveIndex !== objectiveIndex) {
+          return objective;
+        }
+
+        const removedLabel = objective.gradeLabels[gradeIndex];
+        const nextGradeLabels = objective.gradeLabels.filter((_, currentGradeIndex) => currentGradeIndex !== gradeIndex);
+
+        return {
+          ...objective,
+          gradeLabels: nextGradeLabels.length > 0 ? nextGradeLabels : [""],
+          gradeExamples: objective.gradeExamples.filter((example) => example.gradeLabel !== removedLabel)
+        };
+      })
+    );
+  }
+
+  function addObjectiveGradeExample(objectiveIndex: number) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, currentObjectiveIndex) =>
+        currentObjectiveIndex === objectiveIndex
+          ? {
+              ...objective,
+              gradeExamples: [
+                ...objective.gradeExamples,
+                {
+                  gradeLabel: objective.gradeLabels[0] ?? "",
+                  exampleText: ""
+                }
+              ]
+            }
+          : objective
+      )
+    );
+  }
+
+  function updateObjectiveGradeExample(
+    objectiveIndex: number,
+    exampleIndex: number,
+    patch: Partial<ObjectiveDraft["gradeExamples"][number]>
+  ) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, currentObjectiveIndex) =>
+        currentObjectiveIndex === objectiveIndex
+          ? {
+              ...objective,
+              gradeExamples: objective.gradeExamples.map((example, currentExampleIndex) =>
+                currentExampleIndex === exampleIndex ? { ...example, ...patch } : example
+              )
+            }
+          : objective
+      )
+    );
+  }
+
+  function removeObjectiveGradeExample(objectiveIndex: number, exampleIndex: number) {
+    setObjectiveDrafts((objectives) =>
+      objectives.map((objective, currentObjectiveIndex) =>
+        currentObjectiveIndex === objectiveIndex
+          ? {
+              ...objective,
+              gradeExamples: objective.gradeExamples.filter((_, currentExampleIndex) => currentExampleIndex !== exampleIndex)
+            }
+          : objective
+      )
+    );
+  }
+
+  async function handleSaveObjectives(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setObjectiveError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setObjectiveError("Select a study before configuring objectives.");
+      return;
+    }
+
+    setIsSavingObjectives(true);
+
+    try {
+      const objectives = objectiveDrafts
+        .map((objective) => ({
+          ...(objective.objectiveKey ? { objectiveKey: objective.objectiveKey } : {}),
+          title: objective.title.trim(),
+          description: objective.description.trim(),
+          customScoringPrompt: objective.customScoringPrompt.trim(),
+          gradeLabels: objective.gradeLabels.map((label) => label.trim()).filter(Boolean),
+          gradeExamples: objective.gradeExamples
+            .map((example) => ({
+              gradeLabel: example.gradeLabel.trim(),
+              exampleText: example.exampleText.trim()
+            }))
+            .filter((example) => example.gradeLabel || example.exampleText),
+          evidenceRequirements: objective.evidenceRequirements.trim()
+        }))
+        .filter(
+          (objective) =>
+            objective.title ||
+            objective.description ||
+            objective.gradeLabels.length > 0 ||
+            objective.gradeExamples.length > 0 ||
+            objective.evidenceRequirements
+        );
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/objectives`, {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          objectives
+        })
+      });
+      const payload = (await response.json()) as { objectiveVersions?: ObjectiveVersion[]; message?: string };
+
+      if (!response.ok || !payload.objectiveVersions) {
+        throw new Error(payload.message ?? "Unable to save objectives.");
+      }
+
+      const objectivesPayload = await fetchObjectives(token, selectedStudyId);
+      setObjectiveState({ status: "ready", ...objectivesPayload });
+      loadObjectiveForm(objectivesPayload.activeObjectiveVersions);
+    } catch (error) {
+      setObjectiveError(error instanceof Error ? error.message : "Unable to save objectives.");
+    } finally {
+      setIsSavingObjectives(false);
+    }
+  }
+
   function handleSelectConsentVersion(consentVersion: ConsentVersion) {
     setSelectedConsentVersionNumber(consentVersion.versionNumber);
     setConsentText(consentVersion.consentText);
@@ -754,6 +1071,7 @@ export function App() {
         : undefined;
     const isPreviewingPreviousConsent = Boolean(selectedConsentVersion && !selectedConsentVersion.isActive);
     const activeSurveyVersion = surveyState.status === "ready" ? surveyState.activeSurveyVersion : undefined;
+    const activeObjectiveVersions = objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [];
 
     return (
       <main className="app-shell researcher-shell">
@@ -1104,6 +1422,216 @@ export function App() {
                       : surveyState.status === "ready" && surveyState.activeSurveyVersion
                         ? "Create new version"
                         : "Save survey"}
+                  </button>
+                </div>
+              </form>
+              <form className="study-form objectives-form" onSubmit={handleSaveObjectives}>
+                <div className="section-heading">
+                  <h2>Scoring objectives</h2>
+                  {activeObjectiveVersions.length > 0 ? (
+                    <span className="version-pill">{activeObjectiveVersions.length} active</span>
+                  ) : null}
+                </div>
+                <div className="objective-list">
+                  {objectiveDrafts.map((objective, objectiveIndex) => (
+                    <div className="objective-editor" key={`objective-${objective.objectiveKey ?? objectiveIndex}`}>
+                      <div className="survey-item-toolbar">
+                        <h3>Objective {objectiveIndex + 1}</h3>
+                        <div className="survey-item-actions">
+                          <button
+                            aria-label={`Move objective ${objectiveIndex + 1} up`}
+                            className="secondary-button compact-button"
+                            disabled={!selectedStudy || objectiveIndex === 0}
+                            onClick={() => moveObjective(objectiveIndex, -1)}
+                            type="button"
+                          >
+                            Up
+                          </button>
+                          <button
+                            aria-label={`Move objective ${objectiveIndex + 1} down`}
+                            className="secondary-button compact-button"
+                            disabled={!selectedStudy || objectiveIndex === objectiveDrafts.length - 1}
+                            onClick={() => moveObjective(objectiveIndex, 1)}
+                            type="button"
+                          >
+                            Down
+                          </button>
+                          <button
+                            aria-label={`Remove objective ${objectiveIndex + 1}`}
+                            className="secondary-button compact-button"
+                            disabled={!selectedStudy || objectiveDrafts.length === 1}
+                            onClick={() => removeObjective(objectiveIndex)}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      <label>
+                        Title
+                        <input
+                          disabled={!selectedStudy}
+                          maxLength={160}
+                          onChange={(event) => updateObjective(objectiveIndex, { title: event.target.value })}
+                          placeholder={selectedStudy ? "Reasoning quality" : "Create or select a study first"}
+                          type="text"
+                          value={objective.title}
+                        />
+                      </label>
+                      <label>
+                        Description
+                        <textarea
+                          disabled={!selectedStudy}
+                          maxLength={2000}
+                          onChange={(event) => updateObjective(objectiveIndex, { description: event.target.value })}
+                          placeholder="What this objective should measure"
+                          value={objective.description}
+                        />
+                      </label>
+                      <label>
+                        Evidence requirements
+                        <textarea
+                          disabled={!selectedStudy}
+                          maxLength={2000}
+                          onChange={(event) => updateObjective(objectiveIndex, { evidenceRequirements: event.target.value })}
+                          placeholder="What evidence should support the score"
+                          value={objective.evidenceRequirements}
+                        />
+                      </label>
+                      <label>
+                        Custom scoring prompt
+                        <textarea
+                          disabled={!selectedStudy}
+                          maxLength={4000}
+                          onChange={(event) => updateObjective(objectiveIndex, { customScoringPrompt: event.target.value })}
+                          placeholder="Optional objective-specific scoring guidance"
+                          value={objective.customScoringPrompt}
+                        />
+                      </label>
+                      <div className="rubric-grid">
+                        <div className="rubric-panel">
+                          <div className="section-heading">
+                            <h3>Grade labels</h3>
+                            <button
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy}
+                              onClick={() => addObjectiveGradeLabel(objectiveIndex)}
+                              type="button"
+                            >
+                              Add label
+                            </button>
+                          </div>
+                          <div className="grade-label-list">
+                            {objective.gradeLabels.map((gradeLabel, gradeIndex) => (
+                              <div className="grade-label-row" key={`objective-${objectiveIndex}-grade-${gradeIndex}`}>
+                                <input
+                                  aria-label={`Objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
+                                  disabled={!selectedStudy}
+                                  maxLength={40}
+                                  onChange={(event) =>
+                                    updateObjectiveGradeLabel(objectiveIndex, gradeIndex, event.target.value)
+                                  }
+                                  type="text"
+                                  value={gradeLabel}
+                                />
+                                <button
+                                  aria-label={`Remove objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
+                                  className="secondary-button compact-button"
+                                  disabled={!selectedStudy || objective.gradeLabels.length <= 2}
+                                  onClick={() => removeObjectiveGradeLabel(objectiveIndex, gradeIndex)}
+                                  type="button"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="rubric-panel">
+                          <div className="section-heading">
+                            <h3>Grade examples</h3>
+                            <button
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy}
+                              onClick={() => addObjectiveGradeExample(objectiveIndex)}
+                              type="button"
+                            >
+                              Add example
+                            </button>
+                          </div>
+                          <div className="grade-example-list">
+                            {objective.gradeExamples.length === 0 ? <p className="muted-copy">No examples yet</p> : null}
+                            {objective.gradeExamples.map((example, exampleIndex) => (
+                              <div className="grade-example-row" key={`objective-${objectiveIndex}-example-${exampleIndex}`}>
+                                <select
+                                  aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} grade label`}
+                                  disabled={!selectedStudy}
+                                  onChange={(event) =>
+                                    updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
+                                      gradeLabel: event.target.value
+                                    })
+                                  }
+                                  value={example.gradeLabel}
+                                >
+                                  {objective.gradeLabels.filter(Boolean).map((gradeLabel) => (
+                                    <option key={gradeLabel} value={gradeLabel}>
+                                      {gradeLabel}
+                                    </option>
+                                  ))}
+                                </select>
+                                <textarea
+                                  aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} text`}
+                                  disabled={!selectedStudy}
+                                  maxLength={2000}
+                                  onChange={(event) =>
+                                    updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
+                                      exampleText: event.target.value
+                                    })
+                                  }
+                                  placeholder="Example evidence or response for this label"
+                                  value={example.exampleText}
+                                />
+                                <button
+                                  aria-label={`Remove objective ${objectiveIndex + 1} example ${exampleIndex + 1}`}
+                                  className="secondary-button compact-button"
+                                  disabled={!selectedStudy}
+                                  onClick={() => removeObjectiveGradeExample(objectiveIndex, exampleIndex)}
+                                  type="button"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="survey-add-row">
+                  <button className="secondary-button compact-button" disabled={!selectedStudy} onClick={addObjective} type="button">
+                    Add objective
+                  </button>
+                </div>
+                {objectiveState.status === "loading" ? <p className="muted-copy">Loading objectives</p> : null}
+                {objectiveState.status === "error" ? <p className="form-error">{objectiveState.message}</p> : null}
+                {objectiveState.status === "ready" && objectiveState.objectiveVersions.length > 0 ? (
+                  <div className="version-history" aria-label="Objective versions">
+                    {objectiveState.objectiveVersions.map((version) => (
+                      <span className={version.isActive ? "version-chip active-version-chip" : "version-chip"} key={version.id}>
+                        {version.title} v{version.versionNumber}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {objectiveError ? <p className="form-error">{objectiveError}</p> : null}
+                <div className="form-actions">
+                  <button className="primary-button" disabled={!selectedStudy || isSavingObjectives} type="submit">
+                    {isSavingObjectives
+                      ? "Saving objectives"
+                      : objectiveState.status === "ready" && objectiveState.activeObjectiveVersions.length > 0
+                        ? "Create new versions"
+                        : "Save objectives"}
                   </button>
                 </div>
               </form>
