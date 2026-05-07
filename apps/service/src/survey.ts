@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { StudyShell, StudyShellStore } from "./study-shell.js";
 
 export interface SurveyQuestion {
@@ -73,6 +73,7 @@ export type SurveyLayoutItem =
 export interface SurveyVersionStore {
   listByStudy(studyId: string): Promise<SurveyVersion[]>;
   saveActiveVersion(version: SurveyVersion, previousActiveVersion?: SurveyVersion): Promise<SurveyVersion>;
+  restoreActiveVersion(studyId: string, versionNumber: number): Promise<SurveyVersion | undefined>;
 }
 
 interface SurveyVersionItem {
@@ -180,6 +181,11 @@ export class SurveyService {
     const parsedInput = parseSurveyInput(input);
     const versions = await this.surveyVersionStore.listByStudy(study.id);
     const activeVersion = versions.find((version) => version.isActive);
+
+    if (activeVersion && surveyInputMatchesVersion(parsedInput, activeVersion)) {
+      throw new SurveyValidationError("Survey is unchanged from the active version.");
+    }
+
     const nextVersionNumber = versions.reduce((highest, version) => Math.max(highest, version.versionNumber), 0) + 1;
     const createdAt = this.now().toISOString();
     const surveyVersionId = this.createSurveyVersionId();
@@ -237,6 +243,26 @@ export class SurveyService {
     return savedVersion;
   }
 
+  async restoreSurveyVersion(study: StudyShell, versionNumber: number) {
+    if (!Number.isInteger(versionNumber) || versionNumber < 1) {
+      throw new SurveyValidationError("Survey version number is required.");
+    }
+
+    const restoredVersion = await this.surveyVersionStore.restoreActiveVersion(study.id, versionNumber);
+
+    if (!restoredVersion) {
+      throw new SurveyValidationError("Survey version was not found.");
+    }
+
+    await this.studyShellStore.update({
+      ...study,
+      activeSurveyVersionId: restoredVersion.id,
+      updatedAt: this.now().toISOString()
+    });
+
+    return restoredVersion;
+  }
+
   private toSurveyQuestion(
     surveyVersionId: string,
     createdAt: string,
@@ -282,6 +308,31 @@ export class InMemorySurveyVersionStore implements SurveyVersionStore {
 
     this.versions.set(version.id, version);
     return version;
+  }
+
+  async restoreActiveVersion(studyId: string, versionNumber: number) {
+    const versions = await this.listByStudy(studyId);
+    const selectedVersion = versions.find((version) => version.versionNumber === versionNumber);
+
+    if (!selectedVersion) {
+      return undefined;
+    }
+
+    for (const version of versions) {
+      if (version.versionNumber > versionNumber) {
+        this.versions.delete(version.id);
+      } else {
+        this.versions.set(version.id, {
+          ...version,
+          isActive: version.versionNumber === versionNumber
+        });
+      }
+    }
+
+    return {
+      ...selectedVersion,
+      isActive: true
+    };
   }
 }
 
@@ -380,6 +431,50 @@ export class DynamoDbSurveyVersionStore implements SurveyVersionStore {
     return version;
   }
 
+  async restoreActiveVersion(studyId: string, versionNumber: number) {
+    const versions = await this.listByStudy(studyId);
+    const selectedVersion = versions.find((version) => version.versionNumber === versionNumber);
+
+    if (!selectedVersion) {
+      return undefined;
+    }
+
+    for (const version of versions) {
+      if (version.versionNumber > versionNumber) {
+        await this.deleteSurveyVersion(version);
+      } else {
+        await this.documentClient.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: {
+              pk: `STUDY#${version.studyId}`,
+              sk: `SURVEY_VERSION#${version.versionNumber}`
+            },
+            UpdateExpression:
+              version.versionNumber === versionNumber
+                ? "SET isActive = :active, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk"
+                : "SET isActive = :inactive REMOVE gsi1pk, gsi1sk",
+            ExpressionAttributeValues:
+              version.versionNumber === versionNumber
+                ? {
+                    ":active": true,
+                    ":gsi1pk": `STUDY#${version.studyId}#ACTIVE_CONFIG`,
+                    ":gsi1sk": `SURVEY_VERSION#${version.versionNumber}#${version.id}`
+                  }
+                : {
+                    ":inactive": false
+                  }
+          })
+        );
+      }
+    }
+
+    return {
+      ...selectedVersion,
+      isActive: true
+    };
+  }
+
   private async hydrateSurveyVersion(
     version: Omit<SurveyVersion, "groups" | "layoutItems" | "ungroupedQuestions">
   ): Promise<SurveyVersion> {
@@ -424,6 +519,40 @@ export class DynamoDbSurveyVersionStore implements SurveyVersionStore {
         TableName: this.tableName,
         Item: toSurveyQuestionItem(question),
         ConditionExpression: "attribute_not_exists(pk)"
+      })
+    );
+  }
+
+  private async deleteSurveyVersion(version: SurveyVersion) {
+    const childResponse = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :version",
+        ExpressionAttributeValues: {
+          ":version": `SURVEY_VERSION#${version.id}`
+        }
+      })
+    );
+
+    for (const item of childResponse.Items ?? []) {
+      await this.documentClient.send(
+        new DeleteCommand({
+          TableName: this.tableName,
+          Key: {
+            pk: item.pk,
+            sk: item.sk
+          }
+        })
+      );
+    }
+
+    await this.documentClient.send(
+      new DeleteCommand({
+        TableName: this.tableName,
+        Key: {
+          pk: `STUDY#${version.studyId}`,
+          sk: `SURVEY_VERSION#${version.versionNumber}`
+        }
       })
     );
   }
@@ -478,6 +607,43 @@ function parseSurveyInput(input: SaveSurveyInput): ParsedSurveyInput {
   return {
     items
   };
+}
+
+function surveyInputMatchesVersion(input: ParsedSurveyInput, version: SurveyVersion) {
+  const versionItems =
+    version.layoutItems ??
+    [
+      ...version.ungroupedQuestions.map((question) => ({ type: "question" as const, sortOrder: question.sortOrder, question })),
+      ...version.groups.map((group) => ({ type: "group" as const, sortOrder: group.sortOrder, group }))
+    ].sort((left, right) => left.sortOrder - right.sortOrder);
+
+  if (input.items.length !== versionItems.length) {
+    return false;
+  }
+
+  return input.items.every((inputItem, index) => {
+    const versionItem = versionItems[index];
+
+    if (!versionItem || inputItem.type !== versionItem.type) {
+      return false;
+    }
+
+    if (inputItem.type === "question" && versionItem.type === "question") {
+      return inputItem.question.prompt === versionItem.question.prompt;
+    }
+
+    if (inputItem.type === "group" && versionItem.type === "group") {
+      return (
+        inputItem.group.title === versionItem.group.title &&
+        inputItem.group.questions.length === versionItem.group.questions.length &&
+        inputItem.group.questions.every(
+          (question, questionIndex) => question.prompt === versionItem.group.questions[questionIndex]?.prompt
+        )
+      );
+    }
+
+    return false;
+  });
 }
 
 function parseLegacyLayoutItems(input: SaveSurveyInput): ParsedSurveyLayoutItem[] {

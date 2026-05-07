@@ -182,13 +182,13 @@ function coerceSaveConsentInput(body: unknown): SaveConsentInput {
   } as SaveConsentInput;
 }
 
-function coerceRestoreConsentInput(body: unknown) {
+function coerceRestoreVersionNumberInput(body: unknown, label: string) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw {
       statusCode: 400,
       body: {
         error: "Bad Request",
-        message: "Consent version number is required."
+        message: `${label} version number is required.`
       }
     };
   }
@@ -200,12 +200,32 @@ function coerceRestoreConsentInput(body: unknown) {
       statusCode: 400,
       body: {
         error: "Bad Request",
-        message: "Consent version number is required."
+        message: `${label} version number is required.`
       }
     };
   }
 
   return record.versionNumber;
+}
+
+function coerceRestoreObjectiveInput(body: unknown) {
+  const versionNumber = coerceRestoreVersionNumberInput(body, "Objective");
+  const record = body as Record<string, unknown>;
+
+  if (typeof record.objectiveKey !== "string") {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Objective key is required."
+      }
+    };
+  }
+
+  return {
+    objectiveKey: record.objectiveKey,
+    versionNumber
+  };
 }
 
 function coerceSaveSurveyInput(body: unknown): SaveSurveyInput {
@@ -646,7 +666,7 @@ export function buildServer(options: BuildServerOptions = {}) {
 
         const consentVersion = await consentService.restoreConsentVersion(
           study,
-          coerceRestoreConsentInput(request.body)
+          coerceRestoreVersionNumberInput(request.body, "Consent")
         );
 
         return {
@@ -721,6 +741,45 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/survey/restore",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const study = await studyShellStore.getById(request.params.studyId);
+
+        if (!study) {
+          const safeAuthorization = toSafeAuthorizationResponse(new Error());
+          return reply.code(safeAuthorization?.statusCode ?? 403).send(
+            safeAuthorization?.body ?? {
+              error: "Forbidden",
+              message: "You are not authorized to access this study resource."
+            }
+          );
+        }
+
+        const surveyVersion = await surveyService.restoreSurveyVersion(
+          study,
+          coerceRestoreVersionNumberInput(request.body, "Survey")
+        );
+
+        return {
+          surveyVersion
+        };
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ?? toSafeSurveyValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
   server.get<{ Params: StudyParams }>(
     "/researcher/studies/:studyId/objectives",
     { preHandler: requireResearcher },
@@ -767,6 +826,47 @@ export function buildServer(options: BuildServerOptions = {}) {
         return reply.code(201).send({
           objectiveVersions
         });
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ?? toSafeObjectiveValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/objectives/restore",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const study = await studyShellStore.getById(request.params.studyId);
+
+        if (!study) {
+          const safeAuthorization = toSafeAuthorizationResponse(new Error());
+          return reply.code(safeAuthorization?.statusCode ?? 403).send(
+            safeAuthorization?.body ?? {
+              error: "Forbidden",
+              message: "You are not authorized to access this study resource."
+            }
+          );
+        }
+
+        const restoreInput = coerceRestoreObjectiveInput(request.body);
+        const objectiveVersion = await objectiveService.restoreObjectiveVersion(
+          request.params.studyId,
+          restoreInput.objectiveKey,
+          restoreInput.versionNumber
+        );
+
+        return {
+          objectiveVersion
+        };
       } catch (error) {
         const safeResponse =
           toSafeAuthorizationResponse(error) ?? toSafeObjectiveValidationResponse(error) ?? toSafeInlineErrorResponse(error);

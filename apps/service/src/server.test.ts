@@ -489,6 +489,49 @@ describe("researcher consent routes", () => {
     await server.close();
   });
 
+  it("rejects an unchanged active consent save", async () => {
+    const initialConsent: ConsentVersion = {
+      id: "consent_version_001",
+      studyId: "study_fixture_001",
+      versionNumber: 1,
+      consentText: "Original consent text.",
+      consentMethod: "checkmark",
+      isActive: true,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    };
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        activeConsentVersionId: initialConsent.id
+      })
+    ]);
+    const consentStore = new InMemoryConsentVersionStore([initialConsent]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: " Original consent text. ",
+        consentMethod: "checkmark"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: "Consent is unchanged from the active version."
+    });
+    expect(await consentStore.listByStudy("study_fixture_001")).toHaveLength(1);
+
+    await server.close();
+  });
+
   it("restores a previous consent version and removes later versions", async () => {
     const consentVersions: ConsentVersion[] = [
       {
@@ -556,6 +599,72 @@ describe("researcher consent routes", () => {
     const versions = await consentStore.listByStudy("study_fixture_001");
     expect(versions).toEqual([expect.objectContaining({ id: "consent_version_001", isActive: true })]);
     expect((await store.getById("study_fixture_001"))?.activeConsentVersionId).toBe("consent_version_001");
+
+    await server.close();
+  });
+
+  it("creates two consent versions, restores the first, and preserves its content", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const consentStore = new InMemoryConsentVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      consentVersionStore: consentStore,
+      logger: false,
+      studyShellStore: store
+    });
+
+    const firstResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: "First consent text with all original terms.",
+        consentMethod: "checkmark"
+      }
+    });
+    const secondResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/consent",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        consentText: "Second consent text.",
+        consentMethod: "electronic_signature"
+      }
+    });
+    const restoreResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/consent/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        versionNumber: 1
+      }
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(201);
+    expect(restoreResponse.statusCode).toBe(200);
+    expect(restoreResponse.json()).toMatchObject({
+      consentVersion: {
+        id: firstResponse.json().consentVersion.id,
+        versionNumber: 1,
+        consentText: "First consent text with all original terms.",
+        consentMethod: "checkmark",
+        isActive: true
+      }
+    });
+    expect(await consentStore.listByStudy("study_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: firstResponse.json().consentVersion.id,
+        consentText: "First consent text with all original terms.",
+        isActive: true
+      })
+    ]);
 
     await server.close();
   });
@@ -956,6 +1065,174 @@ describe("researcher survey routes", () => {
     await server.close();
   });
 
+  it("rejects an unchanged active survey save", async () => {
+    const initialQuestion = {
+      id: "survey_question_001",
+      surveyVersionId: "survey_version_001",
+      prompt: "Original question.",
+      required: true,
+      questionType: "long_text",
+      sortOrder: 1,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    } as const;
+    const initialSurvey: SurveyVersion = {
+      id: "survey_version_001",
+      studyId: "study_fixture_001",
+      versionNumber: 1,
+      isActive: true,
+      layoutItems: [
+        {
+          type: "question",
+          sortOrder: 1,
+          question: initialQuestion
+        }
+      ],
+      groups: [],
+      ungroupedQuestions: [initialQuestion],
+      createdAt: "2026-05-06T12:00:00.000Z"
+    };
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        activeSurveyVersionId: initialSurvey.id
+      })
+    ]);
+    const surveyStore = new InMemorySurveyVersionStore([initialSurvey]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store,
+      surveyVersionStore: surveyStore
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        items: [
+          {
+            type: "question",
+            question: {
+              prompt: " Original question. "
+            }
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      message: "Survey is unchanged from the active version."
+    });
+    expect(await surveyStore.listByStudy("study_fixture_001")).toHaveLength(1);
+
+    await server.close();
+  });
+
+  it("creates two survey versions, restores the first, and preserves its layout integrity", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const surveyStore = new InMemorySurveyVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store,
+      surveyVersionStore: surveyStore
+    });
+
+    const firstResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        items: [
+          {
+            type: "question",
+            question: {
+              prompt: "First standalone prompt."
+            }
+          },
+          {
+            type: "group",
+            group: {
+              title: "First group",
+              questions: [{ prompt: "First grouped prompt." }]
+            }
+          }
+        ]
+      }
+    });
+    const secondResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/survey",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        questions: [{ prompt: "Second version prompt." }]
+      }
+    });
+    const restoreResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/survey/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        versionNumber: 1
+      }
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(201);
+    expect(restoreResponse.statusCode).toBe(200);
+    expect(restoreResponse.json()).toMatchObject({
+      surveyVersion: {
+        id: firstResponse.json().surveyVersion.id,
+        versionNumber: 1,
+        isActive: true,
+        layoutItems: [
+          {
+            type: "question",
+            sortOrder: 1,
+            question: {
+              prompt: "First standalone prompt."
+            }
+          },
+          {
+            type: "group",
+            sortOrder: 2,
+            group: {
+              title: "First group",
+              questions: [
+                {
+                  prompt: "First grouped prompt."
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+    expect(await surveyStore.listByStudy("study_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: firstResponse.json().surveyVersion.id,
+        isActive: true,
+        layoutItems: expect.arrayContaining([
+          expect.objectContaining({
+            type: "group",
+            group: expect.objectContaining({ title: "First group" })
+          })
+        ])
+      })
+    ]);
+    expect((await store.getById("study_fixture_001"))?.activeSurveyVersionId).toBe(firstResponse.json().surveyVersion.id);
+
+    await server.close();
+  });
+
   it("lists survey versions for an authorized researcher", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
     const fixtureQuestion = {
@@ -1188,6 +1465,65 @@ describe("researcher objective routes", () => {
     await server.close();
   });
 
+  it("rejects unchanged active scoring objective saves", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const objectiveInput = {
+      title: "Reasoning quality",
+      description: "Explains the reason behind a claim.",
+      customScoringPrompt: "Prioritize concrete examples.",
+      gradeLabels: ["1", "2", "3", "4"],
+      gradeExamples: [
+        {
+          gradeLabel: "4",
+          exampleText: "Specific claim with supporting evidence."
+        }
+      ],
+      evidenceRequirements: "Cite survey or interview evidence."
+    };
+    const createResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [objectiveInput]
+      }
+    });
+    const activeObjective = createResponse.json().objectiveVersions[0];
+    const duplicateResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            objectiveKey: activeObjective.objectiveKey,
+            ...objectiveInput
+          }
+        ]
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(duplicateResponse.statusCode).toBe(400);
+    expect(duplicateResponse.json()).toMatchObject({
+      message: "Scoring objectives are unchanged from the active versions."
+    });
+    expect(await objectiveStore.listByStudy("study_fixture_001")).toHaveLength(1);
+
+    await server.close();
+  });
+
   it("creates new objective versions while preserving prior scoring references", async () => {
     const initialObjective: ObjectiveVersion = {
       id: "objective_version_001",
@@ -1253,6 +1589,101 @@ describe("researcher objective routes", () => {
         expect.objectContaining({ objectiveKey: "reasoning_quality", versionNumber: 2, isActive: true })
       ])
     );
+
+    await server.close();
+  });
+
+  it("creates two objective versions, restores the first, and preserves its rubric integrity", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+
+    const firstResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            title: "Reasoning Quality",
+            description: "Original description.",
+            customScoringPrompt: "Original scoring prompt.",
+            gradeLabels: ["emerging", "secure"],
+            gradeExamples: [{ gradeLabel: "secure", exampleText: "Original strong example." }],
+            evidenceRequirements: "Original evidence requirement."
+          }
+        ]
+      }
+    });
+    const objectiveKey = firstResponse.json().objectiveVersions[0].objectiveKey;
+    const secondResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            objectiveKey,
+            title: "Reasoning Quality",
+            description: "Updated description.",
+            gradeLabels: ["1", "2", "3"],
+            evidenceRequirements: "Updated evidence requirement."
+          }
+        ]
+      }
+    });
+    const restoreResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/objectives/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectiveKey,
+        versionNumber: 1
+      }
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(201);
+    expect(restoreResponse.statusCode).toBe(200);
+    expect(restoreResponse.json()).toMatchObject({
+      objectiveVersion: {
+        id: firstResponse.json().objectiveVersions[0].id,
+        objectiveKey,
+        versionNumber: 1,
+        description: "Original description.",
+        customScoringPrompt: "Original scoring prompt.",
+        gradeScale: ["emerging", "secure"],
+        gradeExamples: [
+          {
+            gradeLabel: "secure",
+            exampleText: "Original strong example."
+          }
+        ],
+        evidenceRequirements: "Original evidence requirement.",
+        isActive: true
+      }
+    });
+
+    const versions = await objectiveStore.listByStudy("study_fixture_001");
+    expect(versions.filter((version) => version.objectiveKey === objectiveKey)).toEqual([
+      expect.objectContaining({
+        id: firstResponse.json().objectiveVersions[0].id,
+        gradeScale: ["emerging", "secure"],
+        evidenceRequirements: "Original evidence requirement.",
+        isActive: true
+      })
+    ]);
 
     await server.close();
   });

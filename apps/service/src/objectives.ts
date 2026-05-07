@@ -1,5 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
 export interface ObjectiveGradeExample {
   readonly id: string;
@@ -51,6 +51,11 @@ export interface ObjectiveVersionStore {
     versions: readonly ObjectiveVersion[],
     previousActiveVersions: readonly ObjectiveVersion[]
   ): Promise<readonly ObjectiveVersion[]>;
+  restoreActiveVersion(
+    studyId: string,
+    objectiveKey: string,
+    versionNumber: number
+  ): Promise<ObjectiveVersion | undefined>;
 }
 
 interface ObjectiveVersionItem {
@@ -149,6 +154,11 @@ export class ObjectiveService {
     const parsedObjectives = parseObjectivesInput(input);
     const existingVersions = await this.objectiveVersionStore.listByStudy(studyId);
     const activeVersions = existingVersions.filter((version) => version.isActive);
+
+    if (activeVersions.length > 0 && objectiveInputsMatchActiveVersions(parsedObjectives, activeVersions)) {
+      throw new ObjectiveValidationError("Scoring objectives are unchanged from the active versions.");
+    }
+
     const existingKeys = new Set(existingVersions.map((version) => version.objectiveKey));
     const seenKeys = new Set<string>();
     const createdAt = this.now().toISOString();
@@ -195,6 +205,24 @@ export class ObjectiveService {
 
     return this.objectiveVersionStore.saveActiveVersions(objectiveVersions, activeVersions);
   }
+
+  async restoreObjectiveVersion(studyId: string, objectiveKey: string, versionNumber: number) {
+    if (typeof objectiveKey !== "string" || !/^[A-Za-z0-9_-]{3,120}$/.test(objectiveKey)) {
+      throw new ObjectiveValidationError("Objective key is required.");
+    }
+
+    if (!Number.isInteger(versionNumber) || versionNumber < 1) {
+      throw new ObjectiveValidationError("Objective version number is required.");
+    }
+
+    const restoredVersion = await this.objectiveVersionStore.restoreActiveVersion(studyId, objectiveKey, versionNumber);
+
+    if (!restoredVersion) {
+      throw new ObjectiveValidationError("Objective version was not found.");
+    }
+
+    return restoredVersion;
+  }
 }
 
 export class InMemoryObjectiveVersionStore implements ObjectiveVersionStore {
@@ -236,6 +264,31 @@ export class InMemoryObjectiveVersionStore implements ObjectiveVersionStore {
     }
 
     return versions;
+  }
+
+  async restoreActiveVersion(studyId: string, objectiveKey: string, versionNumber: number) {
+    const versions = (await this.listByStudy(studyId)).filter((version) => version.objectiveKey === objectiveKey);
+    const selectedVersion = versions.find((version) => version.versionNumber === versionNumber);
+
+    if (!selectedVersion) {
+      return undefined;
+    }
+
+    for (const version of versions) {
+      if (version.versionNumber > versionNumber) {
+        this.versions.delete(version.id);
+      } else {
+        this.versions.set(version.id, {
+          ...version,
+          isActive: version.versionNumber === versionNumber
+        });
+      }
+    }
+
+    return {
+      ...selectedVersion,
+      isActive: true
+    };
   }
 }
 
@@ -328,6 +381,50 @@ export class DynamoDbObjectiveVersionStore implements ObjectiveVersionStore {
     return versions;
   }
 
+  async restoreActiveVersion(studyId: string, objectiveKey: string, versionNumber: number) {
+    const versions = (await this.listByStudy(studyId)).filter((version) => version.objectiveKey === objectiveKey);
+    const selectedVersion = versions.find((version) => version.versionNumber === versionNumber);
+
+    if (!selectedVersion) {
+      return undefined;
+    }
+
+    for (const version of versions) {
+      if (version.versionNumber > versionNumber) {
+        await this.deleteObjectiveVersion(version);
+      } else {
+        await this.documentClient.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: {
+              pk: `STUDY#${version.studyId}`,
+              sk: `OBJECTIVE#${version.objectiveKey}#VERSION#${version.versionNumber}`
+            },
+            UpdateExpression:
+              version.versionNumber === versionNumber
+                ? "SET isActive = :active, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk"
+                : "SET isActive = :inactive REMOVE gsi1pk, gsi1sk",
+            ExpressionAttributeValues:
+              version.versionNumber === versionNumber
+                ? {
+                    ":active": true,
+                    ":gsi1pk": `STUDY#${version.studyId}#ACTIVE_CONFIG`,
+                    ":gsi1sk": `OBJECTIVE_VERSION#${padSortOrder(version.sortOrder)}#${version.objectiveKey}#${version.versionNumber}#${version.id}`
+                  }
+                : {
+                    ":inactive": false
+                  }
+          })
+        );
+      }
+    }
+
+    return {
+      ...selectedVersion,
+      isActive: true
+    };
+  }
+
   private async hydrateObjectiveVersion(
     version: Omit<ObjectiveVersion, "gradeExamples">
   ): Promise<ObjectiveVersion> {
@@ -349,6 +446,40 @@ export class DynamoDbObjectiveVersionStore implements ObjectiveVersionStore {
       ...version,
       gradeExamples
     };
+  }
+
+  private async deleteObjectiveVersion(version: ObjectiveVersion) {
+    const childResponse = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :version",
+        ExpressionAttributeValues: {
+          ":version": `OBJECTIVE_VERSION#${version.id}`
+        }
+      })
+    );
+
+    for (const item of childResponse.Items ?? []) {
+      await this.documentClient.send(
+        new DeleteCommand({
+          TableName: this.tableName,
+          Key: {
+            pk: item.pk,
+            sk: item.sk
+          }
+        })
+      );
+    }
+
+    await this.documentClient.send(
+      new DeleteCommand({
+        TableName: this.tableName,
+        Key: {
+          pk: `STUDY#${version.studyId}`,
+          sk: `OBJECTIVE#${version.objectiveKey}#VERSION#${version.versionNumber}`
+        }
+      })
+    );
   }
 }
 
@@ -398,6 +529,44 @@ function parseObjectivesInput(input: SaveObjectivesInput): readonly ParsedObject
   }
 
   return input.objectives.map((objective, index) => parseObjective(objective, index + 1));
+}
+
+function objectiveInputsMatchActiveVersions(
+  inputs: readonly ParsedObjectiveInput[],
+  activeVersions: readonly ObjectiveVersion[]
+) {
+  const sortedActiveVersions = [...activeVersions].sort((left, right) => left.sortOrder - right.sortOrder);
+
+  if (inputs.length !== sortedActiveVersions.length) {
+    return false;
+  }
+
+  return inputs.every((input, index) => {
+    const version = sortedActiveVersions[index];
+
+    return (
+      version &&
+      input.objectiveKey === version.objectiveKey &&
+      input.title === version.title &&
+      input.description === version.description &&
+      (input.customScoringPrompt ?? "") === (version.customScoringPrompt ?? "") &&
+      input.evidenceRequirements === version.evidenceRequirements &&
+      input.gradeScale.length === version.gradeScale.length &&
+      input.gradeScale.every((label, labelIndex) => label === version.gradeScale[labelIndex]) &&
+      input.gradeExamples.length === version.gradeExamples.length &&
+      input.gradeExamples.every((example, exampleIndex) => {
+        const versionExample = [...version.gradeExamples].sort((left, right) => left.sortOrder - right.sortOrder)[
+          exampleIndex
+        ];
+
+        return (
+          versionExample &&
+          example.gradeLabel === versionExample.gradeLabel &&
+          example.exampleText === versionExample.exampleText
+        );
+      })
+    );
+  });
 }
 
 function parseObjective(objective: SaveObjectiveInput, index: number): ParsedObjectiveInput {

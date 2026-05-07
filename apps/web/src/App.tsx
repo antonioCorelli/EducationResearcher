@@ -175,8 +175,237 @@ interface ObjectiveDraft {
   readonly evidenceRequirements: string;
 }
 
+interface VersionChangeSummary {
+  readonly label: string;
+  readonly before: string;
+  readonly after: string;
+}
+
+type PendingVersionConfirmation =
+  | { readonly kind: "consent"; readonly changes: readonly VersionChangeSummary[] }
+  | { readonly kind: "survey"; readonly changes: readonly VersionChangeSummary[] }
+  | { readonly kind: "objectives"; readonly changes: readonly VersionChangeSummary[] };
+
 function getCurrentPath() {
   return window.location.pathname;
+}
+
+function formatChangeValue(value: string) {
+  return value || "Not set";
+}
+
+function addTextChange(changes: VersionChangeSummary[], label: string, before: string, after: string) {
+  if (before !== after) {
+    changes.push({ label, before: formatChangeValue(before), after: formatChangeValue(after) });
+  }
+}
+
+function createSurveySnapshot(items: readonly SurveyDraftItem[]) {
+  return items
+    .map((item) =>
+      item.type === "question"
+        ? ({
+            type: "question",
+            prompt: item.prompt.trim()
+          } as const)
+        : ({
+            type: "group",
+            title: item.title.trim(),
+            questions: item.questions.map((prompt) => prompt.trim()).filter(Boolean)
+          } as const)
+    )
+    .filter((item) => (item.type === "question" ? item.prompt : item.title || item.questions.length > 0));
+}
+
+function createSurveyVersionSnapshot(version: SurveyVersion) {
+  const layoutItems =
+    version.layoutItems ??
+    [
+      ...version.groups.map((group) => ({ type: "group" as const, sortOrder: group.sortOrder, group })),
+      ...version.ungroupedQuestions.map((question) => ({ type: "question" as const, sortOrder: question.sortOrder, question }))
+    ].sort((left, right) => left.sortOrder - right.sortOrder);
+
+  return layoutItems.map((item) =>
+    item.type === "question"
+      ? ({
+          type: "question",
+          prompt: item.question.prompt
+        } as const)
+      : ({
+          type: "group",
+          title: item.group.title,
+          questions: item.group.questions
+            .slice()
+            .sort((left, right) => left.sortOrder - right.sortOrder)
+            .map((question) => question.prompt)
+        } as const)
+  );
+}
+
+function describeSurveyItem(item: ReturnType<typeof createSurveySnapshot>[number]) {
+  return item.type === "question"
+    ? `Question: ${formatChangeValue(item.prompt)}`
+    : `Group: ${formatChangeValue(item.title)} (${item.questions.length} question${item.questions.length === 1 ? "" : "s"})`;
+}
+
+function getSurveyChanges(activeVersion: SurveyVersion | undefined, items: readonly SurveyDraftItem[]) {
+  if (!activeVersion) {
+    return [];
+  }
+
+  const beforeItems = createSurveyVersionSnapshot(activeVersion);
+  const afterItems = createSurveySnapshot(items);
+  const changes: VersionChangeSummary[] = [];
+  const itemCount = Math.max(beforeItems.length, afterItems.length);
+
+  for (let index = 0; index < itemCount; index += 1) {
+    const beforeItem = beforeItems[index];
+    const afterItem = afterItems[index];
+    const label = `Item ${index + 1}`;
+
+    if (!beforeItem && afterItem) {
+      changes.push({ label, before: "Not set", after: describeSurveyItem(afterItem) });
+      continue;
+    }
+
+    if (beforeItem && !afterItem) {
+      changes.push({ label, before: describeSurveyItem(beforeItem), after: "Removed" });
+      continue;
+    }
+
+    if (!beforeItem || !afterItem) {
+      continue;
+    }
+
+    if (beforeItem.type !== afterItem.type) {
+      changes.push({ label, before: describeSurveyItem(beforeItem), after: describeSurveyItem(afterItem) });
+      continue;
+    }
+
+    if (beforeItem.type === "question" && afterItem.type === "question") {
+      addTextChange(changes, `${label} prompt`, beforeItem.prompt, afterItem.prompt);
+      continue;
+    }
+
+    if (beforeItem.type === "group" && afterItem.type === "group") {
+      addTextChange(changes, `${label} title`, beforeItem.title, afterItem.title);
+      const questionCount = Math.max(beforeItem.questions.length, afterItem.questions.length);
+
+      for (let questionIndex = 0; questionIndex < questionCount; questionIndex += 1) {
+        addTextChange(
+          changes,
+          `${label} question ${questionIndex + 1}`,
+          beforeItem.questions[questionIndex] ?? "",
+          afterItem.questions[questionIndex] ?? ""
+        );
+      }
+    }
+  }
+
+  return changes;
+}
+
+function getConsentChanges(activeVersion: ConsentVersion | undefined, text: string, method: ConsentMethod) {
+  if (!activeVersion) {
+    return [];
+  }
+
+  const changes: VersionChangeSummary[] = [];
+  addTextChange(changes, "Consent text", activeVersion.consentText, text.trim());
+  addTextChange(changes, "Consent method", activeVersion.consentMethod, method);
+  return changes;
+}
+
+function createObjectiveSnapshot(objectives: readonly ObjectiveDraft[]) {
+  return objectives
+    .map((objective) => ({
+      objectiveKey: objective.objectiveKey,
+      title: objective.title.trim(),
+      description: objective.description.trim(),
+      customScoringPrompt: objective.customScoringPrompt.trim(),
+      gradeLabels: objective.gradeLabels.map((label) => label.trim()).filter(Boolean),
+      gradeExamples: objective.gradeExamples
+        .map((example) => ({
+          gradeLabel: example.gradeLabel.trim(),
+          exampleText: example.exampleText.trim()
+        }))
+        .filter((example) => example.gradeLabel || example.exampleText),
+      evidenceRequirements: objective.evidenceRequirements.trim()
+    }))
+    .filter(
+      (objective) =>
+        objective.title ||
+        objective.description ||
+        objective.gradeLabels.length > 0 ||
+        objective.gradeExamples.length > 0 ||
+        objective.evidenceRequirements
+    );
+}
+
+function createActiveObjectiveSnapshot(versions: readonly ObjectiveVersion[]) {
+  return versions
+    .slice()
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((version) => ({
+      objectiveKey: version.objectiveKey,
+      title: version.title,
+      description: version.description,
+      customScoringPrompt: version.customScoringPrompt ?? "",
+      gradeLabels: [...version.gradeScale],
+      gradeExamples: version.gradeExamples
+        .slice()
+        .sort((left, right) => left.sortOrder - right.sortOrder)
+        .map((example) => ({
+          gradeLabel: example.gradeLabel,
+          exampleText: example.exampleText
+        })),
+      evidenceRequirements: version.evidenceRequirements
+    }));
+}
+
+function describeObjective(objective: ReturnType<typeof createObjectiveSnapshot>[number]) {
+  return `${formatChangeValue(objective.title)} (${objective.gradeLabels.length} grade${objective.gradeLabels.length === 1 ? "" : "s"})`;
+}
+
+function getObjectiveChanges(activeVersions: readonly ObjectiveVersion[], drafts: readonly ObjectiveDraft[]) {
+  const beforeObjectives = createActiveObjectiveSnapshot(activeVersions);
+  const afterObjectives = createObjectiveSnapshot(drafts);
+  const changes: VersionChangeSummary[] = [];
+  const objectiveCount = Math.max(beforeObjectives.length, afterObjectives.length);
+
+  for (let index = 0; index < objectiveCount; index += 1) {
+    const beforeObjective = beforeObjectives[index];
+    const afterObjective = afterObjectives[index];
+    const label = `Objective ${index + 1}`;
+
+    if (!beforeObjective && afterObjective) {
+      changes.push({ label, before: "Not set", after: describeObjective(afterObjective) });
+      continue;
+    }
+
+    if (beforeObjective && !afterObjective) {
+      changes.push({ label, before: describeObjective(beforeObjective), after: "Removed" });
+      continue;
+    }
+
+    if (!beforeObjective || !afterObjective) {
+      continue;
+    }
+
+    addTextChange(changes, `${label} title`, beforeObjective.title, afterObjective.title);
+    addTextChange(changes, `${label} description`, beforeObjective.description, afterObjective.description);
+    addTextChange(changes, `${label} custom prompt`, beforeObjective.customScoringPrompt, afterObjective.customScoringPrompt);
+    addTextChange(changes, `${label} grade labels`, beforeObjective.gradeLabels.join(", "), afterObjective.gradeLabels.join(", "));
+    addTextChange(changes, `${label} evidence requirements`, beforeObjective.evidenceRequirements, afterObjective.evidenceRequirements);
+    addTextChange(
+      changes,
+      `${label} grade examples`,
+      beforeObjective.gradeExamples.map((example) => `${example.gradeLabel}: ${example.exampleText}`).join("\n"),
+      afterObjective.gradeExamples.map((example) => `${example.gradeLabel}: ${example.exampleText}`).join("\n")
+    );
+  }
+
+  return changes;
 }
 
 function createEmptyObjectiveDraft(): ObjectiveDraft {
@@ -297,6 +526,8 @@ export function App() {
   const [surveyItems, setSurveyItems] = useState<readonly SurveyDraftItem[]>([{ type: "question", prompt: "" }]);
   const [surveyError, setSurveyError] = useState("");
   const [isSavingSurvey, setIsSavingSurvey] = useState(false);
+  const [selectedSurveyVersionNumber, setSelectedSurveyVersionNumber] = useState<number | null>(null);
+  const [isRestoreSurveyDialogOpen, setIsRestoreSurveyDialogOpen] = useState(false);
   const [objectiveDrafts, setObjectiveDrafts] = useState<readonly ObjectiveDraft[]>([
     {
       title: "",
@@ -309,6 +540,9 @@ export function App() {
   ]);
   const [objectiveError, setObjectiveError] = useState("");
   const [isSavingObjectives, setIsSavingObjectives] = useState(false);
+  const [selectedObjectiveVersionId, setSelectedObjectiveVersionId] = useState<string | null>(null);
+  const [isRestoreObjectiveDialogOpen, setIsRestoreObjectiveDialogOpen] = useState(false);
+  const [pendingVersionConfirmation, setPendingVersionConfirmation] = useState<PendingVersionConfirmation | null>(null);
 
   const isParticipantRoute = path.startsWith("/participant");
 
@@ -473,9 +707,13 @@ export function App() {
     setSurveyState({ status: "idle" });
     setSurveyItems([{ type: "question", prompt: "" }]);
     setSurveyError("");
+    setSelectedSurveyVersionNumber(null);
+    setIsRestoreSurveyDialogOpen(false);
     setObjectiveState({ status: "idle" });
     setObjectiveDrafts([createEmptyObjectiveDraft()]);
     setObjectiveError("");
+    setSelectedObjectiveVersionId(null);
+    setIsRestoreObjectiveDialogOpen(false);
   }
 
   function loadStudyForm(study: StudyShell) {
@@ -532,6 +770,8 @@ export function App() {
         : [{ type: "question", prompt: "" }]
     );
     setSurveyError("");
+    setSelectedSurveyVersionNumber(surveyVersion?.versionNumber ?? null);
+    setIsRestoreSurveyDialogOpen(false);
   }
 
   function loadObjectiveForm(objectiveVersions: readonly ObjectiveVersion[]) {
@@ -554,6 +794,8 @@ export function App() {
         : [createEmptyObjectiveDraft()]
     );
     setObjectiveError("");
+    setSelectedObjectiveVersionId(null);
+    setIsRestoreObjectiveDialogOpen(false);
   }
 
   async function reloadStudies(token: string, nextSelectedStudyId: string) {
@@ -609,8 +851,7 @@ export function App() {
     }
   }
 
-  async function handleSaveConsent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveConsentVersion(skipConfirmation = false) {
     setConsentError("");
 
     const selectedConsentVersion =
@@ -620,6 +861,19 @@ export function App() {
 
     if (selectedConsentVersion && !selectedConsentVersion.isActive) {
       setIsRestoreDialogOpen(true);
+      return;
+    }
+
+    const activeConsentVersion = consentState.status === "ready" ? consentState.activeConsentVersion : undefined;
+    const changes = getConsentChanges(activeConsentVersion, consentText, consentMethod);
+
+    if (activeConsentVersion && changes.length === 0) {
+      setConsentError("No consent changes to save. The active version already matches this draft.");
+      return;
+    }
+
+    if (activeConsentVersion && !skipConfirmation) {
+      setPendingVersionConfirmation({ kind: "consent", changes });
       return;
     }
 
@@ -659,6 +913,11 @@ export function App() {
     } finally {
       setIsSavingConsent(false);
     }
+  }
+
+  async function handleSaveConsent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await saveConsentVersion();
   }
 
   function addSurveyQuestion() {
@@ -744,9 +1003,31 @@ export function App() {
     );
   }
 
-  async function handleSaveSurvey(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveSurveyVersion(skipConfirmation = false) {
     setSurveyError("");
+
+    const selectedSurveyVersion =
+      surveyState.status === "ready"
+        ? surveyState.surveyVersions.find((version) => version.versionNumber === selectedSurveyVersionNumber)
+        : undefined;
+
+    if (selectedSurveyVersion && !selectedSurveyVersion.isActive) {
+      setIsRestoreSurveyDialogOpen(true);
+      return;
+    }
+
+    const activeSurveyVersion = surveyState.status === "ready" ? surveyState.activeSurveyVersion : undefined;
+    const changes = getSurveyChanges(activeSurveyVersion, surveyItems);
+
+    if (activeSurveyVersion && changes.length === 0) {
+      setSurveyError("No survey changes to save. The active version already matches this draft.");
+      return;
+    }
+
+    if (activeSurveyVersion && !skipConfirmation) {
+      setPendingVersionConfirmation({ kind: "survey", changes });
+      return;
+    }
 
     const token = localStorage.getItem(accessTokenStorageKey);
 
@@ -758,29 +1039,22 @@ export function App() {
     setIsSavingSurvey(true);
 
     try {
-      const items = surveyItems
-        .map((item) =>
-          item.type === "question"
-            ? ({
-                type: "question",
-                question: {
-                  prompt: item.prompt.trim()
-                }
-              } as const)
-            : ({
-                type: "group",
-                group: {
-                  title: item.title.trim(),
-                  questions: item.questions
-                    .map((prompt) => prompt.trim())
-                    .filter(Boolean)
-                    .map((prompt) => ({ prompt }))
-                }
-              } as const)
-        )
-        .filter((item) =>
-          item.type === "question" ? item.question.prompt : item.group.title || item.group.questions.length > 0
-        );
+      const items = createSurveySnapshot(surveyItems).map((item) =>
+        item.type === "question"
+          ? ({
+              type: "question",
+              question: {
+                prompt: item.prompt
+              }
+            } as const)
+          : ({
+              type: "group",
+              group: {
+                title: item.title,
+                questions: item.questions.map((prompt) => ({ prompt }))
+              }
+            } as const)
+      );
       const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/survey`, {
         method: "PUT",
         headers: {
@@ -806,6 +1080,11 @@ export function App() {
     } finally {
       setIsSavingSurvey(false);
     }
+  }
+
+  async function handleSaveSurvey(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await saveSurveyVersion();
   }
 
   function addObjective() {
@@ -934,9 +1213,31 @@ export function App() {
     );
   }
 
-  async function handleSaveObjectives(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveObjectiveVersions(skipConfirmation = false) {
     setObjectiveError("");
+
+    const selectedObjectiveVersion =
+      objectiveState.status === "ready"
+        ? objectiveState.objectiveVersions.find((version) => version.id === selectedObjectiveVersionId)
+        : undefined;
+
+    if (selectedObjectiveVersion && !selectedObjectiveVersion.isActive) {
+      setIsRestoreObjectiveDialogOpen(true);
+      return;
+    }
+
+    const activeObjectiveVersions = objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [];
+    const changes = getObjectiveChanges(activeObjectiveVersions, objectiveDrafts);
+
+    if (activeObjectiveVersions.length > 0 && changes.length === 0) {
+      setObjectiveError("No objective changes to save. The active versions already match this draft.");
+      return;
+    }
+
+    if (activeObjectiveVersions.length > 0 && !skipConfirmation) {
+      setPendingVersionConfirmation({ kind: "objectives", changes });
+      return;
+    }
 
     const token = localStorage.getItem(accessTokenStorageKey);
 
@@ -948,29 +1249,7 @@ export function App() {
     setIsSavingObjectives(true);
 
     try {
-      const objectives = objectiveDrafts
-        .map((objective) => ({
-          ...(objective.objectiveKey ? { objectiveKey: objective.objectiveKey } : {}),
-          title: objective.title.trim(),
-          description: objective.description.trim(),
-          customScoringPrompt: objective.customScoringPrompt.trim(),
-          gradeLabels: objective.gradeLabels.map((label) => label.trim()).filter(Boolean),
-          gradeExamples: objective.gradeExamples
-            .map((example) => ({
-              gradeLabel: example.gradeLabel.trim(),
-              exampleText: example.exampleText.trim()
-            }))
-            .filter((example) => example.gradeLabel || example.exampleText),
-          evidenceRequirements: objective.evidenceRequirements.trim()
-        }))
-        .filter(
-          (objective) =>
-            objective.title ||
-            objective.description ||
-            objective.gradeLabels.length > 0 ||
-            objective.gradeExamples.length > 0 ||
-            objective.evidenceRequirements
-        );
+      const objectives = createObjectiveSnapshot(objectiveDrafts);
       const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/objectives`, {
         method: "PUT",
         headers: {
@@ -997,12 +1276,32 @@ export function App() {
     }
   }
 
+  async function handleSaveObjectives(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await saveObjectiveVersions();
+  }
+
   function handleSelectConsentVersion(consentVersion: ConsentVersion) {
     setSelectedConsentVersionNumber(consentVersion.versionNumber);
     setConsentText(consentVersion.consentText);
     setConsentMethod(consentVersion.consentMethod);
     setConsentError("");
     setIsRestoreDialogOpen(false);
+  }
+
+  function handleSelectSurveyVersion(surveyVersion: SurveyVersion) {
+    setSelectedSurveyVersionNumber(surveyVersion.versionNumber);
+    loadSurveyForm(surveyVersion);
+  }
+
+  function handleSelectObjectiveVersion(objectiveVersion: ObjectiveVersion) {
+    if (objectiveVersion.isActive) {
+      loadObjectiveForm(objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [objectiveVersion]);
+      return;
+    }
+
+    setSelectedObjectiveVersionId(objectiveVersion.id);
+    loadObjectiveForm([objectiveVersion]);
   }
 
   async function handleConfirmRestoreConsent() {
@@ -1047,6 +1346,115 @@ export function App() {
     }
   }
 
+  async function handleConfirmRestoreSurvey() {
+    setSurveyError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId || selectedSurveyVersionNumber === null) {
+      setSurveyError("Select a previous survey version before restoring.");
+      setIsRestoreSurveyDialogOpen(false);
+      return;
+    }
+
+    setIsSavingSurvey(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/survey/restore`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          versionNumber: selectedSurveyVersionNumber
+        })
+      });
+      const payload = (await response.json()) as { surveyVersion?: SurveyVersion; message?: string };
+
+      if (!response.ok || !payload.surveyVersion) {
+        throw new Error(payload.message ?? "Unable to restore survey.");
+      }
+
+      const survey = await fetchSurvey(token, selectedStudyId);
+      setSurveyState({ status: "ready", ...survey });
+      loadSurveyForm(survey.activeSurveyVersion);
+      await reloadStudies(token, selectedStudyId);
+    } catch (error) {
+      setSurveyError(error instanceof Error ? error.message : "Unable to restore survey.");
+    } finally {
+      setIsSavingSurvey(false);
+      setIsRestoreSurveyDialogOpen(false);
+    }
+  }
+
+  async function handleConfirmRestoreObjective() {
+    setObjectiveError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+    const selectedObjectiveVersion =
+      objectiveState.status === "ready"
+        ? objectiveState.objectiveVersions.find((version) => version.id === selectedObjectiveVersionId)
+        : undefined;
+
+    if (!token || !selectedStudyId || !selectedObjectiveVersion) {
+      setObjectiveError("Select a previous objective version before restoring.");
+      setIsRestoreObjectiveDialogOpen(false);
+      return;
+    }
+
+    setIsSavingObjectives(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/objectives/restore`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          objectiveKey: selectedObjectiveVersion.objectiveKey,
+          versionNumber: selectedObjectiveVersion.versionNumber
+        })
+      });
+      const payload = (await response.json()) as { objectiveVersion?: ObjectiveVersion; message?: string };
+
+      if (!response.ok || !payload.objectiveVersion) {
+        throw new Error(payload.message ?? "Unable to restore objective.");
+      }
+
+      const objectivesPayload = await fetchObjectives(token, selectedStudyId);
+      setObjectiveState({ status: "ready", ...objectivesPayload });
+      loadObjectiveForm(objectivesPayload.activeObjectiveVersions);
+    } catch (error) {
+      setObjectiveError(error instanceof Error ? error.message : "Unable to restore objective.");
+    } finally {
+      setIsSavingObjectives(false);
+      setIsRestoreObjectiveDialogOpen(false);
+    }
+  }
+
+  async function handleConfirmCreateVersion() {
+    const pending = pendingVersionConfirmation;
+    setPendingVersionConfirmation(null);
+
+    if (!pending) {
+      return;
+    }
+
+    if (pending.kind === "consent") {
+      await saveConsentVersion(true);
+      return;
+    }
+
+    if (pending.kind === "survey") {
+      await saveSurveyVersion(true);
+      return;
+    }
+
+    await saveObjectiveVersions(true);
+  }
+
   if (isParticipantRoute) {
     return (
       <main className="app-shell participant-shell">
@@ -1082,7 +1490,17 @@ export function App() {
         : undefined;
     const isPreviewingPreviousConsent = Boolean(selectedConsentVersion && !selectedConsentVersion.isActive);
     const activeSurveyVersion = surveyState.status === "ready" ? surveyState.activeSurveyVersion : undefined;
+    const selectedSurveyVersion =
+      surveyState.status === "ready"
+        ? surveyState.surveyVersions.find((version) => version.versionNumber === selectedSurveyVersionNumber)
+        : undefined;
+    const isPreviewingPreviousSurvey = Boolean(selectedSurveyVersion && !selectedSurveyVersion.isActive);
     const activeObjectiveVersions = objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [];
+    const selectedObjectiveVersion =
+      objectiveState.status === "ready"
+        ? objectiveState.objectiveVersions.find((version) => version.id === selectedObjectiveVersionId)
+        : undefined;
+    const isPreviewingPreviousObjective = Boolean(selectedObjectiveVersion && !selectedObjectiveVersion.isActive);
 
     return (
       <main className="app-shell researcher-shell">
@@ -1311,7 +1729,13 @@ export function App() {
               >
                 <div className="section-heading">
                   <h2>Survey information</h2>
-                  {activeSurveyVersion ? <span className="version-pill">Version {activeSurveyVersion.versionNumber}</span> : null}
+                  {selectedSurveyVersion ? (
+                    <span className={isPreviewingPreviousSurvey ? "version-pill preview-version-pill" : "version-pill"}>
+                      Version {selectedSurveyVersion.versionNumber}
+                    </span>
+                  ) : activeSurveyVersion ? (
+                    <span className="version-pill">Version {activeSurveyVersion.versionNumber}</span>
+                  ) : null}
                 </div>
                 <p className="muted-copy">
                   Configure required long-form prompts. Standalone questions and titled groups can be ordered together.
@@ -1326,7 +1750,7 @@ export function App() {
                             <button
                               aria-label={`Move question ${itemIndex + 1} up`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy || itemIndex === 0}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey || itemIndex === 0}
                               onClick={() => moveSurveyItem(itemIndex, -1)}
                               type="button"
                             >
@@ -1335,7 +1759,7 @@ export function App() {
                             <button
                               aria-label={`Move question ${itemIndex + 1} down`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy || itemIndex === surveyItems.length - 1}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey || itemIndex === surveyItems.length - 1}
                               onClick={() => moveSurveyItem(itemIndex, 1)}
                               type="button"
                             >
@@ -1344,7 +1768,7 @@ export function App() {
                             <button
                               aria-label={`Remove question ${itemIndex + 1}`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy || surveyItems.length === 1}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey || surveyItems.length === 1}
                               onClick={() => removeSurveyItem(itemIndex)}
                               type="button"
                             >
@@ -1355,7 +1779,7 @@ export function App() {
                         <label>
                           Prompt
                           <textarea
-                            disabled={!selectedStudy}
+                            disabled={!selectedStudy || isPreviewingPreviousSurvey}
                             maxLength={1000}
                             onChange={(event) => updateSurveyQuestion(itemIndex, event.target.value)}
                             placeholder={selectedStudy ? "Ask for a sentence-to-paragraph response" : "Create or select a study first"}
@@ -1371,7 +1795,7 @@ export function App() {
                             <button
                               aria-label={`Move group ${itemIndex + 1} up`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy || itemIndex === 0}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey || itemIndex === 0}
                               onClick={() => moveSurveyItem(itemIndex, -1)}
                               type="button"
                             >
@@ -1380,7 +1804,7 @@ export function App() {
                             <button
                               aria-label={`Move group ${itemIndex + 1} down`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy || itemIndex === surveyItems.length - 1}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey || itemIndex === surveyItems.length - 1}
                               onClick={() => moveSurveyItem(itemIndex, 1)}
                               type="button"
                             >
@@ -1389,7 +1813,7 @@ export function App() {
                             <button
                               aria-label={`Remove group ${itemIndex + 1}`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey}
                               onClick={() => removeSurveyItem(itemIndex)}
                               type="button"
                             >
@@ -1400,7 +1824,7 @@ export function App() {
                         <label>
                           Group title
                           <input
-                            disabled={!selectedStudy}
+                            disabled={!selectedStudy || isPreviewingPreviousSurvey}
                             maxLength={120}
                             onChange={(event) => updateSurveyGroupTitle(itemIndex, event.target.value)}
                             placeholder="Visible group title"
@@ -1413,7 +1837,7 @@ export function App() {
                             <label>
                               Group question {questionIndex + 1}
                               <textarea
-                                disabled={!selectedStudy}
+                                disabled={!selectedStudy || isPreviewingPreviousSurvey}
                                 maxLength={1000}
                                 onChange={(event) => updateGroupedQuestion(itemIndex, questionIndex, event.target.value)}
                                 placeholder="Ask for a long-form response"
@@ -1423,7 +1847,7 @@ export function App() {
                             <button
                               aria-label={`Remove group ${itemIndex + 1} question ${questionIndex + 1}`}
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy || item.questions.length === 1}
+                              disabled={!selectedStudy || isPreviewingPreviousSurvey || item.questions.length === 1}
                               onClick={() => removeGroupedQuestion(itemIndex, questionIndex)}
                               type="button"
                             >
@@ -1433,7 +1857,7 @@ export function App() {
                         ))}
                         <button
                           className="secondary-button compact-button"
-                          disabled={!selectedStudy}
+                          disabled={!selectedStudy || isPreviewingPreviousSurvey}
                           onClick={() => addGroupedQuestion(itemIndex)}
                           type="button"
                         >
@@ -1444,10 +1868,10 @@ export function App() {
                   )}
                 </div>
                 <div className="survey-add-row">
-                  <button className="secondary-button compact-button" disabled={!selectedStudy} onClick={addSurveyQuestion} type="button">
+                  <button className="secondary-button compact-button" disabled={!selectedStudy || isPreviewingPreviousSurvey} onClick={addSurveyQuestion} type="button">
                     Add question
                   </button>
-                  <button className="secondary-button compact-button" disabled={!selectedStudy} onClick={addSurveyGroup} type="button">
+                  <button className="secondary-button compact-button" disabled={!selectedStudy || isPreviewingPreviousSurvey} onClick={addSurveyGroup} type="button">
                     Add group
                   </button>
                 </div>
@@ -1456,17 +1880,32 @@ export function App() {
                 {surveyState.status === "ready" && surveyState.surveyVersions.length > 0 ? (
                   <div className="version-history" aria-label="Survey versions">
                     {surveyState.surveyVersions.map((version) => (
-                      <span className={version.isActive ? "version-chip active-version-chip" : "version-chip"} key={version.id}>
+                      <button
+                        className={[
+                          "version-chip",
+                          version.isActive ? "active-version-chip" : "",
+                          version.versionNumber === selectedSurveyVersionNumber ? "selected-version-chip" : ""
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        key={version.id}
+                        onClick={() => handleSelectSurveyVersion(version)}
+                        type="button"
+                      >
                         v{version.versionNumber}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 ) : null}
                 {surveyError ? <p className="form-error">{surveyError}</p> : null}
                 <div className="form-actions">
-                  <button className="primary-button" disabled={!selectedStudy || isSavingSurvey} type="submit">
+                  <button className={isPreviewingPreviousSurvey ? "danger-button" : "primary-button"} disabled={!selectedStudy || isSavingSurvey} type="submit">
                     {isSavingSurvey
-                      ? "Saving survey"
+                      ? isPreviewingPreviousSurvey
+                        ? "Restoring version"
+                        : "Saving survey"
+                      : isPreviewingPreviousSurvey
+                        ? "Restore selected version"
                       : surveyState.status === "ready" && surveyState.activeSurveyVersion
                         ? "Create new version"
                         : "Save survey"}
@@ -1483,7 +1922,11 @@ export function App() {
               >
                 <div className="section-heading">
                   <h2>Scoring objectives</h2>
-                  {activeObjectiveVersions.length > 0 ? (
+                  {selectedObjectiveVersion ? (
+                    <span className={isPreviewingPreviousObjective ? "version-pill preview-version-pill" : "version-pill"}>
+                      {selectedObjectiveVersion.title} v{selectedObjectiveVersion.versionNumber}
+                    </span>
+                  ) : activeObjectiveVersions.length > 0 ? (
                     <span className="version-pill">{activeObjectiveVersions.length} active</span>
                   ) : null}
                 </div>
@@ -1496,7 +1939,7 @@ export function App() {
                           <button
                             aria-label={`Move objective ${objectiveIndex + 1} up`}
                             className="secondary-button compact-button"
-                            disabled={!selectedStudy || objectiveIndex === 0}
+                            disabled={!selectedStudy || isPreviewingPreviousObjective || objectiveIndex === 0}
                             onClick={() => moveObjective(objectiveIndex, -1)}
                             type="button"
                           >
@@ -1505,7 +1948,7 @@ export function App() {
                           <button
                             aria-label={`Move objective ${objectiveIndex + 1} down`}
                             className="secondary-button compact-button"
-                            disabled={!selectedStudy || objectiveIndex === objectiveDrafts.length - 1}
+                            disabled={!selectedStudy || isPreviewingPreviousObjective || objectiveIndex === objectiveDrafts.length - 1}
                             onClick={() => moveObjective(objectiveIndex, 1)}
                             type="button"
                           >
@@ -1514,7 +1957,7 @@ export function App() {
                           <button
                             aria-label={`Remove objective ${objectiveIndex + 1}`}
                             className="secondary-button compact-button"
-                            disabled={!selectedStudy || objectiveDrafts.length === 1}
+                            disabled={!selectedStudy || isPreviewingPreviousObjective || objectiveDrafts.length === 1}
                             onClick={() => removeObjective(objectiveIndex)}
                             type="button"
                           >
@@ -1525,7 +1968,7 @@ export function App() {
                       <label>
                         Title
                         <input
-                          disabled={!selectedStudy}
+                          disabled={!selectedStudy || isPreviewingPreviousObjective}
                           maxLength={160}
                           onChange={(event) => updateObjective(objectiveIndex, { title: event.target.value })}
                           placeholder={selectedStudy ? "Reasoning quality" : "Create or select a study first"}
@@ -1536,7 +1979,7 @@ export function App() {
                       <label>
                         Description
                         <textarea
-                          disabled={!selectedStudy}
+                          disabled={!selectedStudy || isPreviewingPreviousObjective}
                           maxLength={2000}
                           onChange={(event) => updateObjective(objectiveIndex, { description: event.target.value })}
                           placeholder="What this objective should measure"
@@ -1546,7 +1989,7 @@ export function App() {
                       <label>
                         Evidence requirements
                         <textarea
-                          disabled={!selectedStudy}
+                          disabled={!selectedStudy || isPreviewingPreviousObjective}
                           maxLength={2000}
                           onChange={(event) => updateObjective(objectiveIndex, { evidenceRequirements: event.target.value })}
                           placeholder="What evidence should support the score"
@@ -1556,7 +1999,7 @@ export function App() {
                       <label>
                         Custom scoring prompt
                         <textarea
-                          disabled={!selectedStudy}
+                          disabled={!selectedStudy || isPreviewingPreviousObjective}
                           maxLength={4000}
                           onChange={(event) => updateObjective(objectiveIndex, { customScoringPrompt: event.target.value })}
                           placeholder="Optional objective-specific scoring guidance"
@@ -1569,7 +2012,7 @@ export function App() {
                             <h3>Grade labels</h3>
                             <button
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy}
+                              disabled={!selectedStudy || isPreviewingPreviousObjective}
                               onClick={() => addObjectiveGradeLabel(objectiveIndex)}
                               type="button"
                             >
@@ -1581,7 +2024,7 @@ export function App() {
                               <div className="grade-label-row" key={`objective-${objectiveIndex}-grade-${gradeIndex}`}>
                                 <input
                                   aria-label={`Objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
-                                  disabled={!selectedStudy}
+                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
                                   maxLength={40}
                                   onChange={(event) =>
                                     updateObjectiveGradeLabel(objectiveIndex, gradeIndex, event.target.value)
@@ -1592,7 +2035,7 @@ export function App() {
                                 <button
                                   aria-label={`Remove objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
                                   className="secondary-button compact-button"
-                                  disabled={!selectedStudy || objective.gradeLabels.length <= 2}
+                                  disabled={!selectedStudy || isPreviewingPreviousObjective || objective.gradeLabels.length <= 2}
                                   onClick={() => removeObjectiveGradeLabel(objectiveIndex, gradeIndex)}
                                   type="button"
                                 >
@@ -1607,7 +2050,7 @@ export function App() {
                             <h3>Grade examples</h3>
                             <button
                               className="secondary-button compact-button"
-                              disabled={!selectedStudy}
+                              disabled={!selectedStudy || isPreviewingPreviousObjective}
                               onClick={() => addObjectiveGradeExample(objectiveIndex)}
                               type="button"
                             >
@@ -1620,7 +2063,7 @@ export function App() {
                               <div className="grade-example-row" key={`objective-${objectiveIndex}-example-${exampleIndex}`}>
                                 <select
                                   aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} grade label`}
-                                  disabled={!selectedStudy}
+                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
                                   onChange={(event) =>
                                     updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
                                       gradeLabel: event.target.value
@@ -1636,7 +2079,7 @@ export function App() {
                                 </select>
                                 <textarea
                                   aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} text`}
-                                  disabled={!selectedStudy}
+                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
                                   maxLength={2000}
                                   onChange={(event) =>
                                     updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
@@ -1649,7 +2092,7 @@ export function App() {
                                 <button
                                   aria-label={`Remove objective ${objectiveIndex + 1} example ${exampleIndex + 1}`}
                                   className="secondary-button compact-button"
-                                  disabled={!selectedStudy}
+                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
                                   onClick={() => removeObjectiveGradeExample(objectiveIndex, exampleIndex)}
                                   type="button"
                                 >
@@ -1664,7 +2107,7 @@ export function App() {
                   ))}
                 </div>
                 <div className="survey-add-row">
-                  <button className="secondary-button compact-button" disabled={!selectedStudy} onClick={addObjective} type="button">
+                  <button className="secondary-button compact-button" disabled={!selectedStudy || isPreviewingPreviousObjective} onClick={addObjective} type="button">
                     Add objective
                   </button>
                 </div>
@@ -1673,17 +2116,32 @@ export function App() {
                 {objectiveState.status === "ready" && objectiveState.objectiveVersions.length > 0 ? (
                   <div className="version-history" aria-label="Objective versions">
                     {objectiveState.objectiveVersions.map((version) => (
-                      <span className={version.isActive ? "version-chip active-version-chip" : "version-chip"} key={version.id}>
+                      <button
+                        className={[
+                          "version-chip",
+                          version.isActive ? "active-version-chip" : "",
+                          version.id === selectedObjectiveVersionId ? "selected-version-chip" : ""
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        key={version.id}
+                        onClick={() => handleSelectObjectiveVersion(version)}
+                        type="button"
+                      >
                         {version.title} v{version.versionNumber}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 ) : null}
                 {objectiveError ? <p className="form-error">{objectiveError}</p> : null}
                 <div className="form-actions">
-                  <button className="primary-button" disabled={!selectedStudy || isSavingObjectives} type="submit">
+                  <button className={isPreviewingPreviousObjective ? "danger-button" : "primary-button"} disabled={!selectedStudy || isSavingObjectives} type="submit">
                     {isSavingObjectives
-                      ? "Saving objectives"
+                      ? isPreviewingPreviousObjective
+                        ? "Restoring version"
+                        : "Saving objectives"
+                      : isPreviewingPreviousObjective
+                        ? "Restore selected version"
                       : objectiveState.status === "ready" && objectiveState.activeObjectiveVersions.length > 0
                         ? "Create new versions"
                         : "Save objectives"}
@@ -1693,6 +2151,46 @@ export function App() {
             </div>
           </div>
         </section>
+        {pendingVersionConfirmation ? (
+          <div className="dialog-backdrop" role="presentation">
+            <div aria-labelledby="create-version-title" aria-modal="true" className="confirm-dialog version-diff-dialog" role="dialog">
+              <h2 id="create-version-title">Create new {pendingVersionConfirmation.kind} version?</h2>
+              <p>Review the changes that will be captured in the next active version.</p>
+              <dl className="version-diff-list">
+                {pendingVersionConfirmation.changes.map((change) => (
+                  <div className="version-diff-row" key={change.label}>
+                    <dt>{change.label}</dt>
+                    <dd>
+                      <span className="diff-before">{change.before}</span>
+                      <span className="diff-arrow" aria-hidden="true">
+                        to
+                      </span>
+                      <span className="diff-after">{change.after}</span>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="form-actions">
+                <button
+                  className="primary-button"
+                  disabled={isSavingConsent || isSavingSurvey || isSavingObjectives}
+                  onClick={handleConfirmCreateVersion}
+                  type="button"
+                >
+                  Create new version
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={isSavingConsent || isSavingSurvey || isSavingObjectives}
+                  onClick={() => setPendingVersionConfirmation(null)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {isRestoreDialogOpen && selectedConsentVersion ? (
           <div className="dialog-backdrop" role="presentation">
             <div aria-labelledby="restore-consent-title" aria-modal="true" className="confirm-dialog" role="dialog">
@@ -1705,6 +2203,44 @@ export function App() {
                   Restore Version
                 </button>
                 <button className="secondary-button" disabled={isSavingConsent} onClick={() => setIsRestoreDialogOpen(false)} type="button">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {isRestoreSurveyDialogOpen && selectedSurveyVersion ? (
+          <div className="dialog-backdrop" role="presentation">
+            <div aria-labelledby="restore-survey-title" aria-modal="true" className="confirm-dialog" role="dialog">
+              <h2 id="restore-survey-title">Restore survey version {selectedSurveyVersion.versionNumber}?</h2>
+              <p>
+                You cannot undo this action. Versions after version {selectedSurveyVersion.versionNumber} will be removed, and this version will become current.
+              </p>
+              <div className="form-actions">
+                <button className="danger-button" disabled={isSavingSurvey} onClick={handleConfirmRestoreSurvey} type="button">
+                  Restore Version
+                </button>
+                <button className="secondary-button" disabled={isSavingSurvey} onClick={() => setIsRestoreSurveyDialogOpen(false)} type="button">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {isRestoreObjectiveDialogOpen && selectedObjectiveVersion ? (
+          <div className="dialog-backdrop" role="presentation">
+            <div aria-labelledby="restore-objective-title" aria-modal="true" className="confirm-dialog" role="dialog">
+              <h2 id="restore-objective-title">
+                Restore {selectedObjectiveVersion.title} version {selectedObjectiveVersion.versionNumber}?
+              </h2>
+              <p>
+                You cannot undo this action. Later versions of this objective will be removed, and this version will become current.
+              </p>
+              <div className="form-actions">
+                <button className="danger-button" disabled={isSavingObjectives} onClick={handleConfirmRestoreObjective} type="button">
+                  Restore Version
+                </button>
+                <button className="secondary-button" disabled={isSavingObjectives} onClick={() => setIsRestoreObjectiveDialogOpen(false)} type="button">
                   Cancel
                 </button>
               </div>
