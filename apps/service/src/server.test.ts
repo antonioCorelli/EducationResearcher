@@ -1344,3 +1344,417 @@ describe("researcher objective routes", () => {
     await server.close();
   });
 });
+
+describe("researcher create survey end-to-end workflows", () => {
+  it("saves a complete created survey with consent, interleaved grouped questions, and a full grading system", async () => {
+    const studyStore = new InMemoryStudyShellStore();
+    const consentStore = new InMemoryConsentVersionStore();
+    const surveyStore = new InMemorySurveyVersionStore();
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: studyStore,
+      consentVersionStore: consentStore,
+      surveyVersionStore: surveyStore,
+      objectiveVersionStore: objectiveStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+    const longConsentText = [
+      "Consent & Assent: participants may stop at any time.",
+      "We will preserve punctuation and symbols: !@#$%^&*()_+-=[]{}|;':\",./<>?`~.",
+      "Special text stays intact: café, naïve, 中文, emoji-like marker 🙂, math ≤ ≥ ≠, and quotes “yes”.",
+      "Repeated disclosure: ".repeat(40),
+      "End of consent."
+    ].join("\n");
+
+    const studyResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies",
+      headers,
+      payload: {
+        title: "  Mixed Methods Reflection Survey  ",
+        defaultFreshnessDays: 30,
+        defaultMaxInterviewMinutes: 60
+      }
+    });
+    expect(studyResponse.statusCode).toBe(201);
+    const studyId = studyResponse.json().study.id as string;
+
+    const consentResponse = await server.inject({
+      method: "PUT",
+      url: `/researcher/studies/${studyId}/consent`,
+      headers,
+      payload: {
+        consentText: longConsentText,
+        consentMethod: "electronic_signature"
+      }
+    });
+    expect(consentResponse.statusCode).toBe(201);
+
+    const surveyResponse = await server.inject({
+      method: "PUT",
+      url: `/researcher/studies/${studyId}/survey`,
+      headers,
+      payload: {
+        items: [
+          {
+            type: "question",
+            question: {
+              prompt: "What did you notice first?"
+            }
+          },
+          {
+            type: "group",
+            group: {
+              title: "Evidence and reasoning",
+              questions: [
+                {
+                  prompt: "What evidence supports your answer?"
+                },
+                {
+                  prompt: "What is another possible explanation?"
+                }
+              ]
+            }
+          },
+          {
+            type: "question",
+            question: {
+              prompt: "What would you want to investigate next?"
+            }
+          },
+          {
+            type: "group",
+            group: {
+              title: "Confidence check",
+              questions: [
+                {
+                  prompt: "How confident are you in your response?"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+    expect(surveyResponse.statusCode).toBe(201);
+
+    const objectivesResponse = await server.inject({
+      method: "PUT",
+      url: `/researcher/studies/${studyId}/objectives`,
+      headers,
+      payload: {
+        objectives: [
+          {
+            title: "Reasoning quality",
+            description: "Scores whether the learner explains claims with relevant evidence.",
+            customScoringPrompt: "Reward specific references to the learner's survey responses.",
+            gradeLabels: ["1", "2", "3", "4"],
+            gradeExamples: [
+              {
+                gradeLabel: "1",
+                exampleText: "Makes a claim without evidence."
+              },
+              {
+                gradeLabel: "4",
+                exampleText: "Connects a precise claim to multiple pieces of evidence."
+              }
+            ],
+            evidenceRequirements: "Use survey answers and follow-up interview evidence."
+          },
+          {
+            title: "Reflection depth",
+            description: "Scores whether the learner identifies uncertainty and next steps.",
+            gradeLabels: ["emerging", "developing", "proficient", "advanced"],
+            gradeExamples: [
+              {
+                gradeLabel: "advanced",
+                exampleText: "Names uncertainty, why it matters, and a concrete next investigation."
+              }
+            ],
+            evidenceRequirements: "Cite the confidence check and investigation prompt."
+          }
+        ]
+      }
+    });
+    expect(objectivesResponse.statusCode).toBe(201);
+
+    const savedStudyResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}`,
+      headers
+    });
+    const savedConsentResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}/consent`,
+      headers
+    });
+    const savedSurveyResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}/survey`,
+      headers
+    });
+    const savedObjectivesResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}/objectives`,
+      headers
+    });
+
+    expect(savedStudyResponse.statusCode).toBe(200);
+    expect(savedConsentResponse.statusCode).toBe(200);
+    expect(savedSurveyResponse.statusCode).toBe(200);
+    expect(savedObjectivesResponse.statusCode).toBe(200);
+    expect(savedStudyResponse.json()).toMatchObject({
+      study: {
+        id: studyId,
+        title: "Mixed Methods Reflection Survey",
+        defaultFreshnessDays: 30,
+        defaultMaxInterviewMinutes: 60,
+        activeConsentVersionId: consentResponse.json().consentVersion.id,
+        activeSurveyVersionId: surveyResponse.json().surveyVersion.id
+      }
+    });
+    expect(savedConsentResponse.json()).toMatchObject({
+      activeConsentVersion: {
+        consentText: longConsentText,
+        consentMethod: "electronic_signature",
+        isActive: true,
+        versionNumber: 1
+      },
+      consentVersions: [
+        {
+          consentText: longConsentText,
+          consentMethod: "electronic_signature",
+          isActive: true,
+          versionNumber: 1
+        }
+      ]
+    });
+    expect(savedSurveyResponse.json()).toMatchObject({
+      activeSurveyVersion: {
+        layoutItems: [
+          {
+            type: "question",
+            sortOrder: 1,
+            question: {
+              prompt: "What did you notice first?",
+              questionType: "long_text",
+              required: true,
+              sortOrder: 1
+            }
+          },
+          {
+            type: "group",
+            sortOrder: 2,
+            group: {
+              title: "Evidence and reasoning",
+              sortOrder: 2,
+              questions: [
+                {
+                  prompt: "What evidence supports your answer?",
+                  questionType: "long_text",
+                  required: true,
+                  sortOrder: 1
+                },
+                {
+                  prompt: "What is another possible explanation?",
+                  questionType: "long_text",
+                  required: true,
+                  sortOrder: 2
+                }
+              ]
+            }
+          },
+          {
+            type: "question",
+            sortOrder: 3,
+            question: {
+              prompt: "What would you want to investigate next?",
+              questionType: "long_text",
+              required: true,
+              sortOrder: 3
+            }
+          },
+          {
+            type: "group",
+            sortOrder: 4,
+            group: {
+              title: "Confidence check",
+              sortOrder: 4,
+              questions: [
+                {
+                  prompt: "How confident are you in your response?",
+                  questionType: "long_text",
+                  required: true,
+                  sortOrder: 1
+                }
+              ]
+            }
+          }
+        ],
+        ungroupedQuestions: [
+          {
+            prompt: "What did you notice first?",
+            sortOrder: 1
+          },
+          {
+            prompt: "What would you want to investigate next?",
+            sortOrder: 3
+          }
+        ],
+        groups: [
+          {
+            title: "Evidence and reasoning",
+            sortOrder: 2
+          },
+          {
+            title: "Confidence check",
+            sortOrder: 4
+          }
+        ]
+      }
+    });
+    expect(savedObjectivesResponse.json()).toMatchObject({
+      activeObjectiveVersions: [
+        {
+          title: "Reasoning quality",
+          description: "Scores whether the learner explains claims with relevant evidence.",
+          customScoringPrompt: "Reward specific references to the learner's survey responses.",
+          gradeScale: ["1", "2", "3", "4"],
+          gradeExamples: [
+            {
+              gradeLabel: "1",
+              exampleText: "Makes a claim without evidence.",
+              sortOrder: 1
+            },
+            {
+              gradeLabel: "4",
+              exampleText: "Connects a precise claim to multiple pieces of evidence.",
+              sortOrder: 2
+            }
+          ],
+          evidenceRequirements: "Use survey answers and follow-up interview evidence.",
+          sortOrder: 1,
+          isActive: true
+        },
+        {
+          title: "Reflection depth",
+          description: "Scores whether the learner identifies uncertainty and next steps.",
+          gradeScale: ["emerging", "developing", "proficient", "advanced"],
+          gradeExamples: [
+            {
+              gradeLabel: "advanced",
+              exampleText: "Names uncertainty, why it matters, and a concrete next investigation.",
+              sortOrder: 1
+            }
+          ],
+          evidenceRequirements: "Cite the confidence check and investigation prompt.",
+          sortOrder: 2,
+          isActive: true
+        }
+      ]
+    });
+
+    expect(await consentStore.listByStudy(studyId)).toHaveLength(1);
+    expect(await surveyStore.listByStudy(studyId)).toHaveLength(1);
+    expect(await objectiveStore.listByStudy(studyId)).toHaveLength(2);
+
+    await server.close();
+  });
+
+  it("saves a created survey shell that is just a title", async () => {
+    const studyStore = new InMemoryStudyShellStore();
+    const consentStore = new InMemoryConsentVersionStore();
+    const surveyStore = new InMemorySurveyVersionStore();
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: studyStore,
+      consentVersionStore: consentStore,
+      surveyVersionStore: surveyStore,
+      objectiveVersionStore: objectiveStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+    const response = await server.inject({
+      method: "POST",
+      url: "/researcher/studies",
+      headers,
+      payload: {
+        title: "  Title Only Survey  "
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const studyId = response.json().study.id as string;
+    const savedStudyResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}`,
+      headers
+    });
+    const savedConsentResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}/consent`,
+      headers
+    });
+    const savedSurveyResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}/survey`,
+      headers
+    });
+    const savedObjectivesResponse = await server.inject({
+      method: "GET",
+      url: `/researcher/studies/${studyId}/objectives`,
+      headers
+    });
+
+    expect(savedStudyResponse.statusCode).toBe(200);
+    expect(savedConsentResponse.statusCode).toBe(200);
+    expect(savedSurveyResponse.statusCode).toBe(200);
+    expect(savedObjectivesResponse.statusCode).toBe(200);
+    const savedTitleOnlyStudy = savedStudyResponse.json().study;
+
+    expect(savedTitleOnlyStudy).toMatchObject({
+      id: studyId,
+      ownerUserId: researcher.id,
+      title: "Title Only Survey",
+      defaultFreshnessDays: 14,
+      defaultMaxInterviewMinutes: 45,
+      activePersonaVersionId: "persona_version_v1_default_001",
+      status: "active"
+    });
+    expect(savedTitleOnlyStudy.activeConsentVersionId).toBeUndefined();
+    expect(savedTitleOnlyStudy.activeSurveyVersionId).toBeUndefined();
+    expect(savedConsentResponse.json()).toEqual({
+      activeConsentVersion: undefined,
+      consentVersions: []
+    });
+    expect(savedSurveyResponse.json()).toEqual({
+      activeSurveyVersion: undefined,
+      surveyVersions: []
+    });
+    expect(savedObjectivesResponse.json()).toEqual({
+      activeObjectiveVersions: [],
+      objectiveVersions: []
+    });
+    const titleOnlyStoredStudies = await studyStore.listByOwner(researcher.id);
+    expect(titleOnlyStoredStudies).toEqual([
+      expect.objectContaining({
+        id: studyId,
+        title: "Title Only Survey"
+      })
+    ]);
+    expect(titleOnlyStoredStudies[0]?.activeConsentVersionId).toBeUndefined();
+    expect(titleOnlyStoredStudies[0]?.activeSurveyVersionId).toBeUndefined();
+    expect(await consentStore.listByStudy(studyId)).toHaveLength(0);
+    expect(await surveyStore.listByStudy(studyId)).toHaveLength(0);
+    expect(await objectiveStore.listByStudy(studyId)).toHaveLength(0);
+
+    await server.close();
+  });
+});
