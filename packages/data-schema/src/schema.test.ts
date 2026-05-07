@@ -133,4 +133,37 @@ describe("data domain schema", () => {
       consentVersionId: "consent_version_001"
     });
   });
+
+  it("captures versioned scoring objective rubric fields", () => {
+    const objectiveVersion = getEntityDefinition("objective_version")?.definition;
+    const gradeExample = getEntityDefinition("objective_grade_example")?.definition;
+    const fixtureObjectiveVersion = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "objective_version");
+    const fixtureGradeExample = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "objective_grade_example");
+
+    expect(objectiveVersion?.requiredAttributes).toEqual(
+      expect.arrayContaining([
+        "objectiveKey",
+        "versionNumber",
+        "title",
+        "description",
+        "gradeScale",
+        "evidenceRequirements",
+        "sortOrder",
+        "isActive"
+      ])
+    );
+    expect(gradeExample?.requiredAttributes).toEqual(
+      expect.arrayContaining(["objectiveVersionId", "gradeLabel", "exampleText", "sortOrder"])
+    );
+    expect(fixtureObjectiveVersion?.attributes).toMatchObject({
+      objectiveKey: "reasoning_quality",
+      gradeScale: ["1", "2", "3", "4"],
+      sortOrder: 1,
+      isActive: true
+    });
+    expect(fixtureGradeExample?.attributes).toMatchObject({
+      objectiveVersionId: "objective_version_001",
+      gradeLabel: "4"
+    });
+  });
 });

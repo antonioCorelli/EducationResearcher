@@ -14,6 +14,13 @@ import {
   type SaveConsentInput
 } from "./consent.js";
 import {
+  ObjectiveService,
+  createConfiguredObjectiveVersionStore,
+  toSafeObjectiveValidationResponse,
+  type ObjectiveVersionStore,
+  type SaveObjectivesInput
+} from "./objectives.js";
+import {
   SurveyService,
   createConfiguredSurveyVersionStore,
   toSafeSurveyValidationResponse,
@@ -38,6 +45,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly authProvider?: AuthProvider;
   readonly consentVersionStore?: ConsentVersionStore;
   readonly corsOrigin?: string | string[];
+  readonly objectiveVersionStore?: ObjectiveVersionStore;
   readonly studyShellStore?: StudyShellStore;
   readonly surveyVersionStore?: SurveyVersionStore;
 }
@@ -234,6 +242,94 @@ function coerceSaveSurveyInput(body: unknown): SaveSurveyInput {
   } as SaveSurveyInput;
 }
 
+function coerceSaveObjectivesInput(body: unknown): SaveObjectivesInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Scoring objectives are required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if ("id" in record || "versionNumber" in record || "isActive" in record || "studyId" in record) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Objective version metadata is assigned by the service."
+      }
+    };
+  }
+
+  rejectObjectiveMetadata(record.objectives);
+
+  return {
+    objectives: record.objectives
+  } as SaveObjectivesInput;
+}
+
+function rejectObjectiveMetadata(value: unknown) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (
+      "id" in record ||
+      "studyId" in record ||
+      "versionNumber" in record ||
+      "isActive" in record ||
+      "createdAt" in record ||
+      "sortOrder" in record ||
+      "gradeScale" in record
+    ) {
+      throw {
+        statusCode: 400,
+        body: {
+          error: "Bad Request",
+          message: "Objective version metadata is assigned by the service."
+        }
+      };
+    }
+
+    rejectObjectiveExampleMetadata(record.gradeExamples);
+  }
+}
+
+function rejectObjectiveExampleMetadata(value: unknown) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if ("id" in record || "objectiveVersionId" in record || "sortOrder" in record || "createdAt" in record) {
+      throw {
+        statusCode: 400,
+        body: {
+          error: "Bad Request",
+          message: "Objective grade example metadata is assigned by the service."
+        }
+      };
+    }
+  }
+}
+
 function rejectSurveyMetadata(value: unknown, metadataMessage: string) {
   if (!Array.isArray(value)) {
     return;
@@ -307,6 +403,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     authProvider,
     consentVersionStore = createConfiguredConsentVersionStore(),
     corsOrigin = true,
+    objectiveVersionStore = createConfiguredObjectiveVersionStore(),
     studyShellStore = createConfiguredStudyShellStore(),
     surveyVersionStore = createConfiguredSurveyVersionStore(),
     ...fastifyOptions
@@ -314,6 +411,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   let resolvedAuthProvider = authProvider;
   const studyShellService = new StudyShellService(studyShellStore);
   const consentService = new ConsentService(consentVersionStore, studyShellStore);
+  const objectiveService = new ObjectiveService(objectiveVersionStore);
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
   const server = Fastify({
@@ -613,6 +711,65 @@ export function buildServer(options: BuildServerOptions = {}) {
       } catch (error) {
         const safeResponse =
           toSafeAuthorizationResponse(error) ?? toSafeSurveyValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/objectives",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read");
+
+        return objectiveService.listForStudy(request.params.studyId);
+      } catch (error) {
+        const safeAuthorization = toSafeAuthorizationResponse(error);
+
+        if (safeAuthorization) {
+          return reply.code(safeAuthorization.statusCode).send(safeAuthorization.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.put<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/objectives",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const study = await studyShellStore.getById(request.params.studyId);
+
+        if (!study) {
+          const safeAuthorization = toSafeAuthorizationResponse(new Error());
+          return reply.code(safeAuthorization?.statusCode ?? 403).send(
+            safeAuthorization?.body ?? {
+              error: "Forbidden",
+              message: "You are not authorized to access this study resource."
+            }
+          );
+        }
+
+        const objectiveVersions = await objectiveService.saveObjectives(
+          request.params.studyId,
+          coerceSaveObjectivesInput(request.body)
+        );
+
+        return reply.code(201).send({
+          objectiveVersions
+        });
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ?? toSafeObjectiveValidationResponse(error) ?? toSafeInlineErrorResponse(error);
 
         if (safeResponse) {
           return reply.code(safeResponse.statusCode).send(safeResponse.body);

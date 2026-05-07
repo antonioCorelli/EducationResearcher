@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
+import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -1078,6 +1079,265 @@ describe("researcher survey routes", () => {
     expect(metadataAttempt.json()).toEqual({
       error: "Bad Request",
       message: "Survey question metadata is assigned by the service."
+    });
+    expect(crossTenant.statusCode).toBe(403);
+
+    await server.close();
+  });
+});
+
+describe("researcher objective routes", () => {
+  it("allows browser preflight for objective saves", async () => {
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false });
+    const response = await server.inject({
+      method: "OPTIONS",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "access-control-request-method": "PUT"
+      }
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-methods"]).toContain("PUT");
+
+    await server.close();
+  });
+
+  it("creates one or more active scoring objectives with rubrics and ordering", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            title: "  Reasoning quality  ",
+            description: "Explains the reason behind a claim.",
+            customScoringPrompt: "Prioritize concrete examples.",
+            gradeLabels: ["1", "2", "3", "4"],
+            gradeExamples: [
+              {
+                gradeLabel: "4",
+                exampleText: "Specific claim with supporting evidence."
+              }
+            ],
+            evidenceRequirements: "Cite survey or interview evidence."
+          },
+          {
+            title: "Confidence",
+            description: "Describes certainty and uncertainty.",
+            gradeLabels: ["low", "medium", "high"],
+            evidenceRequirements: "Use the participant's own words."
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      objectiveVersions: [
+        {
+          studyId: "study_fixture_001",
+          versionNumber: 1,
+          title: "Reasoning quality",
+          description: "Explains the reason behind a claim.",
+          customScoringPrompt: "Prioritize concrete examples.",
+          gradeScale: ["1", "2", "3", "4"],
+          gradeExamples: [
+            {
+              gradeLabel: "4",
+              exampleText: "Specific claim with supporting evidence.",
+              sortOrder: 1
+            }
+          ],
+          evidenceRequirements: "Cite survey or interview evidence.",
+          sortOrder: 1,
+          isActive: true
+        },
+        {
+          title: "Confidence",
+          gradeScale: ["low", "medium", "high"],
+          sortOrder: 2,
+          isActive: true
+        }
+      ]
+    });
+
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().activeObjectiveVersions).toHaveLength(2);
+
+    await server.close();
+  });
+
+  it("creates new objective versions while preserving prior scoring references", async () => {
+    const initialObjective: ObjectiveVersion = {
+      id: "objective_version_001",
+      studyId: "study_fixture_001",
+      objectiveKey: "reasoning_quality",
+      versionNumber: 1,
+      title: "Reasoning Quality",
+      description: "Original description.",
+      gradeScale: ["1", "2", "3", "4"],
+      gradeExamples: [],
+      evidenceRequirements: "Original evidence requirement.",
+      sortOrder: 1,
+      isActive: true,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    };
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore([initialObjective]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const scoringObjectiveVersionId = initialObjective.id;
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            objectiveKey: "reasoning_quality",
+            title: "Reasoning Quality",
+            description: "Updated description.",
+            gradeLabels: ["emerging", "developing", "strong"],
+            evidenceRequirements: "Updated evidence requirement."
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      objectiveVersions: [
+        {
+          objectiveKey: "reasoning_quality",
+          versionNumber: 2,
+          title: "Reasoning Quality",
+          description: "Updated description.",
+          gradeScale: ["emerging", "developing", "strong"],
+          isActive: true
+        }
+      ]
+    });
+    expect(scoringObjectiveVersionId).toBe("objective_version_001");
+
+    const versions = await objectiveStore.listByStudy("study_fixture_001");
+    expect(versions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "objective_version_001", objectiveKey: "reasoning_quality", isActive: false }),
+        expect.objectContaining({ objectiveKey: "reasoning_quality", versionNumber: 2, isActive: true })
+      ])
+    );
+
+    await server.close();
+  });
+
+  it("validates objective rubrics, service-owned metadata, and tenant access", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false, studyShellStore: store });
+    const missingObjective = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: []
+      }
+    });
+    const invalidExample = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            title: "Reasoning",
+            description: "Valid description.",
+            gradeLabels: ["1", "2"],
+            gradeExamples: [{ gradeLabel: "3", exampleText: "Not in the scale." }],
+            evidenceRequirements: "Valid requirement."
+          }
+        ]
+      }
+    });
+    const metadataAttempt = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            id: "objective_version_client",
+            title: "Reasoning",
+            description: "Valid description.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Valid requirement."
+          }
+        ]
+      }
+    });
+    const crossTenant = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            title: "Reasoning",
+            description: "Valid description.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Valid requirement."
+          }
+        ]
+      }
+    });
+
+    expect(missingObjective.statusCode).toBe(400);
+    expect(missingObjective.json()).toEqual({
+      error: "Bad Request",
+      message: "Add at least one scoring objective."
+    });
+    expect(invalidExample.statusCode).toBe(400);
+    expect(invalidExample.json()).toEqual({
+      error: "Bad Request",
+      message: "Objective 1 grade examples must use configured labels."
+    });
+    expect(metadataAttempt.statusCode).toBe(400);
+    expect(metadataAttempt.json()).toEqual({
+      error: "Bad Request",
+      message: "Objective version metadata is assigned by the service."
     });
     expect(crossTenant.statusCode).toBe(403);
 

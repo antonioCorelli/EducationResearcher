@@ -159,6 +159,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       customScoringPrompt: "Prioritize evidence of explanation and examples.",
       gradeScale: ["1", "2", "3", "4"],
       evidenceRequirements: "Cite at least one survey response or interview turn.",
+      sortOrder: 1,
       isActive: true,
       createdAt
     }

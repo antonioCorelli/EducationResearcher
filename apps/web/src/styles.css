@@ -21,6 +21,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -99,6 +100,7 @@ label {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   border: 1px solid #bdc9c2;
@@ -321,7 +323,8 @@ h3 {
 }
 
 .consent-form,
-.survey-form {
+.survey-form,
+.objectives-form {
   border-top: 1px solid #e3e9e5;
   padding-top: 18px;
 }
@@ -412,7 +415,12 @@ button.version-chip:hover {
 
 .survey-item-list,
 .survey-item-editor,
-.survey-group-editor {
+.survey-group-editor,
+.objective-list,
+.objective-editor,
+.rubric-panel,
+.grade-label-list,
+.grade-example-list {
   display: grid;
   gap: 12px;
 }
@@ -454,6 +462,45 @@ button.version-chip:hover {
 
 .survey-group-editor {
   background: #fbfcfa;
+}
+
+.objective-editor {
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.rubric-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.rubric-panel {
+  border: 1px solid #e3e9e5;
+  border-radius: 6px;
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.grade-label-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.grade-example-row {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.24fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.grade-example-row textarea {
+  min-height: 72px;
 }
 
 .dialog-backdrop {
@@ -512,7 +559,10 @@ button.version-chip:hover {
   .topline,
   .study-workspace,
   .settings-grid,
-  .question-row {
+  .question-row,
+  .rubric-grid,
+  .grade-label-row,
+  .grade-example-row {
     grid-template-columns: 1fr;
   }
 
