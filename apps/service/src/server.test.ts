@@ -1593,6 +1593,89 @@ describe("researcher objective routes", () => {
     await server.close();
   });
 
+  it("creates a new version only for the changed objective", async () => {
+    const firstObjective: ObjectiveVersion = {
+      id: "objective_version_001",
+      studyId: "study_fixture_001",
+      objectiveKey: "reasoning_quality",
+      versionNumber: 1,
+      title: "Reasoning Quality",
+      description: "Original reasoning description.",
+      gradeScale: ["1", "2"],
+      gradeExamples: [],
+      evidenceRequirements: "Reasoning evidence.",
+      sortOrder: 1,
+      isActive: true,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    };
+    const secondObjective: ObjectiveVersion = {
+      id: "objective_version_002",
+      studyId: "study_fixture_001",
+      objectiveKey: "evidence_quality",
+      versionNumber: 1,
+      title: "Evidence Quality",
+      description: "Original evidence description.",
+      gradeScale: ["1", "2"],
+      gradeExamples: [],
+      evidenceRequirements: "Evidence evidence.",
+      sortOrder: 2,
+      isActive: true,
+      createdAt: "2026-05-06T12:01:00.000Z"
+    };
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore([firstObjective, secondObjective]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            objectiveKey: "reasoning_quality",
+            title: "Reasoning Quality",
+            description: "Original reasoning description.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Reasoning evidence."
+          },
+          {
+            objectiveKey: "evidence_quality",
+            title: "Evidence Quality",
+            description: "Updated evidence description.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Evidence evidence."
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().objectiveVersions).toEqual([
+      expect.objectContaining({ id: "objective_version_001", objectiveKey: "reasoning_quality", versionNumber: 1 }),
+      expect.objectContaining({ objectiveKey: "evidence_quality", versionNumber: 2 })
+    ]);
+
+    const versions = await objectiveStore.listByStudy("study_fixture_001");
+    expect(versions.filter((version) => version.objectiveKey === "reasoning_quality")).toEqual([
+      expect.objectContaining({ id: "objective_version_001", versionNumber: 1, isActive: true })
+    ]);
+    expect(versions.filter((version) => version.objectiveKey === "evidence_quality")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "objective_version_002", versionNumber: 1, isActive: false }),
+        expect.objectContaining({ objectiveKey: "evidence_quality", versionNumber: 2, isActive: true })
+      ])
+    );
+
+    await server.close();
+  });
+
   it("creates two objective versions, restores the first, and preserves its rubric integrity", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
     const objectiveStore = new InMemoryObjectiveVersionStore();
@@ -1683,6 +1766,100 @@ describe("researcher objective routes", () => {
         evidenceRequirements: "Original evidence requirement.",
         isActive: true
       })
+    ]);
+
+    await server.close();
+  });
+
+  it("restores only the selected objective version and preserves other objective histories", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore([
+      {
+        id: "objective_version_001",
+        studyId: "study_fixture_001",
+        objectiveKey: "reasoning_quality",
+        versionNumber: 1,
+        title: "Reasoning Quality",
+        description: "Reasoning v1.",
+        gradeScale: ["1", "2"],
+        gradeExamples: [],
+        evidenceRequirements: "Reasoning evidence.",
+        sortOrder: 1,
+        isActive: false,
+        createdAt: "2026-05-06T12:00:00.000Z"
+      },
+      {
+        id: "objective_version_002",
+        studyId: "study_fixture_001",
+        objectiveKey: "reasoning_quality",
+        versionNumber: 2,
+        title: "Reasoning Quality",
+        description: "Reasoning v2.",
+        gradeScale: ["1", "2"],
+        gradeExamples: [],
+        evidenceRequirements: "Reasoning evidence.",
+        sortOrder: 1,
+        isActive: true,
+        createdAt: "2026-05-06T12:01:00.000Z"
+      },
+      {
+        id: "objective_version_003",
+        studyId: "study_fixture_001",
+        objectiveKey: "evidence_quality",
+        versionNumber: 1,
+        title: "Evidence Quality",
+        description: "Evidence v1.",
+        gradeScale: ["1", "2"],
+        gradeExamples: [],
+        evidenceRequirements: "Evidence evidence.",
+        sortOrder: 2,
+        isActive: false,
+        createdAt: "2026-05-06T12:02:00.000Z"
+      },
+      {
+        id: "objective_version_004",
+        studyId: "study_fixture_001",
+        objectiveKey: "evidence_quality",
+        versionNumber: 2,
+        title: "Evidence Quality",
+        description: "Evidence v2.",
+        gradeScale: ["1", "2"],
+        gradeExamples: [],
+        evidenceRequirements: "Evidence evidence.",
+        sortOrder: 2,
+        isActive: true,
+        createdAt: "2026-05-06T12:03:00.000Z"
+      }
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const restoreResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/objectives/restore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectiveKey: "evidence_quality",
+        versionNumber: 1
+      }
+    });
+
+    expect(restoreResponse.statusCode).toBe(200);
+
+    const versions = await objectiveStore.listByStudy("study_fixture_001");
+    expect(versions.filter((version) => version.objectiveKey === "reasoning_quality")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "objective_version_001", versionNumber: 1, isActive: false }),
+        expect.objectContaining({ id: "objective_version_002", versionNumber: 2, isActive: true })
+      ])
+    );
+    expect(versions.filter((version) => version.objectiveKey === "evidence_quality")).toEqual([
+      expect.objectContaining({ id: "objective_version_003", versionNumber: 1, isActive: true })
     ]);
 
     await server.close();

@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { getDuplicateGradeLabelError, type ObjectiveDraft } from "./objectiveDrafts";
+import {
+  buildScopedObjectiveDraftsForSave,
+  createObjectiveDraftFromVersion,
+  getDuplicateGradeLabelError,
+  replaceObjectiveDraft,
+  type ObjectiveDraft
+} from "./objectiveDrafts";
 
 const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://localhost:4000";
 const accessTokenStorageKey = "educationResearcher.accessToken";
@@ -173,7 +179,7 @@ interface VersionChangeSummary {
 type PendingVersionConfirmation =
   | { readonly kind: "consent"; readonly changes: readonly VersionChangeSummary[] }
   | { readonly kind: "survey"; readonly changes: readonly VersionChangeSummary[] }
-  | { readonly kind: "objectives"; readonly changes: readonly VersionChangeSummary[] };
+  | { readonly kind: "objectives"; readonly objectiveIndex: number; readonly changes: readonly VersionChangeSummary[] };
 
 function getCurrentPath() {
   return window.location.pathname;
@@ -529,7 +535,8 @@ export function App() {
   ]);
   const [objectiveError, setObjectiveError] = useState("");
   const [isSavingObjectives, setIsSavingObjectives] = useState(false);
-  const [selectedObjectiveVersionId, setSelectedObjectiveVersionId] = useState<string | null>(null);
+  const [selectedObjectiveVersionIds, setSelectedObjectiveVersionIds] = useState<Record<string, string>>({});
+  const [restoreObjectiveVersionId, setRestoreObjectiveVersionId] = useState<string | null>(null);
   const [isRestoreObjectiveDialogOpen, setIsRestoreObjectiveDialogOpen] = useState(false);
   const [pendingVersionConfirmation, setPendingVersionConfirmation] = useState<PendingVersionConfirmation | null>(null);
 
@@ -702,7 +709,8 @@ export function App() {
     setObjectiveState({ status: "idle" });
     setObjectiveDrafts([createEmptyObjectiveDraft()]);
     setObjectiveError("");
-    setSelectedObjectiveVersionId(null);
+    setSelectedObjectiveVersionIds({});
+    setRestoreObjectiveVersionId(null);
     setIsRestoreObjectiveDialogOpen(false);
   }
 
@@ -769,22 +777,12 @@ export function App() {
       objectiveVersions.length > 0
         ? [...objectiveVersions]
             .sort((left, right) => left.sortOrder - right.sortOrder)
-            .map((objective): ObjectiveDraft => ({
-              objectiveKey: objective.objectiveKey,
-              title: objective.title,
-              description: objective.description,
-              customScoringPrompt: objective.customScoringPrompt ?? "",
-              gradeLabels: objective.gradeScale,
-              gradeExamples: objective.gradeExamples.map((example) => ({
-                gradeLabel: example.gradeLabel,
-                exampleText: example.exampleText
-              })),
-              evidenceRequirements: objective.evidenceRequirements
-            }))
+            .map(createObjectiveDraftFromVersion)
         : [createEmptyObjectiveDraft()]
     );
     setObjectiveError("");
-    setSelectedObjectiveVersionId(null);
+    setSelectedObjectiveVersionIds({});
+    setRestoreObjectiveVersionId(null);
     setIsRestoreObjectiveDialogOpen(false);
   }
 
@@ -1204,34 +1202,47 @@ export function App() {
     );
   }
 
-  async function saveObjectiveVersions(skipConfirmation = false) {
+  async function saveObjectiveVersion(objectiveIndex: number, skipConfirmation = false) {
     setObjectiveError("");
 
+    const objective = objectiveDrafts[objectiveIndex];
+    const objectiveKey = objective?.objectiveKey;
     const selectedObjectiveVersion =
-      objectiveState.status === "ready"
-        ? objectiveState.objectiveVersions.find((version) => version.id === selectedObjectiveVersionId)
+      objectiveState.status === "ready" && objectiveKey
+        ? objectiveState.objectiveVersions.find(
+            (version) => version.id === selectedObjectiveVersionIds[objectiveKey]
+          )
         : undefined;
 
     if (selectedObjectiveVersion && !selectedObjectiveVersion.isActive) {
+      setRestoreObjectiveVersionId(selectedObjectiveVersion.id);
       setIsRestoreObjectiveDialogOpen(true);
       return;
     }
 
-    if (duplicateGradeLabelError) {
-      setObjectiveError(duplicateGradeLabelError);
+    if (!objective) {
+      setObjectiveError("Select an objective before saving.");
+      return;
+    }
+
+    const objectiveGradeLabelError = getDuplicateGradeLabelError([objective]);
+
+    if (objectiveGradeLabelError) {
+      setObjectiveError(objectiveGradeLabelError);
       return;
     }
 
     const activeObjectiveVersions = objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [];
-    const changes = getObjectiveChanges(activeObjectiveVersions, objectiveDrafts);
+    const scopedObjectiveDrafts = buildScopedObjectiveDraftsForSave(objectiveDrafts, activeObjectiveVersions, objectiveIndex);
+    const changes = getObjectiveChanges(activeObjectiveVersions, scopedObjectiveDrafts);
 
     if (activeObjectiveVersions.length > 0 && changes.length === 0) {
-      setObjectiveError("No objective changes to save. The active versions already match this draft.");
+      setObjectiveError("No objective changes to save. The active version already matches this draft.");
       return;
     }
 
     if (activeObjectiveVersions.length > 0 && !skipConfirmation) {
-      setPendingVersionConfirmation({ kind: "objectives", changes });
+      setPendingVersionConfirmation({ kind: "objectives", objectiveIndex, changes });
       return;
     }
 
@@ -1245,7 +1256,7 @@ export function App() {
     setIsSavingObjectives(true);
 
     try {
-      const objectives = createObjectiveSnapshot(objectiveDrafts);
+      const objectives = createObjectiveSnapshot(scopedObjectiveDrafts);
       const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/objectives`, {
         method: "PUT",
         headers: {
@@ -1274,7 +1285,6 @@ export function App() {
 
   async function handleSaveObjectives(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await saveObjectiveVersions();
   }
 
   function handleSelectConsentVersion(consentVersion: ConsentVersion) {
@@ -1290,14 +1300,22 @@ export function App() {
     loadSurveyForm(surveyVersion);
   }
 
-  function handleSelectObjectiveVersion(objectiveVersion: ObjectiveVersion) {
+  function handleSelectObjectiveVersion(objectiveIndex: number, objectiveVersion: ObjectiveVersion) {
     if (objectiveVersion.isActive) {
-      loadObjectiveForm(objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [objectiveVersion]);
+      setSelectedObjectiveVersionIds((selectedIds) => {
+        const nextSelectedIds = { ...selectedIds };
+        delete nextSelectedIds[objectiveVersion.objectiveKey];
+        return nextSelectedIds;
+      });
+      setObjectiveDrafts((drafts) => replaceObjectiveDraft(drafts, objectiveIndex, objectiveVersion));
       return;
     }
 
-    setSelectedObjectiveVersionId(objectiveVersion.id);
-    loadObjectiveForm([objectiveVersion]);
+    setSelectedObjectiveVersionIds((selectedIds) => ({
+      ...selectedIds,
+      [objectiveVersion.objectiveKey]: objectiveVersion.id
+    }));
+    setObjectiveDrafts((drafts) => replaceObjectiveDraft(drafts, objectiveIndex, objectiveVersion));
   }
 
   async function handleConfirmRestoreConsent() {
@@ -1390,7 +1408,7 @@ export function App() {
     const token = localStorage.getItem(accessTokenStorageKey);
     const selectedObjectiveVersion =
       objectiveState.status === "ready"
-        ? objectiveState.objectiveVersions.find((version) => version.id === selectedObjectiveVersionId)
+        ? objectiveState.objectiveVersions.find((version) => version.id === restoreObjectiveVersionId)
         : undefined;
 
     if (!token || !selectedStudyId || !selectedObjectiveVersion) {
@@ -1426,6 +1444,7 @@ export function App() {
       setObjectiveError(error instanceof Error ? error.message : "Unable to restore objective.");
     } finally {
       setIsSavingObjectives(false);
+      setRestoreObjectiveVersionId(null);
       setIsRestoreObjectiveDialogOpen(false);
     }
   }
@@ -1448,7 +1467,7 @@ export function App() {
       return;
     }
 
-    await saveObjectiveVersions(true);
+    await saveObjectiveVersion(pending.objectiveIndex, true);
   }
 
   if (isParticipantRoute) {
@@ -1494,9 +1513,13 @@ export function App() {
     const activeObjectiveVersions = objectiveState.status === "ready" ? objectiveState.activeObjectiveVersions : [];
     const selectedObjectiveVersion =
       objectiveState.status === "ready"
-        ? objectiveState.objectiveVersions.find((version) => version.id === selectedObjectiveVersionId)
+        ? objectiveState.objectiveVersions.find((version) => version.id === restoreObjectiveVersionId)
         : undefined;
-    const isPreviewingPreviousObjective = Boolean(selectedObjectiveVersion && !selectedObjectiveVersion.isActive);
+    const isPreviewingPreviousObjective = Object.values(selectedObjectiveVersionIds).some((versionId) =>
+      objectiveState.status === "ready"
+        ? objectiveState.objectiveVersions.some((version) => version.id === versionId && !version.isActive)
+        : false
+    );
 
     return (
       <main className="app-shell researcher-shell">
@@ -1918,241 +1941,260 @@ export function App() {
               >
                 <div className="section-heading">
                   <h2>Scoring objectives</h2>
-                  {selectedObjectiveVersion ? (
-                    <span className={isPreviewingPreviousObjective ? "version-pill preview-version-pill" : "version-pill"}>
-                      {selectedObjectiveVersion.title} v{selectedObjectiveVersion.versionNumber}
-                    </span>
-                  ) : activeObjectiveVersions.length > 0 ? (
+                  {activeObjectiveVersions.length > 0 ? (
                     <span className="version-pill">{activeObjectiveVersions.length} active</span>
                   ) : null}
                 </div>
                 <div className="objective-list">
-                  {objectiveDrafts.map((objective, objectiveIndex) => (
-                    <div className="objective-editor" key={`objective-${objective.objectiveKey ?? objectiveIndex}`}>
-                      <div className="survey-item-toolbar">
-                        <h3>Objective {objectiveIndex + 1}</h3>
-                        <div className="survey-item-actions">
+                  {objectiveDrafts.map((objective, objectiveIndex) => {
+                    const objectiveKey = objective.objectiveKey;
+                    const objectiveVersions =
+                      objectiveState.status === "ready" && objectiveKey
+                        ? objectiveState.objectiveVersions.filter((version) => version.objectiveKey === objectiveKey)
+                        : [];
+                    const selectedObjectiveCardVersion =
+                      objectiveKey && objectiveState.status === "ready"
+                        ? objectiveState.objectiveVersions.find(
+                            (version) => version.id === selectedObjectiveVersionIds[objectiveKey]
+                          )
+                        : undefined;
+                    const isPreviewingObjectiveVersion = Boolean(
+                      selectedObjectiveCardVersion && !selectedObjectiveCardVersion.isActive
+                    );
+
+                    return (
+                      <div className="objective-editor" key={`objective-${objective.objectiveKey ?? objectiveIndex}`}>
+                        <div className="survey-item-toolbar">
+                          <h3>Objective {objectiveIndex + 1}</h3>
+                          <div className="survey-item-actions">
+                            <button
+                              aria-label={`Move objective ${objectiveIndex + 1} up`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || isPreviewingObjectiveVersion || objectiveIndex === 0}
+                              onClick={() => moveObjective(objectiveIndex, -1)}
+                              type="button"
+                            >
+                              Up
+                            </button>
+                            <button
+                              aria-label={`Move objective ${objectiveIndex + 1} down`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || isPreviewingObjectiveVersion || objectiveIndex === objectiveDrafts.length - 1}
+                              onClick={() => moveObjective(objectiveIndex, 1)}
+                              type="button"
+                            >
+                              Down
+                            </button>
+                            <button
+                              aria-label={`Remove objective ${objectiveIndex + 1}`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || isPreviewingObjectiveVersion || objectiveDrafts.length === 1}
+                              onClick={() => removeObjective(objectiveIndex)}
+                              type="button"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                        <label>
+                          Title
+                          <input
+                            disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                            maxLength={160}
+                            onChange={(event) => updateObjective(objectiveIndex, { title: event.target.value })}
+                            placeholder={selectedStudy ? "Reasoning quality" : "Create or select a study first"}
+                            type="text"
+                            value={objective.title}
+                          />
+                        </label>
+                        <label>
+                          Description
+                          <textarea
+                            disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                            maxLength={2000}
+                            onChange={(event) => updateObjective(objectiveIndex, { description: event.target.value })}
+                            placeholder="What this objective should measure"
+                            value={objective.description}
+                          />
+                        </label>
+                        <label>
+                          Evidence requirements
+                          <textarea
+                            disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                            maxLength={2000}
+                            onChange={(event) => updateObjective(objectiveIndex, { evidenceRequirements: event.target.value })}
+                            placeholder="What evidence should support the score"
+                            value={objective.evidenceRequirements}
+                          />
+                        </label>
+                        <label>
+                          Custom scoring prompt
+                          <textarea
+                            disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                            maxLength={4000}
+                            onChange={(event) => updateObjective(objectiveIndex, { customScoringPrompt: event.target.value })}
+                            placeholder="Optional objective-specific scoring guidance"
+                            value={objective.customScoringPrompt}
+                          />
+                        </label>
+                        <div className="rubric-grid">
+                          <div className="rubric-panel">
+                            <div className="section-heading">
+                              <h3>Grade labels</h3>
+                              <button
+                                className="secondary-button compact-button"
+                                disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                                onClick={() => addObjectiveGradeLabel(objectiveIndex)}
+                                type="button"
+                              >
+                                Add label
+                              </button>
+                            </div>
+                            <div className="grade-label-list">
+                              {objective.gradeLabels.length <= 2 ? (
+                                <p className="rubric-help" id={`objective-${objectiveIndex}-minimum-grade-help`}>
+                                  You must have at least two grades.
+                                </p>
+                              ) : null}
+                              {objective.gradeLabels.map((gradeLabel, gradeIndex) => (
+                                <div className="grade-label-row" key={`objective-${objectiveIndex}-grade-${gradeIndex}`}>
+                                  <input
+                                    aria-label={`Objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
+                                    disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                                    maxLength={40}
+                                    onChange={(event) =>
+                                      updateObjectiveGradeLabel(objectiveIndex, gradeIndex, event.target.value)
+                                    }
+                                    type="text"
+                                    value={gradeLabel}
+                                  />
+                                  <button
+                                    aria-describedby={
+                                      objective.gradeLabels.length <= 2
+                                        ? `objective-${objectiveIndex}-minimum-grade-help`
+                                        : undefined
+                                    }
+                                    aria-label={`Remove objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
+                                    className="secondary-button compact-button"
+                                    disabled={!selectedStudy || isPreviewingObjectiveVersion || objective.gradeLabels.length <= 2}
+                                    onClick={() => removeObjectiveGradeLabel(objectiveIndex, gradeIndex)}
+                                    type="button"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="rubric-panel">
+                            <div className="section-heading">
+                              <h3>Grade examples</h3>
+                              <button
+                                className="secondary-button compact-button"
+                                disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                                onClick={() => addObjectiveGradeExample(objectiveIndex)}
+                                type="button"
+                              >
+                                Add example
+                              </button>
+                            </div>
+                            <div className="grade-example-list">
+                              {objective.gradeExamples.length === 0 ? <p className="muted-copy">No examples yet</p> : null}
+                              {objective.gradeExamples.map((example, exampleIndex) => (
+                                <div className="grade-example-row" key={`objective-${objectiveIndex}-example-${exampleIndex}`}>
+                                  <select
+                                    aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} grade label`}
+                                    disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                                    onChange={(event) =>
+                                      updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
+                                        gradeLabel: event.target.value
+                                      })
+                                    }
+                                    value={example.gradeLabel}
+                                  >
+                                    {objective.gradeLabels.filter(Boolean).map((gradeLabel) => (
+                                      <option key={gradeLabel} value={gradeLabel}>
+                                        {gradeLabel}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <textarea
+                                    aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} text`}
+                                    disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                                    maxLength={2000}
+                                    onChange={(event) =>
+                                      updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
+                                        exampleText: event.target.value
+                                      })
+                                    }
+                                    placeholder="Example evidence or response for this label"
+                                    value={example.exampleText}
+                                  />
+                                  <button
+                                    aria-label={`Remove objective ${objectiveIndex + 1} example ${exampleIndex + 1}`}
+                                    className="secondary-button compact-button"
+                                    disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                                    onClick={() => removeObjectiveGradeExample(objectiveIndex, exampleIndex)}
+                                    type="button"
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="objective-version-controls">
+                          {objectiveVersions.length > 0 ? (
+                            <div className="version-history" aria-label={`Objective ${objectiveIndex + 1} versions`}>
+                              {objectiveVersions.map((version) => (
+                                <button
+                                  aria-label={`${version.title} version ${version.versionNumber}`}
+                                  className={[
+                                    "version-chip",
+                                    version.isActive ? "active-version-chip" : "",
+                                    version.id === selectedObjectiveVersionIds[version.objectiveKey] ? "selected-version-chip" : ""
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ")}
+                                  key={version.id}
+                                  onClick={() => handleSelectObjectiveVersion(objectiveIndex, version)}
+                                  type="button"
+                                >
+                                  v{version.versionNumber}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                           <button
-                            aria-label={`Move objective ${objectiveIndex + 1} up`}
-                            className="secondary-button compact-button"
-                            disabled={!selectedStudy || isPreviewingPreviousObjective || objectiveIndex === 0}
-                            onClick={() => moveObjective(objectiveIndex, -1)}
+                            className={isPreviewingObjectiveVersion ? "danger-button compact-button" : "primary-button compact-button"}
+                            disabled={!selectedStudy || isSavingObjectives}
+                            onClick={() => saveObjectiveVersion(objectiveIndex)}
                             type="button"
                           >
-                            Up
-                          </button>
-                          <button
-                            aria-label={`Move objective ${objectiveIndex + 1} down`}
-                            className="secondary-button compact-button"
-                            disabled={!selectedStudy || isPreviewingPreviousObjective || objectiveIndex === objectiveDrafts.length - 1}
-                            onClick={() => moveObjective(objectiveIndex, 1)}
-                            type="button"
-                          >
-                            Down
-                          </button>
-                          <button
-                            aria-label={`Remove objective ${objectiveIndex + 1}`}
-                            className="secondary-button compact-button"
-                            disabled={!selectedStudy || isPreviewingPreviousObjective || objectiveDrafts.length === 1}
-                            onClick={() => removeObjective(objectiveIndex)}
-                            type="button"
-                          >
-                            Remove
+                            {isSavingObjectives
+                              ? isPreviewingObjectiveVersion
+                                ? "Restoring version"
+                                : "Saving objective"
+                              : isPreviewingObjectiveVersion
+                                ? "Restore version"
+                              : objectiveState.status === "ready" && objectiveState.activeObjectiveVersions.length > 0
+                                ? "Create new version"
+                                : "Save objective"}
                           </button>
                         </div>
                       </div>
-                      <label>
-                        Title
-                        <input
-                          disabled={!selectedStudy || isPreviewingPreviousObjective}
-                          maxLength={160}
-                          onChange={(event) => updateObjective(objectiveIndex, { title: event.target.value })}
-                          placeholder={selectedStudy ? "Reasoning quality" : "Create or select a study first"}
-                          type="text"
-                          value={objective.title}
-                        />
-                      </label>
-                      <label>
-                        Description
-                        <textarea
-                          disabled={!selectedStudy || isPreviewingPreviousObjective}
-                          maxLength={2000}
-                          onChange={(event) => updateObjective(objectiveIndex, { description: event.target.value })}
-                          placeholder="What this objective should measure"
-                          value={objective.description}
-                        />
-                      </label>
-                      <label>
-                        Evidence requirements
-                        <textarea
-                          disabled={!selectedStudy || isPreviewingPreviousObjective}
-                          maxLength={2000}
-                          onChange={(event) => updateObjective(objectiveIndex, { evidenceRequirements: event.target.value })}
-                          placeholder="What evidence should support the score"
-                          value={objective.evidenceRequirements}
-                        />
-                      </label>
-                      <label>
-                        Custom scoring prompt
-                        <textarea
-                          disabled={!selectedStudy || isPreviewingPreviousObjective}
-                          maxLength={4000}
-                          onChange={(event) => updateObjective(objectiveIndex, { customScoringPrompt: event.target.value })}
-                          placeholder="Optional objective-specific scoring guidance"
-                          value={objective.customScoringPrompt}
-                        />
-                      </label>
-                      <div className="rubric-grid">
-                        <div className="rubric-panel">
-                          <div className="section-heading">
-                            <h3>Grade labels</h3>
-                            <button
-                              className="secondary-button compact-button"
-                              disabled={!selectedStudy || isPreviewingPreviousObjective}
-                              onClick={() => addObjectiveGradeLabel(objectiveIndex)}
-                              type="button"
-                            >
-                              Add label
-                            </button>
-                          </div>
-                          <div className="grade-label-list">
-                            {objective.gradeLabels.length <= 2 ? (
-                              <p className="rubric-help" id={`objective-${objectiveIndex}-minimum-grade-help`}>
-                                You must have at least two grades.
-                              </p>
-                            ) : null}
-                            {objective.gradeLabels.map((gradeLabel, gradeIndex) => (
-                              <div className="grade-label-row" key={`objective-${objectiveIndex}-grade-${gradeIndex}`}>
-                                <input
-                                  aria-label={`Objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
-                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
-                                  maxLength={40}
-                                  onChange={(event) =>
-                                    updateObjectiveGradeLabel(objectiveIndex, gradeIndex, event.target.value)
-                                  }
-                                  type="text"
-                                  value={gradeLabel}
-                                />
-                                <button
-                                  aria-describedby={
-                                    objective.gradeLabels.length <= 2
-                                      ? `objective-${objectiveIndex}-minimum-grade-help`
-                                      : undefined
-                                  }
-                                  aria-label={`Remove objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
-                                  className="secondary-button compact-button"
-                                  disabled={!selectedStudy || isPreviewingPreviousObjective || objective.gradeLabels.length <= 2}
-                                  onClick={() => removeObjectiveGradeLabel(objectiveIndex, gradeIndex)}
-                                  type="button"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="rubric-panel">
-                          <div className="section-heading">
-                            <h3>Grade examples</h3>
-                            <button
-                              className="secondary-button compact-button"
-                              disabled={!selectedStudy || isPreviewingPreviousObjective}
-                              onClick={() => addObjectiveGradeExample(objectiveIndex)}
-                              type="button"
-                            >
-                              Add example
-                            </button>
-                          </div>
-                          <div className="grade-example-list">
-                            {objective.gradeExamples.length === 0 ? <p className="muted-copy">No examples yet</p> : null}
-                            {objective.gradeExamples.map((example, exampleIndex) => (
-                              <div className="grade-example-row" key={`objective-${objectiveIndex}-example-${exampleIndex}`}>
-                                <select
-                                  aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} grade label`}
-                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
-                                  onChange={(event) =>
-                                    updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
-                                      gradeLabel: event.target.value
-                                    })
-                                  }
-                                  value={example.gradeLabel}
-                                >
-                                  {objective.gradeLabels.filter(Boolean).map((gradeLabel) => (
-                                    <option key={gradeLabel} value={gradeLabel}>
-                                      {gradeLabel}
-                                    </option>
-                                  ))}
-                                </select>
-                                <textarea
-                                  aria-label={`Objective ${objectiveIndex + 1} example ${exampleIndex + 1} text`}
-                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
-                                  maxLength={2000}
-                                  onChange={(event) =>
-                                    updateObjectiveGradeExample(objectiveIndex, exampleIndex, {
-                                      exampleText: event.target.value
-                                    })
-                                  }
-                                  placeholder="Example evidence or response for this label"
-                                  value={example.exampleText}
-                                />
-                                <button
-                                  aria-label={`Remove objective ${objectiveIndex + 1} example ${exampleIndex + 1}`}
-                                  className="secondary-button compact-button"
-                                  disabled={!selectedStudy || isPreviewingPreviousObjective}
-                                  onClick={() => removeObjectiveGradeExample(objectiveIndex, exampleIndex)}
-                                  type="button"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="survey-add-row">
-                  <button className="secondary-button compact-button" disabled={!selectedStudy || isPreviewingPreviousObjective} onClick={addObjective} type="button">
-                    Add objective
-                  </button>
+                    );
+                  })}
                 </div>
                 {objectiveState.status === "loading" ? <p className="muted-copy">Loading objectives</p> : null}
                 {objectiveState.status === "error" ? <p className="form-error">{objectiveState.message}</p> : null}
-                {objectiveState.status === "ready" && objectiveState.objectiveVersions.length > 0 ? (
-                  <div className="version-history" aria-label="Objective versions">
-                    {objectiveState.objectiveVersions.map((version) => (
-                      <button
-                        className={[
-                          "version-chip",
-                          version.isActive ? "active-version-chip" : "",
-                          version.id === selectedObjectiveVersionId ? "selected-version-chip" : ""
-                        ]
-                          .filter(Boolean)
-                          .join(" ")}
-                        key={version.id}
-                        onClick={() => handleSelectObjectiveVersion(version)}
-                        type="button"
-                      >
-                        {version.title} v{version.versionNumber}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
                 {duplicateGradeLabelError || objectiveError ? (
                   <p className="form-error">{duplicateGradeLabelError || objectiveError}</p>
                 ) : null}
-                <div className="form-actions">
-                  <button className={isPreviewingPreviousObjective ? "danger-button" : "primary-button"} disabled={!selectedStudy || isSavingObjectives} type="submit">
-                    {isSavingObjectives
-                      ? isPreviewingPreviousObjective
-                        ? "Restoring version"
-                        : "Saving objectives"
-                      : isPreviewingPreviousObjective
-                        ? "Restore selected version"
-                      : objectiveState.status === "ready" && objectiveState.activeObjectiveVersions.length > 0
-                        ? "Create new versions"
-                        : "Save objectives"}
+                <div className="survey-add-row">
+                  <button className="secondary-button compact-button" disabled={!selectedStudy || isPreviewingPreviousObjective} onClick={addObjective} type="button">
+                    Add objective
                   </button>
                 </div>
               </form>
@@ -2162,7 +2204,9 @@ export function App() {
         {pendingVersionConfirmation ? (
           <div className="dialog-backdrop" role="presentation">
             <div aria-labelledby="create-version-title" aria-modal="true" className="confirm-dialog version-diff-dialog" role="dialog">
-              <h2 id="create-version-title">Create new {pendingVersionConfirmation.kind} version?</h2>
+              <h2 id="create-version-title">
+                Create new {pendingVersionConfirmation.kind === "objectives" ? "objective" : pendingVersionConfirmation.kind} version?
+              </h2>
               <p>Review the changes that will be captured in the next active version.</p>
               <dl className="version-diff-list">
                 {pendingVersionConfirmation.changes.map((change) => (
@@ -2248,7 +2292,15 @@ export function App() {
                 <button className="danger-button" disabled={isSavingObjectives} onClick={handleConfirmRestoreObjective} type="button">
                   Restore Version
                 </button>
-                <button className="secondary-button" disabled={isSavingObjectives} onClick={() => setIsRestoreObjectiveDialogOpen(false)} type="button">
+                <button
+                  className="secondary-button"
+                  disabled={isSavingObjectives}
+                  onClick={() => {
+                    setRestoreObjectiveVersionId(null);
+                    setIsRestoreObjectiveDialogOpen(false);
+                  }}
+                  type="button"
+                >
                   Cancel
                 </button>
               </div>

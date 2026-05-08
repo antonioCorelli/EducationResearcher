@@ -509,6 +509,16 @@ button.version-chip:hover {
   padding: 14px;
 }
 
+.objective-version-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #e3e9e5;
+  padding-top: 12px;
+}
+
 .rubric-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.42fr) minmax(0, 1fr);

@@ -175,6 +175,12 @@ export class ObjectiveService {
 
       seenKeys.add(objectiveKey);
 
+      const activeVersion = activeVersions.find((version) => version.objectiveKey === objectiveKey);
+
+      if (activeVersion && objectiveInputMatchesVersion(objective, activeVersion, objectiveIndex + 1)) {
+        return activeVersion;
+      }
+
       const priorVersions = existingVersions.filter((version) => version.objectiveKey === objectiveKey);
       const versionNumber = priorVersions.reduce((highest, version) => Math.max(highest, version.versionNumber), 0) + 1;
       const objectiveVersionId = this.createObjectiveVersionId();
@@ -242,12 +248,15 @@ export class InMemoryObjectiveVersionStore implements ObjectiveVersionStore {
 
   async saveActiveVersions(versions: readonly ObjectiveVersion[], previousActiveVersions: readonly ObjectiveVersion[]) {
     const nextActiveKeys = new Set(versions.map((version) => version.objectiveKey));
+    const nextActiveVersionIds = new Set(versions.map((version) => version.id));
 
     for (const previousVersion of previousActiveVersions) {
-      this.versions.set(previousVersion.id, {
-        ...previousVersion,
-        isActive: false
-      });
+      if (!nextActiveVersionIds.has(previousVersion.id)) {
+        this.versions.set(previousVersion.id, {
+          ...previousVersion,
+          isActive: false
+        });
+      }
     }
 
     for (const version of versions) {
@@ -341,24 +350,33 @@ export class DynamoDbObjectiveVersionStore implements ObjectiveVersionStore {
   }
 
   async saveActiveVersions(versions: readonly ObjectiveVersion[], previousActiveVersions: readonly ObjectiveVersion[]) {
+    const previousActiveVersionIds = new Set(previousActiveVersions.map((version) => version.id));
+    const nextActiveVersionIds = new Set(versions.map((version) => version.id));
+
     for (const previousVersion of previousActiveVersions) {
-      await this.documentClient.send(
-        new UpdateCommand({
-          TableName: this.tableName,
-          Key: {
-            pk: `STUDY#${previousVersion.studyId}`,
-            sk: `OBJECTIVE#${previousVersion.objectiveKey}#VERSION#${previousVersion.versionNumber}`
-          },
-          UpdateExpression: "SET isActive = :inactive REMOVE gsi1pk, gsi1sk",
-          ConditionExpression: "attribute_exists(pk)",
-          ExpressionAttributeValues: {
-            ":inactive": false
-          }
-        })
-      );
+      if (!nextActiveVersionIds.has(previousVersion.id)) {
+        await this.documentClient.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: {
+              pk: `STUDY#${previousVersion.studyId}`,
+              sk: `OBJECTIVE#${previousVersion.objectiveKey}#VERSION#${previousVersion.versionNumber}`
+            },
+            UpdateExpression: "SET isActive = :inactive REMOVE gsi1pk, gsi1sk",
+            ConditionExpression: "attribute_exists(pk)",
+            ExpressionAttributeValues: {
+              ":inactive": false
+            }
+          })
+        );
+      }
     }
 
     for (const version of versions) {
+      if (previousActiveVersionIds.has(version.id)) {
+        continue;
+      }
+
       await this.documentClient.send(
         new PutCommand({
           TableName: this.tableName,
@@ -544,29 +562,33 @@ function objectiveInputsMatchActiveVersions(
   return inputs.every((input, index) => {
     const version = sortedActiveVersions[index];
 
-    return (
-      version &&
-      input.objectiveKey === version.objectiveKey &&
-      input.title === version.title &&
-      input.description === version.description &&
-      (input.customScoringPrompt ?? "") === (version.customScoringPrompt ?? "") &&
-      input.evidenceRequirements === version.evidenceRequirements &&
-      input.gradeScale.length === version.gradeScale.length &&
-      input.gradeScale.every((label, labelIndex) => label === version.gradeScale[labelIndex]) &&
-      input.gradeExamples.length === version.gradeExamples.length &&
-      input.gradeExamples.every((example, exampleIndex) => {
-        const versionExample = [...version.gradeExamples].sort((left, right) => left.sortOrder - right.sortOrder)[
-          exampleIndex
-        ];
-
-        return (
-          versionExample &&
-          example.gradeLabel === versionExample.gradeLabel &&
-          example.exampleText === versionExample.exampleText
-        );
-      })
-    );
+    return Boolean(version && objectiveInputMatchesVersion(input, version, index + 1));
   });
+}
+
+function objectiveInputMatchesVersion(input: ParsedObjectiveInput, version: ObjectiveVersion, sortOrder: number) {
+  return (
+    input.objectiveKey === version.objectiveKey &&
+    input.title === version.title &&
+    input.description === version.description &&
+    (input.customScoringPrompt ?? "") === (version.customScoringPrompt ?? "") &&
+    input.evidenceRequirements === version.evidenceRequirements &&
+    sortOrder === version.sortOrder &&
+    input.gradeScale.length === version.gradeScale.length &&
+    input.gradeScale.every((label, labelIndex) => label === version.gradeScale[labelIndex]) &&
+    input.gradeExamples.length === version.gradeExamples.length &&
+    input.gradeExamples.every((example, exampleIndex) => {
+      const versionExample = [...version.gradeExamples].sort((left, right) => left.sortOrder - right.sortOrder)[
+        exampleIndex
+      ];
+
+      return (
+        versionExample &&
+        example.gradeLabel === versionExample.gradeLabel &&
+        example.exampleText === versionExample.exampleText
+      );
+    })
+  );
 }
 
 function parseObjective(objective: SaveObjectiveInput, index: number): ParsedObjectiveInput {
