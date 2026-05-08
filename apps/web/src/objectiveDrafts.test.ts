@@ -15,7 +15,8 @@ function createDraft(gradeLabels: readonly string[]): ObjectiveDraft {
     customScoringPrompt: "",
     gradeLabels,
     gradeExamples: [],
-    evidenceRequirements: "Use transcript evidence."
+    evidenceRequirements: "Use transcript evidence.",
+    isEnabled: true
   };
 }
 
@@ -46,7 +47,8 @@ describe("objective draft version scoping", () => {
       gradeScale: ["1", "2"],
       gradeExamples: [],
       evidenceRequirements: "First evidence.",
-      sortOrder: 1
+      sortOrder: 1,
+      isEnabled: true
     },
     {
       objectiveKey: "objective_two",
@@ -55,7 +57,8 @@ describe("objective draft version scoping", () => {
       gradeScale: ["1", "2"],
       gradeExamples: [],
       evidenceRequirements: "Second evidence.",
-      sortOrder: 2
+      sortOrder: 2,
+      isEnabled: true
     }
   ];
 
@@ -86,6 +89,39 @@ describe("objective draft version scoping", () => {
       }
     ]);
   });
+
+  it("preserves another objective's disabled draft status when building scoped objective saves", () => {
+    const drafts: readonly ObjectiveDraft[] = [
+      {
+        ...createDraft(["low", "high"]),
+        objectiveKey: "objective_one",
+        title: "Objective One",
+        description: "Unsaved first objective text should not be swept into the second objective save.",
+        isEnabled: false
+      },
+      {
+        ...createDraft(["low", "high"]),
+        objectiveKey: "objective_two",
+        title: "Objective Two",
+        description: "Selected second objective change.",
+        isEnabled: true
+      }
+    ];
+
+    expect(buildScopedObjectiveDraftsForSave(drafts, activeVersions, 1)).toMatchObject([
+      {
+        objectiveKey: "objective_one",
+        description: "Active first objective.",
+        isEnabled: false
+      },
+      {
+        objectiveKey: "objective_two",
+        description: "Selected second objective change.",
+        isEnabled: true
+      }
+    ]);
+  });
+
 
   it("switches a version into only the selected objective draft", () => {
     const drafts: readonly ObjectiveDraft[] = [

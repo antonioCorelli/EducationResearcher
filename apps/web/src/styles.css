@@ -509,6 +509,34 @@ button.version-chip:hover {
   padding: 14px;
 }
 
+.disabled-objective-editor {
+  border-color: #fed7aa;
+  background: #fffaf5;
+}
+
+.objective-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.disabled-objective-pill {
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 3px 8px;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.disabled-objective-copy {
+  margin: 0;
+  color: #7c2d12;
+  font-weight: 700;
+}
+
 .objective-version-controls {
   display: flex;
   flex-wrap: wrap;

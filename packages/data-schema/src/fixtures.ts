@@ -160,6 +160,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       gradeScale: ["1", "2", "3", "4"],
       evidenceRequirements: "Cite at least one survey response or interview turn.",
       sortOrder: 1,
+      isEnabled: true,
       isActive: true,
       createdAt
     }

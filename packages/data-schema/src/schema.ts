@@ -315,9 +315,10 @@ export const DATA_DOMAIN_TABLES = [
           "gradeScale",
           "evidenceRequirements",
           "sortOrder",
+          "isEnabled",
           "isActive"
         ],
-        statusAttributes: ["isActive"],
+        statusAttributes: ["isEnabled", "isActive"],
         timestampAttributes: ["createdAt"],
         immutableAfterReference: true,
         references: [

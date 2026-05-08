@@ -114,6 +114,7 @@ interface ObjectiveVersion {
   readonly gradeExamples: readonly ObjectiveGradeExample[];
   readonly evidenceRequirements: string;
   readonly sortOrder: number;
+  readonly isEnabled?: boolean;
   readonly isActive: boolean;
   readonly createdAt: string;
 }
@@ -155,6 +156,7 @@ type ObjectiveState =
   | {
       readonly status: "ready";
       readonly activeObjectiveVersions: ObjectiveVersion[];
+      readonly enabledObjectiveVersions?: ObjectiveVersion[];
       readonly objectiveVersions: ObjectiveVersion[];
     }
   | { readonly status: "error"; readonly message: string };
@@ -325,7 +327,8 @@ function createObjectiveSnapshot(objectives: readonly ObjectiveDraft[]) {
           exampleText: example.exampleText.trim()
         }))
         .filter((example) => example.gradeLabel || example.exampleText),
-      evidenceRequirements: objective.evidenceRequirements.trim()
+      evidenceRequirements: objective.evidenceRequirements.trim(),
+      isEnabled: objective.isEnabled
     }))
     .filter(
       (objective) =>
@@ -333,7 +336,8 @@ function createObjectiveSnapshot(objectives: readonly ObjectiveDraft[]) {
         objective.description ||
         objective.gradeLabels.length > 0 ||
         objective.gradeExamples.length > 0 ||
-        objective.evidenceRequirements
+        objective.evidenceRequirements ||
+        !objective.isEnabled
     );
 }
 
@@ -354,7 +358,8 @@ function createActiveObjectiveSnapshot(versions: readonly ObjectiveVersion[]) {
           gradeLabel: example.gradeLabel,
           exampleText: example.exampleText
         })),
-      evidenceRequirements: version.evidenceRequirements
+      evidenceRequirements: version.evidenceRequirements,
+      isEnabled: version.isEnabled ?? true
     }));
 }
 
@@ -392,6 +397,7 @@ function getObjectiveChanges(activeVersions: readonly ObjectiveVersion[], drafts
     addTextChange(changes, `${label} custom prompt`, beforeObjective.customScoringPrompt, afterObjective.customScoringPrompt);
     addTextChange(changes, `${label} grade labels`, beforeObjective.gradeLabels.join(", "), afterObjective.gradeLabels.join(", "));
     addTextChange(changes, `${label} evidence requirements`, beforeObjective.evidenceRequirements, afterObjective.evidenceRequirements);
+    addTextChange(changes, `${label} scoring status`, beforeObjective.isEnabled ? "Enabled" : "Disabled", afterObjective.isEnabled ? "Enabled" : "Disabled");
     addTextChange(
       changes,
       `${label} grade examples`,
@@ -410,7 +416,8 @@ function createEmptyObjectiveDraft(): ObjectiveDraft {
     customScoringPrompt: "",
     gradeLabels: ["1", "2", "3", "4"],
     gradeExamples: [],
-    evidenceRequirements: ""
+    evidenceRequirements: "",
+    isEnabled: true
   };
 }
 
@@ -489,6 +496,7 @@ async function fetchObjectives(accessToken: string, studyId: string) {
 
   return (await response.json()) as {
     activeObjectiveVersions: ObjectiveVersion[];
+    enabledObjectiveVersions?: ObjectiveVersion[];
     objectiveVersions: ObjectiveVersion[];
   };
 }
@@ -530,7 +538,8 @@ export function App() {
       customScoringPrompt: "",
       gradeLabels: ["1", "2", "3", "4"],
       gradeExamples: [],
-      evidenceRequirements: ""
+      evidenceRequirements: "",
+      isEnabled: true
     }
   ]);
   const [objectiveError, setObjectiveError] = useState("");
@@ -1951,7 +1960,11 @@ export function App() {
                 <div className="section-heading">
                   <h2>Scoring objectives</h2>
                   {activeObjectiveVersions.length > 0 ? (
-                    <span className="version-pill">{activeObjectiveVersions.length} active</span>
+                    <span className="version-pill">
+                      {(objectiveState.status === "ready" ? objectiveState.enabledObjectiveVersions?.length : undefined) ??
+                        activeObjectiveVersions.filter((version) => version.isEnabled !== false).length}{" "}
+                      enabled
+                    </span>
                   ) : null}
                 </div>
                 <div className="objective-list">
@@ -1972,10 +1985,25 @@ export function App() {
                     );
 
                     return (
-                      <div className="objective-editor" key={`objective-${objective.objectiveKey ?? objectiveIndex}`}>
+                      <div
+                        className={objective.isEnabled ? "objective-editor" : "objective-editor disabled-objective-editor"}
+                        key={`objective-${objective.objectiveKey ?? objectiveIndex}`}
+                      >
                         <div className="survey-item-toolbar">
-                          <h3>Objective {objectiveIndex + 1}</h3>
+                          <div className="objective-title-row">
+                            <h3>Objective {objectiveIndex + 1}</h3>
+                            {objective.isEnabled ? null : <span className="disabled-objective-pill">Disabled for scoring</span>}
+                          </div>
                           <div className="survey-item-actions">
+                            <button
+                              aria-label={`${objective.isEnabled ? "Disable" : "Enable"} objective ${objectiveIndex + 1} during final scoring`}
+                              className="secondary-button compact-button"
+                              disabled={!selectedStudy || isPreviewingObjectiveVersion}
+                              onClick={() => updateObjective(objectiveIndex, { isEnabled: !objective.isEnabled })}
+                              type="button"
+                            >
+                              {objective.isEnabled ? "Disable scoring" : "Enable scoring"}
+                            </button>
                             <button
                               aria-label={`Move objective ${objectiveIndex + 1} up`}
                               className="secondary-button compact-button"
@@ -2005,6 +2033,11 @@ export function App() {
                             </button>
                           </div>
                         </div>
+                        {objective.isEnabled ? null : (
+                          <p className="disabled-objective-copy">
+                            This objective will stay in the researcher setup, but it will be skipped during final scoring.
+                          </p>
+                        )}
                         <label>
                           Title
                           <input

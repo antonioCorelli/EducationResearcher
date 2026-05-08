@@ -9,6 +9,7 @@ export interface ObjectiveDraft {
     readonly exampleText: string;
   }[];
   readonly evidenceRequirements: string;
+  readonly isEnabled: boolean;
 }
 
 export interface ObjectiveVersionDraftSource {
@@ -24,6 +25,7 @@ export interface ObjectiveVersionDraftSource {
   }[];
   readonly evidenceRequirements: string;
   readonly sortOrder: number;
+  readonly isEnabled?: boolean;
 }
 
 export function createObjectiveDraftFromVersion(version: ObjectiveVersionDraftSource): ObjectiveDraft {
@@ -39,7 +41,8 @@ export function createObjectiveDraftFromVersion(version: ObjectiveVersionDraftSo
         gradeLabel: example.gradeLabel,
         exampleText: example.exampleText
       })),
-    evidenceRequirements: version.evidenceRequirements
+    evidenceRequirements: version.evidenceRequirements,
+    isEnabled: version.isEnabled ?? true
   };
 }
 
@@ -59,9 +62,15 @@ export function buildScopedObjectiveDraftsForSave(
   objectiveIndex: number
 ) {
   const targetDraft = drafts[objectiveIndex];
+  const draftEnabledByKey = new Map(
+    drafts.flatMap((draft) => (draft.objectiveKey ? [[draft.objectiveKey, draft.isEnabled] as const] : []))
+  );
   const scopedDrafts = [...activeVersions]
     .sort((left, right) => left.sortOrder - right.sortOrder)
-    .map(createObjectiveDraftFromVersion);
+    .map((version) => ({
+      ...createObjectiveDraftFromVersion(version),
+      isEnabled: draftEnabledByKey.get(version.objectiveKey) ?? version.isEnabled ?? true
+    }));
 
   if (!targetDraft) {
     return scopedDrafts;

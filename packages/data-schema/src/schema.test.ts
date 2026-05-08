@@ -149,6 +149,7 @@ describe("data domain schema", () => {
         "gradeScale",
         "evidenceRequirements",
         "sortOrder",
+        "isEnabled",
         "isActive"
       ])
     );
@@ -159,6 +160,7 @@ describe("data domain schema", () => {
       objectiveKey: "reasoning_quality",
       gradeScale: ["1", "2", "3", "4"],
       sortOrder: 1,
+      isEnabled: true,
       isActive: true
     });
     expect(fixtureGradeExample?.attributes).toMatchObject({

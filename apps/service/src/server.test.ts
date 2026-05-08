@@ -1593,6 +1593,156 @@ describe("researcher objective routes", () => {
     await server.close();
   });
 
+  it("persists disabled objectives while excluding them from scoring-ready objectives", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const createResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            title: "Reasoning Quality",
+            description: "Score this objective.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Reasoning evidence.",
+            isEnabled: true
+          },
+          {
+            title: "Evidence Quality",
+            description: "Keep this rubric, but skip scoring.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Evidence evidence.",
+            isEnabled: false
+          }
+        ]
+      }
+    });
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json().objectiveVersions).toEqual([
+      expect.objectContaining({ title: "Reasoning Quality", isEnabled: true }),
+      expect.objectContaining({ title: "Evidence Quality", isEnabled: false })
+    ]);
+    expect(listResponse.json()).toMatchObject({
+      activeObjectiveVersions: [
+        expect.objectContaining({ title: "Reasoning Quality", isEnabled: true }),
+        expect.objectContaining({ title: "Evidence Quality", isEnabled: false })
+      ],
+      enabledObjectiveVersions: [expect.objectContaining({ title: "Reasoning Quality", isEnabled: true })]
+    });
+
+    await server.close();
+  });
+
+  it("keeps an existing objective disabled when a second objective is created", async () => {
+    const store = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const objectiveStore = new InMemoryObjectiveVersionStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: objectiveStore,
+      studyShellStore: store
+    });
+    const firstResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            title: "Reasoning Quality",
+            description: "Keep this rubric, but skip scoring.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Reasoning evidence.",
+            isEnabled: false
+          }
+        ]
+      }
+    });
+    const disabledObjective = firstResponse.json().objectiveVersions[0] as ObjectiveVersion;
+    const secondResponse = await server.inject({
+      method: "PUT",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        objectives: [
+          {
+            objectiveKey: disabledObjective.objectiveKey,
+            title: "Reasoning Quality",
+            description: "Keep this rubric, but skip scoring.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Reasoning evidence.",
+            isEnabled: false
+          },
+          {
+            title: "Evidence Quality",
+            description: "Score this second objective.",
+            gradeLabels: ["1", "2"],
+            evidenceRequirements: "Evidence evidence."
+          }
+        ]
+      }
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(secondResponse.statusCode).toBe(201);
+    expect(secondResponse.json()).toMatchObject({
+      objectiveVersions: [
+        {
+          id: disabledObjective.id,
+          objectiveKey: disabledObjective.objectiveKey,
+          title: "Reasoning Quality",
+          isEnabled: false,
+          isActive: true
+        },
+        {
+          title: "Evidence Quality",
+          isEnabled: true,
+          isActive: true
+        }
+      ]
+    });
+
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/objectives",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(listResponse.json()).toMatchObject({
+      activeObjectiveVersions: [
+        expect.objectContaining({ title: "Reasoning Quality", isEnabled: false }),
+        expect.objectContaining({ title: "Evidence Quality", isEnabled: true })
+      ],
+      enabledObjectiveVersions: [expect.objectContaining({ title: "Evidence Quality", isEnabled: true })]
+    });
+
+    await server.close();
+  });
+
   it("creates a new version only for the changed objective", async () => {
     const firstObjective: ObjectiveVersion = {
       id: "objective_version_001",
@@ -2348,6 +2498,7 @@ describe("researcher create survey end-to-end workflows", () => {
     });
     expect(savedObjectivesResponse.json()).toEqual({
       activeObjectiveVersions: [],
+      enabledObjectiveVersions: [],
       objectiveVersions: []
     });
     const titleOnlyStoredStudies = await studyStore.listByOwner(researcher.id);

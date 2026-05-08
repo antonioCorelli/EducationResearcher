@@ -22,6 +22,7 @@ export interface ObjectiveVersion {
   readonly gradeExamples: readonly ObjectiveGradeExample[];
   readonly evidenceRequirements: string;
   readonly sortOrder: number;
+  readonly isEnabled?: boolean;
   readonly isActive: boolean;
   readonly createdAt: string;
 }
@@ -39,6 +40,7 @@ export interface SaveObjectiveInput {
   readonly gradeLabels: readonly string[];
   readonly gradeExamples?: readonly SaveObjectiveGradeExampleInput[];
   readonly evidenceRequirements: string;
+  readonly isEnabled?: boolean;
 }
 
 export interface SaveObjectivesInput {
@@ -76,6 +78,7 @@ interface ObjectiveVersionItem {
   readonly gradeScale: readonly string[];
   readonly evidenceRequirements: string;
   readonly sortOrder: number;
+  readonly isEnabled?: boolean;
   readonly isActive: boolean;
   readonly createdAt: string;
 }
@@ -103,6 +106,7 @@ interface ParsedObjectiveInput {
     readonly exampleText: string;
   }[];
   readonly evidenceRequirements: string;
+  readonly isEnabled: boolean;
 }
 
 export class ObjectiveValidationError extends Error {
@@ -145,6 +149,9 @@ export class ObjectiveService {
     return {
       activeObjectiveVersions: versions
         .filter((version) => version.isActive)
+        .sort((left, right) => left.sortOrder - right.sortOrder),
+      enabledObjectiveVersions: versions
+        .filter((version) => version.isActive && version.isEnabled !== false)
         .sort((left, right) => left.sortOrder - right.sortOrder),
       objectiveVersions: versions
     };
@@ -204,6 +211,7 @@ export class ObjectiveService {
         })),
         evidenceRequirements: objective.evidenceRequirements,
         sortOrder: objectiveIndex + 1,
+        isEnabled: objective.isEnabled,
         isActive: true,
         createdAt
       };
@@ -573,6 +581,7 @@ function objectiveInputMatchesVersion(input: ParsedObjectiveInput, version: Obje
     input.description === version.description &&
     (input.customScoringPrompt ?? "") === (version.customScoringPrompt ?? "") &&
     input.evidenceRequirements === version.evidenceRequirements &&
+    input.isEnabled === (version.isEnabled ?? true) &&
     sortOrder === version.sortOrder &&
     input.gradeScale.length === version.gradeScale.length &&
     input.gradeScale.every((label, labelIndex) => label === version.gradeScale[labelIndex]) &&
@@ -598,6 +607,7 @@ function parseObjective(objective: SaveObjectiveInput, index: number): ParsedObj
 
   const gradeScale = parseGradeScale(objective.gradeLabels, index);
   const gradeExamples = parseGradeExamples(objective.gradeExamples, gradeScale, index);
+  const isEnabled = parseObjectiveEnabled(objective.isEnabled, index);
   const customScoringPrompt = parseOptionalText(
     objective.customScoringPrompt,
     `Objective ${index} custom scoring prompt`,
@@ -611,8 +621,21 @@ function parseObjective(objective: SaveObjectiveInput, index: number): ParsedObj
     ...(customScoringPrompt ? { customScoringPrompt } : {}),
     gradeScale,
     gradeExamples,
-    evidenceRequirements: parseRequiredText(objective.evidenceRequirements, `Objective ${index} evidence requirements`, 2000)
+    evidenceRequirements: parseRequiredText(objective.evidenceRequirements, `Objective ${index} evidence requirements`, 2000),
+    isEnabled
   };
+}
+
+function parseObjectiveEnabled(value: boolean | undefined, objectiveIndex: number) {
+  if (value === undefined) {
+    return true;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new ObjectiveValidationError(`Objective ${objectiveIndex} enabled status must be true or false.`);
+  }
+
+  return value;
 }
 
 function parseObjectiveKey(value: string, index: number) {
@@ -756,6 +779,7 @@ function toObjectiveVersionItem(version: ObjectiveVersion): ObjectiveVersionItem
     gradeScale: version.gradeScale,
     evidenceRequirements: version.evidenceRequirements,
     sortOrder: version.sortOrder,
+    isEnabled: version.isEnabled ?? true,
     isActive: version.isActive,
     createdAt: version.createdAt
   };
@@ -787,6 +811,7 @@ function toObjectiveVersionShell(item: ObjectiveVersionItem): Omit<ObjectiveVers
     gradeScale: item.gradeScale,
     evidenceRequirements: item.evidenceRequirements,
     sortOrder: item.sortOrder,
+    isEnabled: item.isEnabled ?? true,
     isActive: item.isActive,
     createdAt: item.createdAt
   };
