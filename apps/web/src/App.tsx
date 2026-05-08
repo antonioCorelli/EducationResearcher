@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
+import { getDuplicateGradeLabelError, type ObjectiveDraft } from "./objectiveDrafts";
+
 const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://localhost:4000";
 const accessTokenStorageKey = "educationResearcher.accessToken";
 
@@ -161,19 +163,6 @@ type SurveyDraftItem =
       readonly title: string;
       readonly questions: readonly string[];
     };
-
-interface ObjectiveDraft {
-  readonly objectiveKey?: string;
-  readonly title: string;
-  readonly description: string;
-  readonly customScoringPrompt: string;
-  readonly gradeLabels: readonly string[];
-  readonly gradeExamples: readonly {
-    readonly gradeLabel: string;
-    readonly exampleText: string;
-  }[];
-  readonly evidenceRequirements: string;
-}
 
 interface VersionChangeSummary {
   readonly label: string;
@@ -545,6 +534,7 @@ export function App() {
   const [pendingVersionConfirmation, setPendingVersionConfirmation] = useState<PendingVersionConfirmation | null>(null);
 
   const isParticipantRoute = path.startsWith("/participant");
+  const duplicateGradeLabelError = getDuplicateGradeLabelError(objectiveDrafts);
 
   useEffect(() => {
     if (isParticipantRoute) {
@@ -1119,6 +1109,7 @@ export function App() {
   }
 
   function updateObjectiveGradeLabel(objectiveIndex: number, gradeIndex: number, label: string) {
+    setObjectiveError("");
     setObjectiveDrafts((objectives) =>
       objectives.map((objective, currentObjectiveIndex) =>
         currentObjectiveIndex === objectiveIndex
@@ -1223,6 +1214,11 @@ export function App() {
 
     if (selectedObjectiveVersion && !selectedObjectiveVersion.isActive) {
       setIsRestoreObjectiveDialogOpen(true);
+      return;
+    }
+
+    if (duplicateGradeLabelError) {
+      setObjectiveError(duplicateGradeLabelError);
       return;
     }
 
@@ -2020,6 +2016,11 @@ export function App() {
                             </button>
                           </div>
                           <div className="grade-label-list">
+                            {objective.gradeLabels.length <= 2 ? (
+                              <p className="rubric-help" id={`objective-${objectiveIndex}-minimum-grade-help`}>
+                                You must have at least two grades.
+                              </p>
+                            ) : null}
                             {objective.gradeLabels.map((gradeLabel, gradeIndex) => (
                               <div className="grade-label-row" key={`objective-${objectiveIndex}-grade-${gradeIndex}`}>
                                 <input
@@ -2033,6 +2034,11 @@ export function App() {
                                   value={gradeLabel}
                                 />
                                 <button
+                                  aria-describedby={
+                                    objective.gradeLabels.length <= 2
+                                      ? `objective-${objectiveIndex}-minimum-grade-help`
+                                      : undefined
+                                  }
                                   aria-label={`Remove objective ${objectiveIndex + 1} grade label ${gradeIndex + 1}`}
                                   className="secondary-button compact-button"
                                   disabled={!selectedStudy || isPreviewingPreviousObjective || objective.gradeLabels.length <= 2}
@@ -2133,7 +2139,9 @@ export function App() {
                     ))}
                   </div>
                 ) : null}
-                {objectiveError ? <p className="form-error">{objectiveError}</p> : null}
+                {duplicateGradeLabelError || objectiveError ? (
+                  <p className="form-error">{duplicateGradeLabelError || objectiveError}</p>
+                ) : null}
                 <div className="form-actions">
                   <button className={isPreviewingPreviousObjective ? "danger-button" : "primary-button"} disabled={!selectedStudy || isSavingObjectives} type="submit">
                     {isSavingObjectives
