@@ -534,6 +534,7 @@ export function App() {
     }
   ]);
   const [objectiveError, setObjectiveError] = useState("");
+  const [objectiveErrorDialog, setObjectiveErrorDialog] = useState("");
   const [isSavingObjectives, setIsSavingObjectives] = useState(false);
   const [selectedObjectiveVersionIds, setSelectedObjectiveVersionIds] = useState<Record<string, string>>({});
   const [restoreObjectiveVersionId, setRestoreObjectiveVersionId] = useState<string | null>(null);
@@ -709,6 +710,7 @@ export function App() {
     setObjectiveState({ status: "idle" });
     setObjectiveDrafts([createEmptyObjectiveDraft()]);
     setObjectiveError("");
+    setObjectiveErrorDialog("");
     setSelectedObjectiveVersionIds({});
     setRestoreObjectiveVersionId(null);
     setIsRestoreObjectiveDialogOpen(false);
@@ -781,6 +783,7 @@ export function App() {
         : [createEmptyObjectiveDraft()]
     );
     setObjectiveError("");
+    setObjectiveErrorDialog("");
     setSelectedObjectiveVersionIds({});
     setRestoreObjectiveVersionId(null);
     setIsRestoreObjectiveDialogOpen(false);
@@ -1108,6 +1111,7 @@ export function App() {
 
   function updateObjectiveGradeLabel(objectiveIndex: number, gradeIndex: number, label: string) {
     setObjectiveError("");
+    setObjectiveErrorDialog("");
     setObjectiveDrafts((objectives) =>
       objectives.map((objective, currentObjectiveIndex) =>
         currentObjectiveIndex === objectiveIndex
@@ -1204,6 +1208,11 @@ export function App() {
 
   async function saveObjectiveVersion(objectiveIndex: number, skipConfirmation = false) {
     setObjectiveError("");
+    setObjectiveErrorDialog("");
+    const showObjectiveVersionError = (message: string) => {
+      setObjectiveError(message);
+      setObjectiveErrorDialog(message);
+    };
 
     const objective = objectiveDrafts[objectiveIndex];
     const objectiveKey = objective?.objectiveKey;
@@ -1221,14 +1230,14 @@ export function App() {
     }
 
     if (!objective) {
-      setObjectiveError("Select an objective before saving.");
+      showObjectiveVersionError("Select an objective before saving.");
       return;
     }
 
     const objectiveGradeLabelError = getDuplicateGradeLabelError([objective]);
 
     if (objectiveGradeLabelError) {
-      setObjectiveError(objectiveGradeLabelError);
+      showObjectiveVersionError(objectiveGradeLabelError);
       return;
     }
 
@@ -1237,7 +1246,7 @@ export function App() {
     const changes = getObjectiveChanges(activeObjectiveVersions, scopedObjectiveDrafts);
 
     if (activeObjectiveVersions.length > 0 && changes.length === 0) {
-      setObjectiveError("No objective changes to save. The active version already matches this draft.");
+      showObjectiveVersionError("No objective changes to save. The active version already matches this draft.");
       return;
     }
 
@@ -1249,7 +1258,7 @@ export function App() {
     const token = localStorage.getItem(accessTokenStorageKey);
 
     if (!token || !selectedStudyId) {
-      setObjectiveError("Select a study before configuring objectives.");
+      showObjectiveVersionError("Select a study before configuring objectives.");
       return;
     }
 
@@ -1277,7 +1286,7 @@ export function App() {
       setObjectiveState({ status: "ready", ...objectivesPayload });
       loadObjectiveForm(objectivesPayload.activeObjectiveVersions);
     } catch (error) {
-      setObjectiveError(error instanceof Error ? error.message : "Unable to save objectives.");
+      showObjectiveVersionError(error instanceof Error ? error.message : "Unable to save objectives.");
     } finally {
       setIsSavingObjectives(false);
     }
@@ -2302,6 +2311,19 @@ export function App() {
                   type="button"
                 >
                   Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {objectiveErrorDialog ? (
+          <div className="dialog-backdrop" role="presentation">
+            <div aria-labelledby="objective-error-title" aria-modal="true" className="confirm-dialog" role="alertdialog">
+              <h2 id="objective-error-title">Objective version was not created</h2>
+              <p>{objectiveErrorDialog}</p>
+              <div className="form-actions">
+                <button className="primary-button" onClick={() => setObjectiveErrorDialog("")} type="button">
+                  Close
                 </button>
               </div>
             </div>
