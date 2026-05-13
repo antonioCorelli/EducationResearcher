@@ -762,6 +762,76 @@ button.version-chip:hover {
   overflow-wrap: anywhere;
 }
 
+.run-create-panel,
+.run-slot-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.run-create-panel {
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.run-slot-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.run-slot-option input {
+  width: auto;
+  margin-top: 4px;
+}
+
+.run-slot-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.run-slot-option small {
+  color: #566173;
+}
+
+.run-table {
+  display: grid;
+  overflow: auto;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+}
+
+.run-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 0.8fr) minmax(156px, 1fr) minmax(104px, 0.6fr) minmax(76px, 0.4fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 720px;
+  border-top: 1px solid #e3e9e5;
+  padding: 10px 12px;
+}
+
+.run-row:first-child {
+  border-top: 0;
+}
+
+.run-header {
+  background: #fbfcfa;
+  color: #566173;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.run-row span {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 20px;

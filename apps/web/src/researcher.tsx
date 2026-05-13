@@ -6,7 +6,8 @@ const studySetupTabs: readonly { readonly id: StudySetupTab; readonly label?: st
   { id: "shell", label: "New Study" },
   { id: "consent", label: "Consent information" },
   { id: "survey", label: "Survey information" },
-  { id: "objectives", label: "Scoring objectives" }
+  { id: "objectives", label: "Scoring objectives" },
+  { id: "runs", label: "Runs" }
 ];
 
 interface ResearcherProps {
@@ -19,6 +20,7 @@ interface ResearcherProps {
   readonly consentPanel: ReactNode;
   readonly surveyPanel: ReactNode;
   readonly scoringPanel: ReactNode;
+  readonly runsPanel: ReactNode;
   readonly dialogs: ReactNode;
   readonly onSignOut: () => void;
   readonly onResetStudyForm: () => void;
@@ -36,6 +38,7 @@ export function Researcher({
   consentPanel,
   surveyPanel,
   scoringPanel,
+  runsPanel,
   dialogs,
   onSignOut,
   onResetStudyForm,
@@ -44,7 +47,6 @@ export function Researcher({
 }: ResearcherProps) {
   const selectedStudy = studies.find((study) => study.id === selectedStudyId);
   const shellTabLabel = selectedStudy ? ("Study: " + selectedStudy.title).slice(0, 15) : "New Study";
-  console.log(shellTabLabel);
 
   return (
     <main className="app-shell researcher-shell">
@@ -104,6 +106,7 @@ export function Researcher({
             {consentPanel}
             {surveyPanel}
             {scoringPanel}
+            {runsPanel}
           </div>
         </div>
       </section>

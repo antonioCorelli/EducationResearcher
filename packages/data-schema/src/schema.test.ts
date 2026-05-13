@@ -98,7 +98,8 @@ describe("data domain schema", () => {
     expect(run?.attributes).toMatchObject({
       consentVersionId: "consent_version_001",
       surveyVersionId: "survey_version_001",
-      personaVersionId: "persona_version_v1_default_001"
+      personaVersionId: "persona_version_v1_default_001",
+      objectiveVersionIds: ["objective_version_001"]
     });
   });
 
