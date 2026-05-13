@@ -165,6 +165,8 @@ export interface Run {
     | "technical_interruption"
     | "scored";
   readonly currentRunForSlot: boolean;
+  readonly participantAccessUrl?: string;
+  readonly participantAccessTokenId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }

@@ -28,6 +28,7 @@ export type DataDomainEntity =
   | "interview_session"
   | "interview_turn"
   | "interview_audio_asset"
+  | "participant_access_token"
   | "scoring_run"
   | "objective_score"
   | "evidence_citation"
@@ -381,10 +382,10 @@ export const DATA_DOMAIN_TABLES = [
         purpose: "List runs for a participant slot."
       },
       {
-        name: "byRunArtifactType",
+        name: "byParticipantAccessToken",
         partitionKey: "gsi3pk",
         sortKey: "gsi3sk",
-        purpose: "List run artifacts by type for scoring and evidence drilldown."
+        purpose: "Lookup participant access tokens and list run artifacts by type for scoring and evidence drilldown."
       }
     ],
     entities: [
@@ -437,6 +438,40 @@ export const DATA_DOMAIN_TABLES = [
             attribute: "objectiveVersionIds",
             references: "objective_version",
             relationship: "Immutable objective version set used by the run."
+          }
+        ]
+      },
+      {
+        entity: "participant_access_token",
+        description: "Run-scoped participant bearer token metadata; stores only a token hash and lookup id.",
+        partitionKeyPattern: "RUN#<run_id>",
+        sortKeyPattern: "PARTICIPANT_ACCESS_TOKEN#<created_at>#<participant_access_token_id>",
+        requiredAttributes: [
+          "id",
+          "tokenId",
+          "tokenHash",
+          "studyId",
+          "participantSlotId",
+          "runId",
+          "status"
+        ],
+        statusAttributes: ["status"],
+        timestampAttributes: ["createdAt", "updatedAt"],
+        references: [
+          {
+            attribute: "studyId",
+            references: "study",
+            relationship: "Parent study."
+          },
+          {
+            attribute: "participantSlotId",
+            references: "participant_slot",
+            relationship: "Participant slot authorized for the access token."
+          },
+          {
+            attribute: "runId",
+            references: "run",
+            relationship: "Run authorized by the participant link."
           }
         ]
       },
@@ -754,10 +789,6 @@ export const DEFERRED_SCHEMA_ENTITIES = [
   {
     entity: "study_membership",
     reason: "Study collaborator support is not part of the first physical schema."
-  },
-  {
-    entity: "participant_access_token",
-    reason: "Participant access token/link behavior is intentionally deferred."
   },
   {
     entity: "retention_policy",

@@ -809,10 +809,12 @@ button.version-chip:hover {
 
 .run-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(120px, 0.8fr) minmax(156px, 1fr) minmax(104px, 0.6fr) minmax(76px, 0.4fr);
+  grid-template-columns:
+    minmax(120px, 1fr) minmax(120px, 0.8fr) minmax(156px, 1fr) minmax(104px, 0.6fr) minmax(76px, 0.4fr)
+    minmax(112px, 0.6fr);
   gap: 12px;
   align-items: center;
-  min-width: 720px;
+  min-width: 860px;
   border-top: 1px solid #e3e9e5;
   padding: 10px 12px;
 }

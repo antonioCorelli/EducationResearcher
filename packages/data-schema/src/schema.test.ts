@@ -26,10 +26,9 @@ describe("data domain schema", () => {
     }
   });
 
-  it("keeps intentionally deferred entities out of the initial schema", () => {
+  it("keeps remaining intentionally deferred entities out of the schema", () => {
     expect(DEFERRED_SCHEMA_ENTITIES.map((entry) => entry.entity)).toEqual([
       "study_membership",
-      "participant_access_token",
       "retention_policy"
     ]);
   });
@@ -83,6 +82,7 @@ describe("data domain schema", () => {
         "interview_session",
         "interview_turn",
         "interview_audio_asset",
+        "participant_access_token",
         "scoring_run",
         "objective_score",
         "evidence_citation",
@@ -101,6 +101,27 @@ describe("data domain schema", () => {
       personaVersionId: "persona_version_v1_default_001",
       objectiveVersionIds: ["objective_version_001"]
     });
+  });
+
+  it("defines participant access token records without storing raw bearer tokens", () => {
+    const participantAccessToken = getEntityDefinition("participant_access_token")?.definition;
+    const fixtureParticipantAccessToken = FIRST_BUILD_SLICE_FIXTURE.find(
+      (record) => record.entity === "participant_access_token"
+    );
+
+    expect(participantAccessToken?.requiredAttributes).toEqual(
+      expect.arrayContaining(["tokenId", "tokenHash", "studyId", "participantSlotId", "runId", "status"])
+    );
+    expect(fixtureParticipantAccessToken?.attributes).toMatchObject({
+      tokenId: "token_fixture_001",
+      tokenHash: "sha256-fixture-token-hash",
+      studyId: "study_formative_001",
+      participantSlotId: "slot_fixture_001",
+      runId: "run_fixture_001",
+      status: "active"
+    });
+    expect(fixtureParticipantAccessToken?.attributes).not.toHaveProperty("token");
+    expect(fixtureParticipantAccessToken?.attributes).not.toHaveProperty("rawToken");
   });
 
   it("declares survey questions as required long-form text", () => {
