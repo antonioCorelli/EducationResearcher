@@ -483,6 +483,221 @@ describe("researcher participant slot routes", () => {
     await server.close();
   });
 
+  it("imports participant codes from CSV and reports duplicate and invalid rows", async () => {
+    const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const participantSlotStore = new InMemoryParticipantSlotStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantSlotStore,
+      studyShellStore: studyStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+
+    const existingResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers,
+      payload: {
+        participantCode: "P001"
+      }
+    });
+    const importResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots/import",
+      headers,
+      payload: {
+        csv: ["participantCode", "P002", "p002", "P001", "", "too,many,columns", '"P003'].join("\n")
+      }
+    });
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers
+    });
+
+    expect(existingResponse.statusCode).toBe(201);
+    expect(importResponse.statusCode).toBe(201);
+    expect(importResponse.json()).toMatchObject({
+      createdParticipantSlots: [
+        {
+          studyId: "study_fixture_001",
+          participantCode: "P002",
+          codeSource: "researcher_supplied",
+          status: "active"
+        }
+      ],
+      rejectedRows: [
+        {
+          rowNumber: 3,
+          participantCode: "p002",
+          reason: "duplicate",
+          message: "Participant code is duplicated in this import."
+        },
+        {
+          rowNumber: 4,
+          participantCode: "P001",
+          reason: "duplicate",
+          message: "Participant code already exists for this study."
+        },
+        {
+          rowNumber: 6,
+          reason: "invalid",
+          message: "CSV rows must contain exactly one participant code."
+        },
+        {
+          rowNumber: 7,
+          reason: "malformed",
+          message: "CSV row is malformed."
+        }
+      ]
+    });
+    expect(listResponse.json()).toMatchObject({
+      participantSlots: [
+        {
+          participantCode: "P001"
+        },
+        {
+          participantCode: "P002"
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("rejects malformed participant slot import payloads", async () => {
+    const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: studyStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+    const emptyCsvResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots/import",
+      headers,
+      payload: {
+        csv: "participantCode\n"
+      }
+    });
+    const metadataResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots/import",
+      headers,
+      payload: {
+        csv: "P001",
+        codeSource: "platform_generated"
+      }
+    });
+
+    expect(emptyCsvResponse.statusCode).toBe(400);
+    expect(emptyCsvResponse.json()).toEqual({
+      error: "Bad Request",
+      message: "Participant slot CSV must include at least one participant code."
+    });
+    expect(metadataResponse.statusCode).toBe(400);
+    expect(metadataResponse.json()).toEqual({
+      error: "Bad Request",
+      message: "Participant slot metadata is assigned by the service."
+    });
+
+    await server.close();
+  });
+
+  it("generates unique platform participant codes and retries generated code collisions", async () => {
+    const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const participantSlotStore = new InMemoryParticipantSlotStore();
+    const generatedCodes = ["P001", "P002", "P002", "P003"];
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantSlotServiceOptions: {
+        createGeneratedParticipantCode: () => generatedCodes.shift() ?? "P999"
+      },
+      participantSlotStore,
+      studyShellStore: studyStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+
+    const existingResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers,
+      payload: {
+        participantCode: "P001"
+      }
+    });
+    const generateResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots/generate",
+      headers,
+      payload: {
+        count: 2
+      }
+    });
+
+    expect(existingResponse.statusCode).toBe(201);
+    expect(generateResponse.statusCode).toBe(201);
+    expect(generateResponse.json()).toMatchObject({
+      createdParticipantSlots: [
+        {
+          participantCode: "P002",
+          codeSource: "platform_generated",
+          status: "active"
+        },
+        {
+          participantCode: "P003",
+          codeSource: "platform_generated",
+          status: "active"
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("validates generated participant slot counts and tenant access", async () => {
+    const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false, studyShellStore: studyStore });
+    const invalidCountResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots/generate",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        count: 0
+      }
+    });
+    const crossTenantResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots/generate",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        count: 1
+      }
+    });
+
+    expect(invalidCountResponse.statusCode).toBe(400);
+    expect(invalidCountResponse.json()).toEqual({
+      error: "Bad Request",
+      message: "Generated slot count must be between 1 and 200."
+    });
+    expect(crossTenantResponse.statusCode).toBe(403);
+
+    await server.close();
+  });
+
   it("archives a participant slot and blocks cross-tenant slot management", async () => {
     const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
     const participantSlotStore = new InMemoryParticipantSlotStore();

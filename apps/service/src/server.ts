@@ -24,7 +24,10 @@ import {
   ParticipantSlotService,
   createConfiguredParticipantSlotStore,
   toSafeParticipantSlotValidationResponse,
+  type GenerateParticipantSlotsInput,
   type CreateParticipantSlotInput,
+  type ImportParticipantSlotsInput,
+  type ParticipantSlotServiceOptions,
   type ParticipantSlotStore
 } from "./participant-slots.js";
 import {
@@ -53,6 +56,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly consentVersionStore?: ConsentVersionStore;
   readonly corsOrigin?: string | string[];
   readonly objectiveVersionStore?: ObjectiveVersionStore;
+  readonly participantSlotServiceOptions?: ParticipantSlotServiceOptions;
   readonly participantSlotStore?: ParticipantSlotStore;
   readonly studyShellStore?: StudyShellStore;
   readonly surveyVersionStore?: SurveyVersionStore;
@@ -328,6 +332,62 @@ function coerceCreateParticipantSlotInput(body: unknown): CreateParticipantSlotI
   } as CreateParticipantSlotInput;
 }
 
+function coerceImportParticipantSlotsInput(body: unknown): ImportParticipantSlotsInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Participant slot CSV is required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if ("participantSlots" in record || "codeSource" in record || "status" in record) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Participant slot metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    csv: record.csv
+  };
+}
+
+function coerceGenerateParticipantSlotsInput(body: unknown): GenerateParticipantSlotsInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Generated slot count is required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if ("participantSlots" in record || "codeSource" in record || "status" in record) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Participant slot metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    count: record.count
+  };
+}
+
 function rejectObjectiveMetadata(value: unknown) {
   if (!Array.isArray(value)) {
     return;
@@ -460,6 +520,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     consentVersionStore = createConfiguredConsentVersionStore(),
     corsOrigin = true,
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
+    participantSlotServiceOptions,
     participantSlotStore = createConfiguredParticipantSlotStore(),
     studyShellStore = createConfiguredStudyShellStore(),
     surveyVersionStore = createConfiguredSurveyVersionStore(),
@@ -469,7 +530,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const studyShellService = new StudyShellService(studyShellStore);
   const consentService = new ConsentService(consentVersionStore, studyShellStore);
   const objectiveService = new ObjectiveService(objectiveVersionStore);
-  const participantSlotService = new ParticipantSlotService(participantSlotStore);
+  const participantSlotService = new ParticipantSlotService(participantSlotStore, participantSlotServiceOptions);
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
   const server = Fastify({
@@ -757,6 +818,60 @@ export function buildServer(options: BuildServerOptions = {}) {
         return reply.code(201).send({
           participantSlot
         });
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ??
+          toSafeParticipantSlotValidationResponse(error) ??
+          toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/participant-slots/import",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const result = await participantSlotService.importParticipantSlots(
+          request.params.studyId,
+          coerceImportParticipantSlotsInput(request.body)
+        );
+
+        return reply.code(201).send(result);
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ??
+          toSafeParticipantSlotValidationResponse(error) ??
+          toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/participant-slots/generate",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const result = await participantSlotService.generateParticipantSlots(
+          request.params.studyId,
+          coerceGenerateParticipantSlotsInput(request.body)
+        );
+
+        return reply.code(201).send(result);
       } catch (error) {
         const safeResponse =
           toSafeAuthorizationResponse(error) ??
