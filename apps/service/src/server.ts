@@ -39,9 +39,12 @@ import {
 } from "./survey.js";
 import {
   RunService,
+  createConfiguredParticipantAccessTokenStore,
   createConfiguredRunStore,
+  toSafeParticipantAccessResponse,
   toSafeRunValidationResponse,
   type CreateRunsInput,
+  type ParticipantAccessTokenStore,
   type RunServiceOptions,
   type RunStore
 } from "./runs.js";
@@ -66,6 +69,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly objectiveVersionStore?: ObjectiveVersionStore;
   readonly participantSlotServiceOptions?: ParticipantSlotServiceOptions;
   readonly participantSlotStore?: ParticipantSlotStore;
+  readonly participantAccessTokenStore?: ParticipantAccessTokenStore;
   readonly runServiceOptions?: RunServiceOptions;
   readonly runStore?: RunStore;
   readonly studyShellStore?: StudyShellStore;
@@ -569,6 +573,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     consentVersionStore = createConfiguredConsentVersionStore(),
     corsOrigin = true,
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
+    participantAccessTokenStore = createConfiguredParticipantAccessTokenStore(),
     participantSlotServiceOptions,
     participantSlotStore = createConfiguredParticipantSlotStore(),
     runServiceOptions,
@@ -582,7 +587,13 @@ export function buildServer(options: BuildServerOptions = {}) {
   const consentService = new ConsentService(consentVersionStore, studyShellStore);
   const objectiveService = new ObjectiveService(objectiveVersionStore);
   const participantSlotService = new ParticipantSlotService(participantSlotStore, participantSlotServiceOptions);
-  const runService = new RunService(runStore, participantSlotStore, objectiveVersionStore, runServiceOptions);
+  const runService = new RunService(
+    runStore,
+    participantAccessTokenStore,
+    participantSlotStore,
+    objectiveVersionStore,
+    runServiceOptions
+  );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
   const server = Fastify({
@@ -1221,6 +1232,20 @@ export function buildServer(options: BuildServerOptions = {}) {
     participantRoute: "public",
     message: "Participant routes do not require researcher sign-in."
   }));
+
+  server.get<{ Params: { accessToken: string } }>("/participant/runs/:accessToken", async (request, reply) => {
+    try {
+      return await runService.validateParticipantAccess(request.params.accessToken);
+    } catch (error) {
+      const safeResponse = toSafeParticipantAccessResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
 
   server.post("/participant/runs", async (_request, reply) =>
     reply.code(403).send({

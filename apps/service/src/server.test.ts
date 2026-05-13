@@ -3,7 +3,14 @@ import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
 import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
 import { InMemoryParticipantSlotStore } from "./participant-slots.js";
-import { InMemoryRunStore, type Run } from "./runs.js";
+import {
+  InMemoryParticipantAccessTokenStore,
+  InMemoryRunStore,
+  createParticipantAccessTokenForTest,
+  hashParticipantAccessTokenForTest,
+  type ParticipantAccessToken,
+  type Run
+} from "./runs.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -85,6 +92,44 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
     createdAt,
     updatedAt: createdAt,
     ...overrides
+  };
+}
+
+function createFixtureRun(overrides: Partial<Run> = {}): Run {
+  return {
+    id: "run_fixture_001",
+    studyId: "study_fixture_001",
+    participantSlotId: "slot_fixture_001",
+    consentVersionId: "consent_version_active",
+    surveyVersionId: "survey_version_active",
+    personaVersionId: "persona_version_v1_default_001",
+    objectiveVersionIds: ["objective_version_001"],
+    freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+    maxInterviewMinutes: 45,
+    status: "created",
+    currentRunForSlot: true,
+    createdAt: "2026-05-06T12:00:00.000Z",
+    updatedAt: "2026-05-06T12:00:00.000Z",
+    ...overrides
+  };
+}
+
+function createFixtureParticipantAccessToken(
+  overrides: Partial<ParticipantAccessToken> & Pick<ParticipantAccessToken, "tokenHash" | "tokenId">
+): ParticipantAccessToken {
+  const { tokenHash, tokenId, ...optionalOverrides } = overrides;
+
+  return {
+    id: `participant_access_token_${tokenId}`,
+    tokenHash,
+    tokenId,
+    studyId: "study_fixture_001",
+    participantSlotId: "slot_fixture_001",
+    runId: "run_fixture_001",
+    status: "active",
+    createdAt: "2026-05-06T12:00:00.000Z",
+    updatedAt: "2026-05-06T12:00:00.000Z",
+    ...optionalOverrides
   };
 }
 
@@ -228,6 +273,182 @@ describe("participant routes", () => {
       error: "Forbidden",
       message: "Participants cannot create or reset runs."
     });
+
+    await server.close();
+  });
+
+  it("validates secure participant run access tokens for active fresh runs", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_valid",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_valid",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        now: () => new Date("2026-05-06T12:00:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore: new InMemoryRunStore([createFixtureRun()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: `/participant/runs/${rawToken}`
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      run: {
+        id: "run_fixture_001",
+        studyId: "study_fixture_001",
+        participantSlotId: "slot_fixture_001",
+        status: "created",
+        freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+        maxInterviewMinutes: 45
+      }
+    });
+
+    await server.close();
+  });
+
+  it("blocks invalid, cross-run, stale, completed, and archived-slot participant access safely", async () => {
+    const validToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_valid",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const crossRunToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_cross",
+      runId: "run_other_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const staleToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_stale",
+      runId: "run_stale_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const completedToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_complete",
+      runId: "run_completed_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const archivedSlotToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_archived",
+      runId: "run_archived_slot_001",
+      participantSlotId: "slot_archived_001",
+      secret: "test-participant-secret"
+    });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_valid",
+          tokenHash: hashParticipantAccessTokenForTest(validToken)
+        }),
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_cross",
+          tokenHash: hashParticipantAccessTokenForTest(validToken),
+          runId: "run_fixture_001"
+        }),
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_stale",
+          tokenHash: hashParticipantAccessTokenForTest(staleToken),
+          runId: "run_stale_001"
+        }),
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_complete",
+          tokenHash: hashParticipantAccessTokenForTest(completedToken),
+          runId: "run_completed_001"
+        }),
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_archived",
+          tokenHash: hashParticipantAccessTokenForTest(archivedSlotToken),
+          participantSlotId: "slot_archived_001",
+          runId: "run_archived_slot_001"
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        },
+        {
+          id: "slot_archived_001",
+          studyId: "study_fixture_001",
+          participantCode: "P002",
+          codeSource: "researcher_supplied",
+          status: "archived",
+          archivedAt: "2026-05-06T12:01:00.000Z",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:01:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        now: () => new Date("2026-05-21T12:00:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore: new InMemoryRunStore([
+        createFixtureRun(),
+        createFixtureRun({
+          id: "run_stale_001",
+          freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+          status: "created"
+        }),
+        createFixtureRun({
+          id: "run_completed_001",
+          status: "interview_completed"
+        }),
+        createFixtureRun({
+          id: "run_archived_slot_001",
+          participantSlotId: "slot_archived_001"
+        })
+      ])
+    });
+    const attempts = await Promise.all(
+      ["not-a-token", crossRunToken, staleToken, completedToken, archivedSlotToken].map((accessToken) =>
+        server.inject({
+          method: "GET",
+          url: `/participant/runs/${accessToken}`
+        })
+      )
+    );
+
+    for (const response of attempts) {
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({
+        error: "Forbidden",
+        message: "This participant link is not available."
+      });
+    }
 
     await server.close();
   });
@@ -847,19 +1068,27 @@ describe("researcher run routes", () => {
   it("creates researcher-authorized runs for one or more slots with immutable active configuration references", async () => {
     const studyStore = new InMemoryStudyShellStore([configuredStudy]);
     const participantSlotStore = new InMemoryParticipantSlotStore(activeParticipantSlots);
+    const participantAccessTokenStore = new InMemoryParticipantAccessTokenStore();
     const objectiveVersionStore = new InMemoryObjectiveVersionStore(activeObjectives);
     const runStore = new InMemoryRunStore();
     const server = buildServer({
       authProvider: createFakeAuthProvider(),
       logger: false,
       objectiveVersionStore,
+      participantAccessTokenStore,
       participantSlotStore,
       runServiceOptions: {
+        createParticipantAccessTokenId: (() => {
+          const ids = ["token_fixture_001", "token_fixture_002"];
+          return () => ids.shift() ?? "token_fixture_extra";
+        })(),
         createRunId: (() => {
           const ids = ["run_fixture_001", "run_fixture_002"];
           return () => ids.shift() ?? "run_fixture_extra";
         })(),
-        now: () => new Date("2026-05-06T12:00:00.000Z")
+        now: () => new Date("2026-05-06T12:00:00.000Z"),
+        participantAccessBaseUrl: "https://research.test",
+        participantAccessTokenSecret: "test-participant-secret"
       },
       runStore,
       studyShellStore: studyStore
@@ -896,17 +1125,31 @@ describe("researcher run routes", () => {
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
           maxInterviewMinutes: 45,
           status: "created",
-          currentRunForSlot: true
+          currentRunForSlot: true,
+          participantAccessUrl:
+            "https://research.test/participant/runs/pat_token_fixture_001_epXi-T5kxq9Bkpc0Bogcpb_ARuv_2NUsMGPERxn2Z9A",
+          participantAccessTokenId: "token_fixture_001"
         },
         {
           id: "run_fixture_002",
           participantSlotId: "slot_fixture_002",
-          currentRunForSlot: true
+          currentRunForSlot: true,
+          participantAccessUrl:
+            "https://research.test/participant/runs/pat_token_fixture_002_s6UomeebGhb6-4YMNQ89epBK9Cdw0muhIOS4SKFVl44"
         }
       ]
     });
     expect(listResponse.statusCode).toBe(200);
     expect(listResponse.json().runs).toHaveLength(2);
+    expect(listResponse.json().runs[0].participantAccessUrl).toContain("/participant/runs/pat_");
+    expect(await participantAccessTokenStore.listByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        tokenId: "token_fixture_001",
+        runId: "run_fixture_001",
+        participantSlotId: "slot_fixture_001",
+        status: "active"
+      })
+    ]);
 
     await server.close();
   });

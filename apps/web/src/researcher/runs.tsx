@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 import type { ParticipantSlot, Run, RunState, StudySetupTab, StudyShell } from "../App";
 
@@ -25,6 +25,7 @@ export function ResearcherRuns({
   onCreateRuns,
   onSelectedRunParticipantSlotIdsChange
 }: ResearcherRunsProps) {
+  const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
   const runs = runState.status === "ready" ? runState.runs : [];
   const activeParticipantSlots = participantSlots.filter((slot) => slot.status === "active");
   const participantCodeBySlotId = new Map(participantSlots.map((slot) => [slot.id, slot.participantCode]));
@@ -91,6 +92,7 @@ export function ResearcherRuns({
             <span role="columnheader">Fresh until</span>
             <span role="columnheader">Interview cap</span>
             <span role="columnheader">Current</span>
+            <span role="columnheader">Access</span>
           </div>
           {runs.map((run) => (
             <div className="run-row" key={run.id} role="row">
@@ -99,6 +101,22 @@ export function ResearcherRuns({
               <span role="cell">{formatDateTime(run.freshnessDeadlineAt)}</span>
               <span role="cell">{run.maxInterviewMinutes} min</span>
               <span role="cell">{run.currentRunForSlot ? "Yes" : "No"}</span>
+              <span role="cell">
+                {run.participantAccessUrl ? (
+                  <button
+                    className="secondary-button compact-button"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(run.participantAccessUrl ?? "");
+                      setCopiedRunId(run.id);
+                    }}
+                    type="button"
+                  >
+                    {copiedRunId === run.id ? "Copied" : "Copy link"}
+                  </button>
+                ) : (
+                  "Unavailable"
+                )}
+              </span>
             </div>
           ))}
         </div>

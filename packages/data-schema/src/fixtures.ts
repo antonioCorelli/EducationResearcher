@@ -225,6 +225,29 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
   },
   {
     tableKey: "runLifecycle",
+    entity: "participant_access_token",
+    pk: "RUN#run_fixture_001",
+    sk: "PARTICIPANT_ACCESS_TOKEN#2026-05-04T12:00:00.000Z#participant_access_token_001",
+    gsi1pk: "STUDY#study_formative_001#PARTICIPANT_ACCESS_TOKEN#active",
+    gsi1sk: "RUN#run_fixture_001#TOKEN#token_fixture_001",
+    gsi2pk: "SLOT#slot_fixture_001",
+    gsi2sk: "TOKEN#2026-05-04T12:00:00.000Z#token_fixture_001",
+    gsi3pk: "PARTICIPANT_ACCESS_TOKEN#token_fixture_001",
+    gsi3sk: "RUN#run_fixture_001",
+    attributes: {
+      id: "participant_access_token_001",
+      tokenId: "token_fixture_001",
+      tokenHash: "sha256-fixture-token-hash",
+      studyId: "study_formative_001",
+      participantSlotId: "slot_fixture_001",
+      runId: "run_fixture_001",
+      status: "active",
+      createdAt,
+      updatedAt: createdAt
+    }
+  },
+  {
+    tableKey: "runLifecycle",
     entity: "consent_record",
     pk: "RUN#run_fixture_001",
     sk: "CONSENT_RECORD#consent_record_001",
