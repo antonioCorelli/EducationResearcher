@@ -669,6 +669,45 @@ button.version-chip:hover {
   gap: 12px;
 }
 
+.participant-slot-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.participant-slot-table {
+  display: grid;
+  overflow: auto;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+}
+
+.participant-slot-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 0.8fr) minmax(92px, 0.5fr) minmax(92px, 0.5fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 680px;
+  border-top: 1px solid #e3e9e5;
+  padding: 10px 12px;
+}
+
+.participant-slot-row:first-child {
+  border-top: 0;
+}
+
+.participant-slot-header {
+  background: #fbfcfa;
+  color: #566173;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.participant-slot-row span {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 20px;
@@ -695,6 +734,7 @@ button.version-chip:hover {
   .settings-grid,
   .study-setup-tabs,
   .question-row,
+  .participant-slot-create-row,
   .rubric-grid,
   .grade-label-row,
   .grade-example-row,

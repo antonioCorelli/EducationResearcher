@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
 import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
+import { InMemoryParticipantSlotStore } from "./participant-slots.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -370,6 +371,166 @@ describe("researcher study shell routes", () => {
       error: "Forbidden",
       message: "You are not authorized to access this study resource."
     });
+
+    await server.close();
+  });
+});
+
+describe("researcher participant slot routes", () => {
+  it("creates researcher-supplied participant slots and lists slot metadata", async () => {
+    const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const participantSlotStore = new InMemoryParticipantSlotStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantSlotStore,
+      studyShellStore: studyStore
+    });
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        participantCode: "  P001  "
+      }
+    });
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json()).toMatchObject({
+      participantSlot: {
+        studyId: "study_fixture_001",
+        participantCode: "P001",
+        codeSource: "researcher_supplied",
+        status: "active"
+      }
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json()).toMatchObject({
+      participantSlots: [
+        {
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active"
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("rejects duplicate participant codes within a study and allows the same code in another study", async () => {
+    const studyStore = new InMemoryStudyShellStore([
+      createFixtureStudy(),
+      createFixtureStudy({
+        id: "study_fixture_002",
+        ownerUserId: researcher.id,
+        title: "Second Fixture Study"
+      })
+    ]);
+    const participantSlotStore = new InMemoryParticipantSlotStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantSlotStore,
+      studyShellStore: studyStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+
+    const firstResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers,
+      payload: {
+        participantCode: "P001"
+      }
+    });
+    const duplicateResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers,
+      payload: {
+        participantCode: "p001"
+      }
+    });
+    const otherStudyResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_002/participant-slots",
+      headers,
+      payload: {
+        participantCode: "P001"
+      }
+    });
+
+    expect(firstResponse.statusCode).toBe(201);
+    expect(duplicateResponse.statusCode).toBe(400);
+    expect(duplicateResponse.json()).toEqual({
+      error: "Bad Request",
+      message: "Participant code already exists for this study."
+    });
+    expect(otherStudyResponse.statusCode).toBe(201);
+
+    await server.close();
+  });
+
+  it("archives a participant slot and blocks cross-tenant slot management", async () => {
+    const studyStore = new InMemoryStudyShellStore([createFixtureStudy()]);
+    const participantSlotStore = new InMemoryParticipantSlotStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantSlotStore,
+      studyShellStore: studyStore
+    });
+    const createResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        participantCode: "P002"
+      }
+    });
+    const participantSlotId = createResponse.json().participantSlot.id as string;
+    const archiveResponse = await server.inject({
+      method: "POST",
+      url: `/researcher/studies/study_fixture_001/participant-slots/${participantSlotId}/archive`,
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+    const crossTenantResponse = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/participant-slots",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        participantCode: "P003"
+      }
+    });
+
+    expect(archiveResponse.statusCode).toBe(200);
+    expect(archiveResponse.json()).toMatchObject({
+      participantSlot: {
+        id: participantSlotId,
+        participantCode: "P002",
+        status: "archived"
+      }
+    });
+    expect(archiveResponse.json().participantSlot.archivedAt).toEqual(expect.any(String));
+    expect(crossTenantResponse.statusCode).toBe(403);
 
     await server.close();
   });

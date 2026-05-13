@@ -53,7 +53,7 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
-Local development defaults `STUDY_SHELL_STORE=memory`, `CONSENT_VERSION_STORE=memory`, and `SURVEY_VERSION_STORE=memory` so the researcher setup flow works without DynamoDB Local. Set a store variable to `dynamodb` when you want that slice to persist to its local DynamoDB table.
+Local development defaults `STUDY_SHELL_STORE=memory`, `PARTICIPANT_SLOT_STORE=memory`, `CONSENT_VERSION_STORE=memory`, and `SURVEY_VERSION_STORE=memory` so the researcher setup flow works without DynamoDB Local. Set a store variable to `dynamodb` when you want that slice to persist to its local DynamoDB table.
 
 ## Command Contract
 

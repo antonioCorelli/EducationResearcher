@@ -21,6 +21,13 @@ import {
   type SaveObjectivesInput
 } from "./objectives.js";
 import {
+  ParticipantSlotService,
+  createConfiguredParticipantSlotStore,
+  toSafeParticipantSlotValidationResponse,
+  type CreateParticipantSlotInput,
+  type ParticipantSlotStore
+} from "./participant-slots.js";
+import {
   SurveyService,
   createConfiguredSurveyVersionStore,
   toSafeSurveyValidationResponse,
@@ -46,6 +53,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly consentVersionStore?: ConsentVersionStore;
   readonly corsOrigin?: string | string[];
   readonly objectiveVersionStore?: ObjectiveVersionStore;
+  readonly participantSlotStore?: ParticipantSlotStore;
   readonly studyShellStore?: StudyShellStore;
   readonly surveyVersionStore?: SurveyVersionStore;
 }
@@ -292,6 +300,34 @@ function coerceSaveObjectivesInput(body: unknown): SaveObjectivesInput {
   } as SaveObjectivesInput;
 }
 
+function coerceCreateParticipantSlotInput(body: unknown): CreateParticipantSlotInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Participant code is required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if ("id" in record || "studyId" in record || "codeSource" in record || "status" in record || "archivedAt" in record) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Participant slot metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    participantCode: record.participantCode
+  } as CreateParticipantSlotInput;
+}
+
 function rejectObjectiveMetadata(value: unknown) {
   if (!Array.isArray(value)) {
     return;
@@ -424,6 +460,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     consentVersionStore = createConfiguredConsentVersionStore(),
     corsOrigin = true,
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
+    participantSlotStore = createConfiguredParticipantSlotStore(),
     studyShellStore = createConfiguredStudyShellStore(),
     surveyVersionStore = createConfiguredSurveyVersionStore(),
     ...fastifyOptions
@@ -432,6 +469,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const studyShellService = new StudyShellService(studyShellStore);
   const consentService = new ConsentService(consentVersionStore, studyShellStore);
   const objectiveService = new ObjectiveService(objectiveVersionStore);
+  const participantSlotService = new ParticipantSlotService(participantSlotStore);
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
   const server = Fastify({
@@ -675,6 +713,84 @@ export function buildServer(options: BuildServerOptions = {}) {
       } catch (error) {
         const safeResponse =
           toSafeAuthorizationResponse(error) ?? toSafeConsentValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/participant-slots",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read");
+
+        return participantSlotService.listForStudy(request.params.studyId);
+      } catch (error) {
+        const safeAuthorization = toSafeAuthorizationResponse(error);
+
+        if (safeAuthorization) {
+          return reply.code(safeAuthorization.statusCode).send(safeAuthorization.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/participant-slots",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const participantSlot = await participantSlotService.createParticipantSlot(
+          request.params.studyId,
+          coerceCreateParticipantSlotInput(request.body)
+        );
+
+        return reply.code(201).send({
+          participantSlot
+        });
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ??
+          toSafeParticipantSlotValidationResponse(error) ??
+          toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams & { participantSlotId: string } }>(
+    "/researcher/studies/:studyId/participant-slots/:participantSlotId/archive",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const participantSlot = await participantSlotService.archiveParticipantSlot(
+          request.params.studyId,
+          request.params.participantSlotId
+        );
+
+        return {
+          participantSlot
+        };
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ??
+          toSafeParticipantSlotValidationResponse(error) ??
+          toSafeInlineErrorResponse(error);
 
         if (safeResponse) {
           return reply.code(safeResponse.statusCode).send(safeResponse.body);

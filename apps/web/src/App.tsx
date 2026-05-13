@@ -9,6 +9,7 @@ import {
 import { Participant } from "./participant";
 import { Researcher } from "./researcher";
 import { createConsentForm, defaultConsentForm, ResearcherConsent } from "./researcher/consent";
+import { ResearcherParticipantSlots } from "./researcher/participantSlots";
 import { createEmptyObjectiveDraft, createObjectiveDraftsFromVersions, ResearcherScoring } from "./researcher/scoring";
 import { createStudyShellForm, defaultStudyShellForm, ResearcherShell } from "./researcher/shell";
 import { createSurveyItemsFromVersion, defaultSurveyItems, ResearcherSurvey } from "./researcher/survey";
@@ -117,6 +118,17 @@ export interface ObjectiveVersion {
   readonly createdAt: string;
 }
 
+export interface ParticipantSlot {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantCode: string;
+  readonly codeSource: "researcher_supplied";
+  readonly status: "active" | "archived";
+  readonly archivedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export type SurveyLayoutItem =
   | {
       readonly type: "question";
@@ -157,6 +169,11 @@ export type ObjectiveState =
       readonly enabledObjectiveVersions?: ObjectiveVersion[];
       readonly objectiveVersions: ObjectiveVersion[];
     }
+  | { readonly status: "error"; readonly message: string };
+
+export type ParticipantSlotState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly participantSlots: ParticipantSlot[] }
   | { readonly status: "error"; readonly message: string };
 
 export type SurveyDraftItem =
@@ -487,6 +504,22 @@ async function fetchObjectives(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchParticipantSlots(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/participant-slots`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to load participant slots.");
+  }
+
+  return (await response.json()) as {
+    participantSlots: ParticipantSlot[];
+  };
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -496,6 +529,7 @@ export function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenStorageKey));
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
+  const [participantSlotState, setParticipantSlotState] = useState<ParticipantSlotState>({ status: "idle" });
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
   const [objectiveState, setObjectiveState] = useState<ObjectiveState>({ status: "idle" });
@@ -507,6 +541,10 @@ export function App() {
   const [isSavingStudy, setIsSavingStudy] = useState(false);
   const [studyTitleFocusRequest, setStudyTitleFocusRequest] = useState(0);
   const [activeStudySetupTab, setActiveStudySetupTab] = useState<StudySetupTab>("shell");
+  const [participantCode, setParticipantCode] = useState("");
+  const [participantSlotError, setParticipantSlotError] = useState("");
+  const [isSavingParticipantSlot, setIsSavingParticipantSlot] = useState(false);
+  const [isArchivingParticipantSlotId, setIsArchivingParticipantSlotId] = useState<string | null>(null);
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
   const [consentError, setConsentError] = useState("");
@@ -578,6 +616,21 @@ export function App() {
       })
       .catch(() => setStudiesState({ status: "error", message: "Unable to load studies." }));
   }, [accessToken, session.status]);
+
+  useEffect(() => {
+    if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
+      setParticipantSlotState({ status: "idle" });
+      return;
+    }
+
+    setParticipantSlotState({ status: "loading" });
+    fetchParticipantSlots(accessToken, selectedStudyId)
+      .then((participantSlots) => {
+        setParticipantSlotState({ status: "ready", ...participantSlots });
+        setParticipantSlotError("");
+      })
+      .catch(() => setParticipantSlotState({ status: "error", message: "Unable to load participant slots." }));
+  }, [accessToken, selectedStudyId, session.status]);
 
   useEffect(() => {
     if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
@@ -695,6 +748,10 @@ export function App() {
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
+    setParticipantCode("");
+    setParticipantSlotError("");
+    setParticipantSlotState({ status: "idle" });
+    setIsArchivingParticipantSlotId(null);
     setConsentText(consentForm.consentText);
     setConsentMethod(consentForm.consentMethod);
     setConsentError("");
@@ -724,6 +781,9 @@ export function App() {
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
+    setParticipantCode("");
+    setParticipantSlotError("");
+    setIsArchivingParticipantSlotId(null);
   }
 
   function loadConsentForm(consentVersion: ConsentVersion | undefined) {
@@ -823,6 +883,86 @@ export function App() {
       setStudyError(error instanceof Error ? error.message : "Unable to save study.");
     } finally {
       setIsSavingStudy(false);
+    }
+  }
+
+  async function reloadParticipantSlots(token: string, studyId: string) {
+    const participantSlots = await fetchParticipantSlots(token, studyId);
+    setParticipantSlotState({ status: "ready", ...participantSlots });
+  }
+
+  async function handleSaveParticipantSlot(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setParticipantSlotError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setParticipantSlotError("Select a study before adding participant slots.");
+      return;
+    }
+
+    setIsSavingParticipantSlot(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/participant-slots`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          participantCode
+        })
+      });
+      const payload = (await response.json()) as { participantSlot?: ParticipantSlot; message?: string };
+
+      if (!response.ok || !payload.participantSlot) {
+        throw new Error(payload.message ?? "Unable to add participant slot.");
+      }
+
+      setParticipantCode("");
+      await reloadParticipantSlots(token, selectedStudyId);
+    } catch (error) {
+      setParticipantSlotError(error instanceof Error ? error.message : "Unable to add participant slot.");
+    } finally {
+      setIsSavingParticipantSlot(false);
+    }
+  }
+
+  async function handleArchiveParticipantSlot(participantSlot: ParticipantSlot) {
+    setParticipantSlotError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setParticipantSlotError("Select a study before archiving participant slots.");
+      return;
+    }
+
+    setIsArchivingParticipantSlotId(participantSlot.id);
+
+    try {
+      const response = await fetch(
+        `${serviceBaseUrl}/researcher/studies/${selectedStudyId}/participant-slots/${participantSlot.id}/archive`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`
+          }
+        }
+      );
+      const payload = (await response.json()) as { participantSlot?: ParticipantSlot; message?: string };
+
+      if (!response.ok || !payload.participantSlot) {
+        throw new Error(payload.message ?? "Unable to archive participant slot.");
+      }
+
+      await reloadParticipantSlots(token, selectedStudyId);
+    } catch (error) {
+      setParticipantSlotError(error instanceof Error ? error.message : "Unable to archive participant slot.");
+    } finally {
+      setIsArchivingParticipantSlotId(null);
     }
   }
 
@@ -1677,21 +1817,35 @@ export function App() {
         }
         selectedStudyId={selectedStudyId}
         shellPanel={
-          <ResearcherShell
-            activeStudySetupTab={activeStudySetupTab}
-            freshnessDays={freshnessDays}
-            isSavingStudy={isSavingStudy}
-            maxInterviewMinutes={maxInterviewMinutes}
-            selectedStudy={selectedStudy}
-            studyError={studyError}
-            studyTitleFocusRequest={studyTitleFocusRequest}
-            studyTitle={studyTitle}
-            onFreshnessDaysChange={setFreshnessDays}
-            onMaxInterviewMinutesChange={setMaxInterviewMinutes}
-            onNavigateToParticipantDemo={() => navigate('/participant/demo')}
-            onSaveStudy={handleSaveStudy}
-            onStudyTitleChange={setStudyTitle}
-          />
+          <>
+            <ResearcherShell
+              activeStudySetupTab={activeStudySetupTab}
+              freshnessDays={freshnessDays}
+              isSavingStudy={isSavingStudy}
+              maxInterviewMinutes={maxInterviewMinutes}
+              selectedStudy={selectedStudy}
+              studyError={studyError}
+              studyTitleFocusRequest={studyTitleFocusRequest}
+              studyTitle={studyTitle}
+              onFreshnessDaysChange={setFreshnessDays}
+              onMaxInterviewMinutesChange={setMaxInterviewMinutes}
+              onNavigateToParticipantDemo={() => navigate('/participant/demo')}
+              onSaveStudy={handleSaveStudy}
+              onStudyTitleChange={setStudyTitle}
+            />
+            <ResearcherParticipantSlots
+              activeStudySetupTab={activeStudySetupTab}
+              isArchivingParticipantSlotId={isArchivingParticipantSlotId}
+              isSavingParticipantSlot={isSavingParticipantSlot}
+              participantCode={participantCode}
+              participantSlotError={participantSlotError}
+              participantSlotState={participantSlotState}
+              selectedStudy={selectedStudy}
+              onArchiveParticipantSlot={handleArchiveParticipantSlot}
+              onParticipantCodeChange={setParticipantCode}
+              onSaveParticipantSlot={handleSaveParticipantSlot}
+            />
+          </>
         }
         studies={studies}
         studiesState={studiesState}
