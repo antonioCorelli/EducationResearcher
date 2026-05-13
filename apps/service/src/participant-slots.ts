@@ -1,7 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 
-export type ParticipantCodeSource = "researcher_supplied";
+export type ParticipantCodeSource = "researcher_supplied" | "platform_generated";
 export type ParticipantSlotStatus = "active" | "archived";
 
 export interface ParticipantSlot {
@@ -17,6 +17,26 @@ export interface ParticipantSlot {
 
 export interface CreateParticipantSlotInput {
   readonly participantCode: string;
+}
+
+export interface ImportParticipantSlotsInput {
+  readonly csv: unknown;
+}
+
+export interface GenerateParticipantSlotsInput {
+  readonly count: unknown;
+}
+
+export interface ParticipantSlotImportRejectedRow {
+  readonly rowNumber: number;
+  readonly participantCode?: string;
+  readonly reason: "duplicate" | "invalid" | "malformed";
+  readonly message: string;
+}
+
+export interface ParticipantSlotBulkResult {
+  readonly createdParticipantSlots: ParticipantSlot[];
+  readonly rejectedRows: ParticipantSlotImportRejectedRow[];
 }
 
 export interface ParticipantSlotStore {
@@ -57,11 +77,13 @@ export class ParticipantSlotValidationError extends Error {
 export interface ParticipantSlotServiceOptions {
   readonly now?: () => Date;
   readonly createParticipantSlotId?: () => string;
+  readonly createGeneratedParticipantCode?: () => string;
 }
 
 export class ParticipantSlotService {
   private readonly now: () => Date;
   private readonly createParticipantSlotId: () => string;
+  private readonly createGeneratedParticipantCode: () => string;
 
   constructor(
     private readonly store: ParticipantSlotStore,
@@ -69,6 +91,7 @@ export class ParticipantSlotService {
   ) {
     this.now = options.now ?? (() => new Date());
     this.createParticipantSlotId = options.createParticipantSlotId ?? (() => `slot_${crypto.randomUUID()}`);
+    this.createGeneratedParticipantCode = options.createGeneratedParticipantCode ?? createGeneratedParticipantCode;
   }
 
   async listForStudy(studyId: string) {
@@ -86,19 +109,8 @@ export class ParticipantSlotService {
       throw new ParticipantSlotValidationError("Participant code already exists for this study.");
     }
 
-    const now = this.now().toISOString();
-    const slot: ParticipantSlot = {
-      id: this.createParticipantSlotId(),
-      studyId,
-      participantCode,
-      codeSource: "researcher_supplied",
-      status: "active",
-      createdAt: now,
-      updatedAt: now
-    };
-
     try {
-      return await this.store.create(slot, normalizedParticipantCode);
+      return await this.createValidatedParticipantSlot(studyId, participantCode, "researcher_supplied");
     } catch (error) {
       if (isDuplicateParticipantCodeError(error)) {
         throw new ParticipantSlotValidationError("Participant code already exists for this study.");
@@ -106,6 +118,112 @@ export class ParticipantSlotService {
 
       throw error;
     }
+  }
+
+  async importParticipantSlots(studyId: string, input: ImportParticipantSlotsInput): Promise<ParticipantSlotBulkResult> {
+    const csv = parseCsvInput(input.csv);
+    const parsedRows = parseParticipantCodeCsv(csv);
+    const createdParticipantSlots: ParticipantSlot[] = [];
+    const rejectedRows: ParticipantSlotImportRejectedRow[] = [];
+    const seenCodes = new Set<string>();
+
+    for (const row of parsedRows) {
+      if ("error" in row) {
+        rejectedRows.push(row.error);
+        continue;
+      }
+
+      const normalizedParticipantCode = normalizeParticipantCode(row.participantCode);
+
+      if (seenCodes.has(normalizedParticipantCode)) {
+        rejectedRows.push({
+          rowNumber: row.rowNumber,
+          participantCode: row.participantCode,
+          reason: "duplicate",
+          message: "Participant code is duplicated in this import."
+        });
+        continue;
+      }
+
+      seenCodes.add(normalizedParticipantCode);
+
+      const existingSlot = await this.store.findByParticipantCode(studyId, normalizedParticipantCode);
+
+      if (existingSlot) {
+        rejectedRows.push({
+          rowNumber: row.rowNumber,
+          participantCode: row.participantCode,
+          reason: "duplicate",
+          message: "Participant code already exists for this study."
+        });
+        continue;
+      }
+
+      try {
+        const participantSlot = await this.createValidatedParticipantSlot(studyId, row.participantCode, "researcher_supplied");
+        createdParticipantSlots.push(participantSlot);
+      } catch (error) {
+        if (isDuplicateParticipantCodeError(error)) {
+          rejectedRows.push({
+            rowNumber: row.rowNumber,
+            participantCode: row.participantCode,
+            reason: "duplicate",
+            message: "Participant code already exists for this study."
+          });
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    return {
+      createdParticipantSlots,
+      rejectedRows
+    };
+  }
+
+  async generateParticipantSlots(studyId: string, input: GenerateParticipantSlotsInput) {
+    const count = parseGeneratedSlotCount(input.count);
+    const createdParticipantSlots: ParticipantSlot[] = [];
+    const seenCodes = new Set<string>();
+    let attempts = 0;
+    const maxAttempts = count * 20;
+
+    while (createdParticipantSlots.length < count && attempts < maxAttempts) {
+      attempts += 1;
+      const participantCode = parseParticipantCode(this.createGeneratedParticipantCode());
+      const normalizedParticipantCode = normalizeParticipantCode(participantCode);
+
+      if (seenCodes.has(normalizedParticipantCode)) {
+        continue;
+      }
+
+      seenCodes.add(normalizedParticipantCode);
+
+      const existingSlot = await this.store.findByParticipantCode(studyId, normalizedParticipantCode);
+
+      if (existingSlot) {
+        continue;
+      }
+
+      try {
+        const participantSlot = await this.createValidatedParticipantSlot(studyId, participantCode, "platform_generated");
+        createdParticipantSlots.push(participantSlot);
+      } catch (error) {
+        if (!isDuplicateParticipantCodeError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    if (createdParticipantSlots.length < count) {
+      throw new ParticipantSlotValidationError("Unable to generate enough unique participant codes. Try a smaller count.");
+    }
+
+    return {
+      createdParticipantSlots
+    };
   }
 
   async archiveParticipantSlot(studyId: string, participantSlotId: string) {
@@ -120,6 +238,26 @@ export class ParticipantSlotService {
     }
 
     return archivedSlot;
+  }
+
+  private async createValidatedParticipantSlot(
+    studyId: string,
+    participantCode: string,
+    codeSource: ParticipantCodeSource
+  ) {
+    const normalizedParticipantCode = normalizeParticipantCode(participantCode);
+    const now = this.now().toISOString();
+    const slot: ParticipantSlot = {
+      id: this.createParticipantSlotId(),
+      studyId,
+      participantCode,
+      codeSource,
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+
+    return this.store.create(slot, normalizedParticipantCode);
   }
 }
 
@@ -334,11 +472,179 @@ function parseParticipantCode(value: string) {
     throw new ParticipantSlotValidationError("Participant code must be 80 characters or fewer.");
   }
 
+  if ([...participantCode].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
+    throw new ParticipantSlotValidationError("Participant code contains invalid characters.");
+  }
+
   return participantCode;
+}
+
+function parseCsvInput(value: unknown) {
+  if (typeof value !== "string") {
+    throw new ParticipantSlotValidationError("Participant slot CSV is required.");
+  }
+
+  if (!value.trim()) {
+    throw new ParticipantSlotValidationError("Participant slot CSV is required.");
+  }
+
+  if (value.length > 100_000) {
+    throw new ParticipantSlotValidationError("Participant slot CSV is too large.");
+  }
+
+  return value;
+}
+
+function parseGeneratedSlotCount(value: unknown) {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new ParticipantSlotValidationError("Generated slot count must be a whole number.");
+  }
+
+  if (value < 1 || value > 200) {
+    throw new ParticipantSlotValidationError("Generated slot count must be between 1 and 200.");
+  }
+
+  return value;
+}
+
+type ParsedParticipantCodeCsvRow =
+  | { readonly rowNumber: number; readonly participantCode: string }
+  | { readonly error: ParticipantSlotImportRejectedRow };
+
+function parseParticipantCodeCsv(csv: string): ParsedParticipantCodeCsvRow[] {
+  const parsedRows = parseCsvRows(csv);
+
+  if (parsedRows.length === 0) {
+    throw new ParticipantSlotValidationError("Participant slot CSV is required.");
+  }
+
+  const firstRow = parsedRows[0];
+  const hasHeader =
+    firstRow?.cells.length === 1 &&
+    ["participantcode", "participant_code"].includes(firstRow.cells[0]?.trim().toLowerCase() ?? "");
+  const dataRows = hasHeader ? parsedRows.slice(1) : parsedRows;
+
+  if (dataRows.length === 0) {
+    throw new ParticipantSlotValidationError("Participant slot CSV must include at least one participant code.");
+  }
+
+  return dataRows.map((row) => {
+    if (row.malformed) {
+      return {
+        error: {
+          rowNumber: row.rowNumber,
+          reason: "malformed",
+          message: "CSV row is malformed."
+        }
+      };
+    }
+
+    if (row.cells.length !== 1) {
+      return {
+        error: {
+          rowNumber: row.rowNumber,
+          reason: "invalid",
+          message: "CSV rows must contain exactly one participant code."
+        }
+      };
+    }
+
+    try {
+      return {
+        rowNumber: row.rowNumber,
+        participantCode: parseParticipantCode(row.cells[0] ?? "")
+      };
+    } catch (error) {
+      return {
+        error: {
+          rowNumber: row.rowNumber,
+          participantCode: row.cells[0]?.trim() || undefined,
+          reason: "invalid",
+          message: error instanceof ParticipantSlotValidationError ? error.safeMessage : "Participant code is invalid."
+        }
+      };
+    }
+  });
+}
+
+function parseCsvRows(csv: string) {
+  const rows: { rowNumber: number; cells: string[]; malformed?: true }[] = [];
+  let cells: string[] = [];
+  let cell = "";
+  let rowNumber = 1;
+  let inQuotes = false;
+  let malformed = false;
+
+  const pushRow = () => {
+    cells.push(cell);
+    if (cells.some((value) => value.trim())) {
+      rows.push({ rowNumber, cells, ...(malformed || inQuotes ? { malformed: true } : {}) });
+    }
+    cells = [];
+    cell = "";
+    malformed = false;
+  };
+
+  for (let index = 0; index < csv.length; index += 1) {
+    const char = csv[index];
+    const nextChar = csv[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        cell += '"';
+        index += 1;
+        continue;
+      }
+
+      if (cell.length === 0 && !inQuotes) {
+        inQuotes = true;
+        continue;
+      }
+
+      if (inQuotes) {
+        inQuotes = false;
+        continue;
+      }
+
+      malformed = true;
+      cell += char;
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      cells.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      pushRow();
+      if (char === "\r" && nextChar === "\n") {
+        index += 1;
+      }
+      rowNumber += 1;
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (cell.length > 0 || cells.length > 0) {
+    pushRow();
+  }
+
+  return rows;
 }
 
 function normalizeParticipantCode(participantCode: string) {
   return participantCode.trim().toUpperCase();
+}
+
+function createGeneratedParticipantCode() {
+  const randomBytes = new Uint8Array(5);
+  crypto.getRandomValues(randomBytes);
+  const code = [...randomBytes].map((byte) => byte.toString(36).padStart(2, "0")).join("").slice(0, 8).toUpperCase();
+  return `P-${code}`;
 }
 
 function participantCodeIndexPk(studyId: string, normalizedParticipantCode: string) {

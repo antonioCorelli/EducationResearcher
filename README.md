@@ -80,6 +80,22 @@ npm test
 npm run build
 ```
 
+## Participant Slot Import Format
+
+Participant slot CSV import accepts a single participant code column with an optional `participantCode` or
+`participant_code` header:
+
+```csv
+participantCode
+P001
+P002
+P003
+```
+
+Rows with duplicate, blank, malformed, overlong, or multi-column values are reported back to the researcher while valid
+rows are still created. Platform-generated participant slots accept a count from 1 to 200 and retry code generation when
+a generated code collides within the study.
+
 ## Database Workflow
 
 The initial DynamoDB model uses a table per data domain and is defined in `packages/data-schema`. AWS CDK table definitions live in `apps/infra`.

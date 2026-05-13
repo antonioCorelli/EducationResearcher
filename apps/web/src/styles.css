@@ -676,6 +676,60 @@ button.version-chip:hover {
   align-items: end;
 }
 
+.participant-slot-bulk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.36fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.participant-slot-bulk-panel {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.participant-slot-bulk-panel textarea {
+  min-height: 112px;
+}
+
+.participant-slot-import-result {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #f8faf8;
+  padding: 12px;
+}
+
+.participant-slot-import-result p {
+  margin: 0;
+  color: #2c3648;
+  font-weight: 700;
+}
+
+.participant-slot-rejection-list {
+  display: grid;
+  gap: 6px;
+}
+
+.participant-slot-rejection-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.18fr) minmax(96px, 0.3fr) minmax(0, 1fr);
+  gap: 10px;
+  border-top: 1px solid #e3e9e5;
+  padding-top: 6px;
+  color: #485466;
+}
+
+.participant-slot-rejection-row span {
+  overflow-wrap: anywhere;
+}
+
 .participant-slot-table {
   display: grid;
   overflow: auto;
@@ -732,10 +786,12 @@ button.version-chip:hover {
   .topline,
   .study-workspace,
   .settings-grid,
-  .study-setup-tabs,
-  .question-row,
-  .participant-slot-create-row,
-  .rubric-grid,
+    .study-setup-tabs,
+    .question-row,
+    .participant-slot-create-row,
+    .participant-slot-bulk-grid,
+    .participant-slot-rejection-row,
+    .rubric-grid,
   .grade-label-row,
   .grade-example-row,
   .version-diff-row dd {

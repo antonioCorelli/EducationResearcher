@@ -122,11 +122,23 @@ export interface ParticipantSlot {
   readonly id: string;
   readonly studyId: string;
   readonly participantCode: string;
-  readonly codeSource: "researcher_supplied";
+  readonly codeSource: "researcher_supplied" | "platform_generated";
   readonly status: "active" | "archived";
   readonly archivedAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface ParticipantSlotImportRejectedRow {
+  readonly rowNumber: number;
+  readonly participantCode?: string;
+  readonly reason: "duplicate" | "invalid" | "malformed";
+  readonly message: string;
+}
+
+export interface ParticipantSlotBulkSummary {
+  readonly createdCount: number;
+  readonly rejectedRows: ParticipantSlotImportRejectedRow[];
 }
 
 export type SurveyLayoutItem =
@@ -542,8 +554,13 @@ export function App() {
   const [studyTitleFocusRequest, setStudyTitleFocusRequest] = useState(0);
   const [activeStudySetupTab, setActiveStudySetupTab] = useState<StudySetupTab>("shell");
   const [participantCode, setParticipantCode] = useState("");
+  const [participantSlotCsv, setParticipantSlotCsv] = useState("");
+  const [generatedParticipantSlotCount, setGeneratedParticipantSlotCount] = useState(10);
+  const [participantSlotBulkSummary, setParticipantSlotBulkSummary] = useState<ParticipantSlotBulkSummary | null>(null);
   const [participantSlotError, setParticipantSlotError] = useState("");
   const [isSavingParticipantSlot, setIsSavingParticipantSlot] = useState(false);
+  const [isImportingParticipantSlots, setIsImportingParticipantSlots] = useState(false);
+  const [isGeneratingParticipantSlots, setIsGeneratingParticipantSlots] = useState(false);
   const [isArchivingParticipantSlotId, setIsArchivingParticipantSlotId] = useState<string | null>(null);
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
@@ -749,6 +766,9 @@ export function App() {
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
     setParticipantCode("");
+    setParticipantSlotCsv("");
+    setGeneratedParticipantSlotCount(10);
+    setParticipantSlotBulkSummary(null);
     setParticipantSlotError("");
     setParticipantSlotState({ status: "idle" });
     setIsArchivingParticipantSlotId(null);
@@ -782,6 +802,8 @@ export function App() {
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
     setParticipantCode("");
+    setParticipantSlotCsv("");
+    setParticipantSlotBulkSummary(null);
     setParticipantSlotError("");
     setIsArchivingParticipantSlotId(null);
   }
@@ -894,6 +916,7 @@ export function App() {
   async function handleSaveParticipantSlot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setParticipantSlotError("");
+    setParticipantSlotBulkSummary(null);
 
     const token = localStorage.getItem(accessTokenStorageKey);
 
@@ -930,8 +953,102 @@ export function App() {
     }
   }
 
+  async function handleImportParticipantSlots(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setParticipantSlotError("");
+    setParticipantSlotBulkSummary(null);
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setParticipantSlotError("Select a study before importing participant slots.");
+      return;
+    }
+
+    setIsImportingParticipantSlots(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/participant-slots/import`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          csv: participantSlotCsv
+        })
+      });
+      const payload = (await response.json()) as {
+        createdParticipantSlots?: ParticipantSlot[];
+        rejectedRows?: ParticipantSlotImportRejectedRow[];
+        message?: string;
+      };
+
+      if (!response.ok || !payload.createdParticipantSlots || !payload.rejectedRows) {
+        throw new Error(payload.message ?? "Unable to import participant slots.");
+      }
+
+      setParticipantSlotBulkSummary({
+        createdCount: payload.createdParticipantSlots.length,
+        rejectedRows: payload.rejectedRows
+      });
+      if (payload.rejectedRows.length === 0) {
+        setParticipantSlotCsv("");
+      }
+      await reloadParticipantSlots(token, selectedStudyId);
+    } catch (error) {
+      setParticipantSlotError(error instanceof Error ? error.message : "Unable to import participant slots.");
+    } finally {
+      setIsImportingParticipantSlots(false);
+    }
+  }
+
+  async function handleGenerateParticipantSlots(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setParticipantSlotError("");
+    setParticipantSlotBulkSummary(null);
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setParticipantSlotError("Select a study before generating participant slots.");
+      return;
+    }
+
+    setIsGeneratingParticipantSlots(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/participant-slots/generate`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          count: generatedParticipantSlotCount
+        })
+      });
+      const payload = (await response.json()) as { createdParticipantSlots?: ParticipantSlot[]; message?: string };
+
+      if (!response.ok || !payload.createdParticipantSlots) {
+        throw new Error(payload.message ?? "Unable to generate participant slots.");
+      }
+
+      setParticipantSlotBulkSummary({
+        createdCount: payload.createdParticipantSlots.length,
+        rejectedRows: []
+      });
+      await reloadParticipantSlots(token, selectedStudyId);
+    } catch (error) {
+      setParticipantSlotError(error instanceof Error ? error.message : "Unable to generate participant slots.");
+    } finally {
+      setIsGeneratingParticipantSlots(false);
+    }
+  }
+
   async function handleArchiveParticipantSlot(participantSlot: ParticipantSlot) {
     setParticipantSlotError("");
+    setParticipantSlotBulkSummary(null);
 
     const token = localStorage.getItem(accessTokenStorageKey);
 
@@ -1835,14 +1952,23 @@ export function App() {
             />
             <ResearcherParticipantSlots
               activeStudySetupTab={activeStudySetupTab}
+              generatedParticipantSlotCount={generatedParticipantSlotCount}
               isArchivingParticipantSlotId={isArchivingParticipantSlotId}
+              isGeneratingParticipantSlots={isGeneratingParticipantSlots}
+              isImportingParticipantSlots={isImportingParticipantSlots}
               isSavingParticipantSlot={isSavingParticipantSlot}
               participantCode={participantCode}
+              participantSlotBulkSummary={participantSlotBulkSummary}
+              participantSlotCsv={participantSlotCsv}
               participantSlotError={participantSlotError}
               participantSlotState={participantSlotState}
               selectedStudy={selectedStudy}
               onArchiveParticipantSlot={handleArchiveParticipantSlot}
+              onGenerateParticipantSlots={handleGenerateParticipantSlots}
+              onGeneratedParticipantSlotCountChange={setGeneratedParticipantSlotCount}
+              onImportParticipantSlots={handleImportParticipantSlots}
               onParticipantCodeChange={setParticipantCode}
+              onParticipantSlotCsvChange={setParticipantSlotCsv}
               onSaveParticipantSlot={handleSaveParticipantSlot}
             />
           </>
