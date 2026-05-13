@@ -10,6 +10,7 @@ import { Participant } from "./participant";
 import { Researcher } from "./researcher";
 import { createConsentForm, defaultConsentForm, ResearcherConsent } from "./researcher/consent";
 import { ResearcherParticipantSlots } from "./researcher/participantSlots";
+import { ResearcherRuns } from "./researcher/runs";
 import { createEmptyObjectiveDraft, createObjectiveDraftsFromVersions, ResearcherScoring } from "./researcher/scoring";
 import { createStudyShellForm, defaultStudyShellForm, ResearcherShell } from "./researcher/shell";
 import { createSurveyItemsFromVersion, defaultSurveyItems, ResearcherSurvey } from "./researcher/survey";
@@ -47,7 +48,7 @@ export interface StudyShell {
   };
 }
 
-export type StudySetupTab = "shell" | "consent" | "survey" | "objectives";
+export type StudySetupTab = "shell" | "consent" | "survey" | "objectives" | "runs";
 
 export type ConsentMethod = "checkmark" | "electronic_signature";
 
@@ -141,6 +142,33 @@ export interface ParticipantSlotBulkSummary {
   readonly rejectedRows: ParticipantSlotImportRejectedRow[];
 }
 
+export interface Run {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly consentVersionId: string;
+  readonly surveyVersionId: string;
+  readonly personaVersionId: string;
+  readonly objectiveVersionIds: readonly string[];
+  readonly freshnessDeadlineAt: string;
+  readonly maxInterviewMinutes: number;
+  readonly status:
+    | "created"
+    | "consented"
+    | "survey_in_progress"
+    | "survey_completed"
+    | "interview_in_progress"
+    | "interview_paused"
+    | "interview_completed"
+    | "stale"
+    | "partial"
+    | "technical_interruption"
+    | "scored";
+  readonly currentRunForSlot: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export type SurveyLayoutItem =
   | {
       readonly type: "question";
@@ -186,6 +214,11 @@ export type ObjectiveState =
 export type ParticipantSlotState =
   | { readonly status: "idle" | "loading" }
   | { readonly status: "ready"; readonly participantSlots: ParticipantSlot[] }
+  | { readonly status: "error"; readonly message: string };
+
+export type RunState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly runs: Run[] }
   | { readonly status: "error"; readonly message: string };
 
 export type SurveyDraftItem =
@@ -532,6 +565,22 @@ async function fetchParticipantSlots(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchRuns(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/runs`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to load runs.");
+  }
+
+  return (await response.json()) as {
+    runs: Run[];
+  };
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -542,6 +591,7 @@ export function App() {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenStorageKey));
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
   const [participantSlotState, setParticipantSlotState] = useState<ParticipantSlotState>({ status: "idle" });
+  const [runState, setRunState] = useState<RunState>({ status: "idle" });
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
   const [objectiveState, setObjectiveState] = useState<ObjectiveState>({ status: "idle" });
@@ -562,6 +612,9 @@ export function App() {
   const [isImportingParticipantSlots, setIsImportingParticipantSlots] = useState(false);
   const [isGeneratingParticipantSlots, setIsGeneratingParticipantSlots] = useState(false);
   const [isArchivingParticipantSlotId, setIsArchivingParticipantSlotId] = useState<string | null>(null);
+  const [selectedRunParticipantSlotIds, setSelectedRunParticipantSlotIds] = useState<readonly string[]>([]);
+  const [runError, setRunError] = useState("");
+  const [isCreatingRuns, setIsCreatingRuns] = useState(false);
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
   const [consentError, setConsentError] = useState("");
@@ -647,6 +700,21 @@ export function App() {
         setParticipantSlotError("");
       })
       .catch(() => setParticipantSlotState({ status: "error", message: "Unable to load participant slots." }));
+  }, [accessToken, selectedStudyId, session.status]);
+
+  useEffect(() => {
+    if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
+      setRunState({ status: "idle" });
+      return;
+    }
+
+    setRunState({ status: "loading" });
+    fetchRuns(accessToken, selectedStudyId)
+      .then((runs) => {
+        setRunState({ status: "ready", ...runs });
+        setRunError("");
+      })
+      .catch(() => setRunState({ status: "error", message: "Unable to load runs." }));
   }, [accessToken, selectedStudyId, session.status]);
 
   useEffect(() => {
@@ -772,6 +840,10 @@ export function App() {
     setParticipantSlotError("");
     setParticipantSlotState({ status: "idle" });
     setIsArchivingParticipantSlotId(null);
+    setRunState({ status: "idle" });
+    setSelectedRunParticipantSlotIds([]);
+    setRunError("");
+    setIsCreatingRuns(false);
     setConsentText(consentForm.consentText);
     setConsentMethod(consentForm.consentMethod);
     setConsentError("");
@@ -806,6 +878,9 @@ export function App() {
     setParticipantSlotBulkSummary(null);
     setParticipantSlotError("");
     setIsArchivingParticipantSlotId(null);
+    setSelectedRunParticipantSlotIds([]);
+    setRunError("");
+    setIsCreatingRuns(false);
   }
 
   function loadConsentForm(consentVersion: ConsentVersion | undefined) {
@@ -913,6 +988,11 @@ export function App() {
     setParticipantSlotState({ status: "ready", ...participantSlots });
   }
 
+  async function reloadRuns(token: string, studyId: string) {
+    const runs = await fetchRuns(token, studyId);
+    setRunState({ status: "ready", ...runs });
+  }
+
   async function handleSaveParticipantSlot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setParticipantSlotError("");
@@ -946,6 +1026,7 @@ export function App() {
 
       setParticipantCode("");
       await reloadParticipantSlots(token, selectedStudyId);
+      await reloadRuns(token, selectedStudyId);
     } catch (error) {
       setParticipantSlotError(error instanceof Error ? error.message : "Unable to add participant slot.");
     } finally {
@@ -996,6 +1077,7 @@ export function App() {
         setParticipantSlotCsv("");
       }
       await reloadParticipantSlots(token, selectedStudyId);
+      await reloadRuns(token, selectedStudyId);
     } catch (error) {
       setParticipantSlotError(error instanceof Error ? error.message : "Unable to import participant slots.");
     } finally {
@@ -1039,6 +1121,7 @@ export function App() {
         rejectedRows: []
       });
       await reloadParticipantSlots(token, selectedStudyId);
+      await reloadRuns(token, selectedStudyId);
     } catch (error) {
       setParticipantSlotError(error instanceof Error ? error.message : "Unable to generate participant slots.");
     } finally {
@@ -1076,10 +1159,50 @@ export function App() {
       }
 
       await reloadParticipantSlots(token, selectedStudyId);
+      await reloadRuns(token, selectedStudyId);
     } catch (error) {
       setParticipantSlotError(error instanceof Error ? error.message : "Unable to archive participant slot.");
     } finally {
       setIsArchivingParticipantSlotId(null);
+    }
+  }
+
+  async function handleCreateRuns(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setRunError("");
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setRunError("Select a study before creating runs.");
+      return;
+    }
+
+    setIsCreatingRuns(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/researcher/studies/${selectedStudyId}/runs`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          participantSlotIds: selectedRunParticipantSlotIds
+        })
+      });
+      const payload = (await response.json()) as { createdRuns?: Run[]; message?: string };
+
+      if (!response.ok || !payload.createdRuns) {
+        throw new Error(payload.message ?? "Unable to create runs.");
+      }
+
+      setSelectedRunParticipantSlotIds([]);
+      await reloadRuns(token, selectedStudyId);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : "Unable to create runs.");
+    } finally {
+      setIsCreatingRuns(false);
     }
   }
 
@@ -1759,6 +1882,7 @@ export function App() {
         ? objectiveState.objectiveVersions.some((version) => version.id === versionId && !version.isActive)
         : false
     );
+    const participantSlots = participantSlotState.status === "ready" ? participantSlotState.participantSlots : [];
 
     return (
       <Researcher
@@ -1930,6 +2054,19 @@ export function App() {
             onUpdateObjective={updateObjective}
             onUpdateObjectiveGradeExample={updateObjectiveGradeExample}
             onUpdateObjectiveGradeLabel={updateObjectiveGradeLabel}
+          />
+        }
+        runsPanel={
+          <ResearcherRuns
+            activeStudySetupTab={activeStudySetupTab}
+            isCreatingRuns={isCreatingRuns}
+            participantSlots={participantSlots}
+            runError={runError}
+            runState={runState}
+            selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
+            selectedStudy={selectedStudy}
+            onCreateRuns={handleCreateRuns}
+            onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
           />
         }
         selectedStudyId={selectedStudyId}

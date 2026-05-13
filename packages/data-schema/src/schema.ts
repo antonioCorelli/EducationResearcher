@@ -400,6 +400,7 @@ export const DATA_DOMAIN_TABLES = [
           "surveyVersionId",
           "consentVersionId",
           "personaVersionId",
+          "objectiveVersionIds",
           "freshnessDeadlineAt",
           "maxInterviewMinutes",
           "currentRunForSlot"
@@ -431,6 +432,11 @@ export const DATA_DOMAIN_TABLES = [
             attribute: "personaVersionId",
             references: "interviewer_persona_version",
             relationship: "Immutable persona version used by the run."
+          },
+          {
+            attribute: "objectiveVersionIds",
+            references: "objective_version",
+            relationship: "Immutable objective version set used by the run."
           }
         ]
       },

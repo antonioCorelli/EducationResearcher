@@ -211,6 +211,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       surveyVersionId: "survey_version_001",
       consentVersionId: "consent_version_001",
       personaVersionId: "persona_version_v1_default_001",
+      objectiveVersionIds: ["objective_version_001"],
       freshnessDeadlineAt: "2026-05-18T12:00:00.000Z",
       maxInterviewMinutes: 45,
       status: "scored",

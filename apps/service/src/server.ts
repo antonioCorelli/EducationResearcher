@@ -38,6 +38,14 @@ import {
   type SurveyVersionStore
 } from "./survey.js";
 import {
+  RunService,
+  createConfiguredRunStore,
+  toSafeRunValidationResponse,
+  type CreateRunsInput,
+  type RunServiceOptions,
+  type RunStore
+} from "./runs.js";
+import {
   StudyAuthorizationService,
   toSafeAuthorizationResponse
 } from "./authorization.js";
@@ -58,6 +66,8 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly objectiveVersionStore?: ObjectiveVersionStore;
   readonly participantSlotServiceOptions?: ParticipantSlotServiceOptions;
   readonly participantSlotStore?: ParticipantSlotStore;
+  readonly runServiceOptions?: RunServiceOptions;
+  readonly runStore?: RunStore;
   readonly studyShellStore?: StudyShellStore;
   readonly surveyVersionStore?: SurveyVersionStore;
 }
@@ -388,6 +398,45 @@ function coerceGenerateParticipantSlotsInput(body: unknown): GenerateParticipant
   };
 }
 
+function coerceCreateRunsInput(body: unknown): CreateRunsInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Select at least one participant slot."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "status" in record ||
+    "currentRunForSlot" in record ||
+    "freshnessDeadlineAt" in record ||
+    "maxInterviewMinutes" in record ||
+    "consentVersionId" in record ||
+    "surveyVersionId" in record ||
+    "personaVersionId" in record ||
+    "objectiveVersionIds" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Run metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    participantSlotIds: record.participantSlotIds
+  };
+}
+
 function rejectObjectiveMetadata(value: unknown) {
   if (!Array.isArray(value)) {
     return;
@@ -522,6 +571,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
     participantSlotServiceOptions,
     participantSlotStore = createConfiguredParticipantSlotStore(),
+    runServiceOptions,
+    runStore = createConfiguredRunStore(),
     studyShellStore = createConfiguredStudyShellStore(),
     surveyVersionStore = createConfiguredSurveyVersionStore(),
     ...fastifyOptions
@@ -531,6 +582,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const consentService = new ConsentService(consentVersionStore, studyShellStore);
   const objectiveService = new ObjectiveService(objectiveVersionStore);
   const participantSlotService = new ParticipantSlotService(participantSlotStore, participantSlotServiceOptions);
+  const runService = new RunService(runStore, participantSlotStore, objectiveVersionStore, runServiceOptions);
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
   const server = Fastify({
@@ -917,6 +969,60 @@ export function buildServer(options: BuildServerOptions = {}) {
   );
 
   server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/runs",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read");
+
+        return runService.listForStudy(request.params.studyId);
+      } catch (error) {
+        const safeAuthorization = toSafeAuthorizationResponse(error);
+
+        if (safeAuthorization) {
+          return reply.code(safeAuthorization.statusCode).send(safeAuthorization.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/runs",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const study = await studyShellStore.getById(request.params.studyId);
+
+        if (!study) {
+          const safeAuthorization = toSafeAuthorizationResponse(new Error());
+          return reply.code(safeAuthorization?.statusCode ?? 403).send(
+            safeAuthorization?.body ?? {
+              error: "Forbidden",
+              message: "You are not authorized to access this study resource."
+            }
+          );
+        }
+
+        const result = await runService.createRuns(study, coerceCreateRunsInput(request.body));
+
+        return reply.code(201).send(result);
+      } catch (error) {
+        const safeResponse =
+          toSafeAuthorizationResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.get<{ Params: StudyParams }>(
     "/researcher/studies/:studyId/survey",
     { preHandler: requireResearcher },
     async (request, reply) => {
@@ -1115,6 +1221,13 @@ export function buildServer(options: BuildServerOptions = {}) {
     participantRoute: "public",
     message: "Participant routes do not require researcher sign-in."
   }));
+
+  server.post("/participant/runs", async (_request, reply) =>
+    reply.code(403).send({
+      error: "Forbidden",
+      message: "Participants cannot create or reset runs."
+    })
+  );
 
   return server;
 }

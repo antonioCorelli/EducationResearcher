@@ -3,6 +3,7 @@ import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
 import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
 import { InMemoryParticipantSlotStore } from "./participant-slots.js";
+import { InMemoryRunStore, type Run } from "./runs.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -207,6 +208,25 @@ describe("participant routes", () => {
     expect(response.json()).toEqual({
       participantRoute: "public",
       message: "Participant routes do not require researcher sign-in."
+    });
+
+    await server.close();
+  });
+
+  it("denies participant self-created run resets", async () => {
+    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false });
+    const response = await server.inject({
+      method: "POST",
+      url: "/participant/runs",
+      payload: {
+        participantSlotId: "slot_fixture_001"
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "Forbidden",
+      message: "Participants cannot create or reset runs."
     });
 
     await server.close();
@@ -746,6 +766,307 @@ describe("researcher participant slot routes", () => {
     });
     expect(archiveResponse.json().participantSlot.archivedAt).toEqual(expect.any(String));
     expect(crossTenantResponse.statusCode).toBe(403);
+
+    await server.close();
+  });
+});
+
+describe("researcher run routes", () => {
+  const configuredStudy = createFixtureStudy({
+    activeConsentVersionId: "consent_version_active",
+    activeSurveyVersionId: "survey_version_active"
+  });
+  const activeParticipantSlots = [
+    {
+      id: "slot_fixture_001",
+      studyId: "study_fixture_001",
+      participantCode: "P001",
+      codeSource: "researcher_supplied" as const,
+      status: "active" as const,
+      createdAt: "2026-05-06T12:00:00.000Z",
+      updatedAt: "2026-05-06T12:00:00.000Z"
+    },
+    {
+      id: "slot_fixture_002",
+      studyId: "study_fixture_001",
+      participantCode: "P002",
+      codeSource: "researcher_supplied" as const,
+      status: "active" as const,
+      createdAt: "2026-05-06T12:00:00.000Z",
+      updatedAt: "2026-05-06T12:00:00.000Z"
+    }
+  ];
+  const activeObjectives: ObjectiveVersion[] = [
+    {
+      id: "objective_version_001",
+      studyId: "study_fixture_001",
+      objectiveKey: "reasoning_quality",
+      versionNumber: 1,
+      title: "Reasoning Quality",
+      description: "Reasoning.",
+      gradeScale: ["1", "2"],
+      gradeExamples: [],
+      evidenceRequirements: "Use evidence.",
+      sortOrder: 2,
+      isEnabled: true,
+      isActive: true,
+      createdAt: "2026-05-06T12:00:00.000Z"
+    },
+    {
+      id: "objective_version_002",
+      studyId: "study_fixture_001",
+      objectiveKey: "evidence_quality",
+      versionNumber: 1,
+      title: "Evidence Quality",
+      description: "Evidence.",
+      gradeScale: ["1", "2"],
+      gradeExamples: [],
+      evidenceRequirements: "Use evidence.",
+      sortOrder: 1,
+      isEnabled: true,
+      isActive: true,
+      createdAt: "2026-05-06T12:01:00.000Z"
+    },
+    {
+      id: "objective_version_disabled",
+      studyId: "study_fixture_001",
+      objectiveKey: "disabled_quality",
+      versionNumber: 1,
+      title: "Disabled Quality",
+      description: "Disabled.",
+      gradeScale: ["1", "2"],
+      gradeExamples: [],
+      evidenceRequirements: "Use evidence.",
+      sortOrder: 3,
+      isEnabled: false,
+      isActive: true,
+      createdAt: "2026-05-06T12:02:00.000Z"
+    }
+  ];
+
+  it("creates researcher-authorized runs for one or more slots with immutable active configuration references", async () => {
+    const studyStore = new InMemoryStudyShellStore([configuredStudy]);
+    const participantSlotStore = new InMemoryParticipantSlotStore(activeParticipantSlots);
+    const objectiveVersionStore = new InMemoryObjectiveVersionStore(activeObjectives);
+    const runStore = new InMemoryRunStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore,
+      participantSlotStore,
+      runServiceOptions: {
+        createRunId: (() => {
+          const ids = ["run_fixture_001", "run_fixture_002"];
+          return () => ids.shift() ?? "run_fixture_extra";
+        })(),
+        now: () => new Date("2026-05-06T12:00:00.000Z")
+      },
+      runStore,
+      studyShellStore: studyStore
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        participantSlotIds: ["slot_fixture_001", "slot_fixture_002"]
+      }
+    });
+    const listResponse = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      createdRuns: [
+        {
+          id: "run_fixture_001",
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          consentVersionId: "consent_version_active",
+          surveyVersionId: "survey_version_active",
+          personaVersionId: "persona_version_v1_default_001",
+          objectiveVersionIds: ["objective_version_002", "objective_version_001"],
+          freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+          maxInterviewMinutes: 45,
+          status: "created",
+          currentRunForSlot: true
+        },
+        {
+          id: "run_fixture_002",
+          participantSlotId: "slot_fixture_002",
+          currentRunForSlot: true
+        }
+      ]
+    });
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().runs).toHaveLength(2);
+
+    await server.close();
+  });
+
+  it("sets only the newest run as current for a slot while preserving prior runs", async () => {
+    const studyStore = new InMemoryStudyShellStore([configuredStudy]);
+    const participantSlotStore = new InMemoryParticipantSlotStore([activeParticipantSlots[0]!]);
+    const objectiveVersionStore = new InMemoryObjectiveVersionStore(activeObjectives);
+    const existingRun: Run = {
+      id: "run_existing_001",
+      studyId: "study_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      consentVersionId: "consent_version_old",
+      surveyVersionId: "survey_version_old",
+      personaVersionId: "persona_version_v1_default_001",
+      objectiveVersionIds: ["objective_version_old"],
+      freshnessDeadlineAt: "2026-05-12T12:00:00.000Z",
+      maxInterviewMinutes: 45,
+      status: "scored",
+      currentRunForSlot: true,
+      createdAt: "2026-05-01T12:00:00.000Z",
+      updatedAt: "2026-05-01T13:00:00.000Z"
+    };
+    const runStore = new InMemoryRunStore([existingRun]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore,
+      participantSlotStore,
+      runServiceOptions: {
+        createRunId: () => "run_new_001",
+        now: () => new Date("2026-05-06T12:00:00.000Z")
+      },
+      runStore,
+      studyShellStore: studyStore
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        participantSlotIds: ["slot_fixture_001"]
+      }
+    });
+    const runs = await runStore.listByParticipantSlot("slot_fixture_001");
+
+    expect(response.statusCode).toBe(201);
+    expect(runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "run_existing_001", currentRunForSlot: false }),
+        expect.objectContaining({ id: "run_new_001", currentRunForSlot: true })
+      ])
+    );
+
+    await server.close();
+  });
+
+  it("validates run prerequisites, researcher authorization, slot state, and service-owned metadata", async () => {
+    const missingConfigStudy = createFixtureStudy({
+      id: "study_missing_config",
+      activeConsentVersionId: undefined,
+      activeSurveyVersionId: undefined
+    });
+    const studyStore = new InMemoryStudyShellStore([missingConfigStudy, configuredStudy]);
+    const participantSlotStore = new InMemoryParticipantSlotStore([
+      activeParticipantSlots[0]!,
+      {
+        id: "slot_missing_config",
+        studyId: "study_missing_config",
+        participantCode: "PX01",
+        codeSource: "researcher_supplied" as const,
+        status: "active" as const,
+        createdAt: "2026-05-06T12:00:00.000Z",
+        updatedAt: "2026-05-06T12:00:00.000Z"
+      },
+      {
+        ...activeParticipantSlots[1]!,
+        status: "archived" as const,
+        archivedAt: "2026-05-06T12:05:00.000Z"
+      }
+    ]);
+    const objectiveVersionStore = new InMemoryObjectiveVersionStore(activeObjectives);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore,
+      participantSlotStore,
+      runStore: new InMemoryRunStore(),
+      studyShellStore: studyStore
+    });
+    const headers = {
+      authorization: `Bearer ${tokens.accessToken}`
+    };
+    const missingSelection = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers,
+      payload: {
+        participantSlotIds: []
+      }
+    });
+    const metadataAttempt = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers,
+      payload: {
+        participantSlotIds: ["slot_fixture_001"],
+        status: "created"
+      }
+    });
+    const missingConfig = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_missing_config/runs",
+      headers,
+      payload: {
+        participantSlotIds: ["slot_missing_config"]
+      }
+    });
+    const archivedSlot = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers,
+      payload: {
+        participantSlotIds: ["slot_fixture_002"]
+      }
+    });
+    const crossTenant = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      },
+      payload: {
+        participantSlotIds: ["slot_fixture_001"]
+      }
+    });
+
+    expect(missingSelection.statusCode).toBe(400);
+    expect(missingSelection.json()).toEqual({
+      error: "Bad Request",
+      message: "Select at least one participant slot."
+    });
+    expect(metadataAttempt.statusCode).toBe(400);
+    expect(metadataAttempt.json()).toEqual({
+      error: "Bad Request",
+      message: "Run metadata is assigned by the service."
+    });
+    expect(missingConfig.statusCode).toBe(400);
+    expect(missingConfig.json()).toEqual({
+      error: "Bad Request",
+      message: "Active consent is required before creating runs."
+    });
+    expect(archivedSlot.statusCode).toBe(400);
+    expect(archivedSlot.json()).toEqual({
+      error: "Bad Request",
+      message: "Runs can only be created for active participant slots."
+    });
+    expect(crossTenant.statusCode).toBe(403);
 
     await server.close();
   });
