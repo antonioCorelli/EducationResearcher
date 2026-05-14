@@ -1,4 +1,4 @@
-export const DATA_SCHEMA_VERSION = "2026-05-04-issue-4";
+export const DATA_SCHEMA_VERSION = "2026-05-13-issue-15";
 
 export const ENVIRONMENT_PLACEHOLDER = "{environment}";
 
@@ -404,6 +404,7 @@ export const DATA_DOMAIN_TABLES = [
           "objectiveVersionIds",
           "freshnessDeadlineAt",
           "maxInterviewMinutes",
+          "status",
           "currentRunForSlot"
         ],
         statusAttributes: ["status"],

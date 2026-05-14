@@ -93,13 +93,22 @@ describe("data domain schema", () => {
   });
 
   it("stores immutable configuration references on run fixtures", () => {
+    const runDefinition = getEntityDefinition("run")?.definition;
     const run = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "run");
 
+    expect(runDefinition?.requiredAttributes).toEqual(
+      expect.arrayContaining([
+        "status",
+        "freshnessDeadlineAt",
+        "currentRunForSlot"
+      ])
+    );
     expect(run?.attributes).toMatchObject({
       consentVersionId: "consent_version_001",
       surveyVersionId: "survey_version_001",
       personaVersionId: "persona_version_v1_default_001",
-      objectiveVersionIds: ["objective_version_001"]
+      objectiveVersionIds: ["objective_version_001"],
+      status: "scored"
     });
   });
 

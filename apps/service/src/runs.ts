@@ -5,18 +5,35 @@ import type { ObjectiveVersionStore } from "./objectives.js";
 import type { ParticipantSlotStore } from "./participant-slots.js";
 import type { StudyShell } from "./study-shell.js";
 
-export type RunStatus =
-  | "created"
-  | "consented"
-  | "survey_in_progress"
-  | "survey_completed"
-  | "interview_in_progress"
-  | "interview_paused"
-  | "interview_completed"
-  | "stale"
-  | "partial"
-  | "technical_interruption"
-  | "scored";
+export const RUN_STATUSES = [
+  "created",
+  "consented",
+  "survey_in_progress",
+  "survey_completed",
+  "interview_in_progress",
+  "interview_paused",
+  "interview_completed",
+  "stale",
+  "partial",
+  "technical_interruption",
+  "scored"
+] as const;
+
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export const RUN_STATUS_TRANSITIONS = {
+  created: ["consented"],
+  consented: ["survey_in_progress"],
+  survey_in_progress: ["survey_completed", "stale"],
+  survey_completed: ["interview_in_progress", "stale", "partial"],
+  interview_in_progress: ["interview_completed", "interview_paused", "stale", "technical_interruption"],
+  interview_paused: ["interview_in_progress", "stale", "partial"],
+  interview_completed: ["scored"],
+  stale: ["scored"],
+  partial: ["scored"],
+  technical_interruption: ["scored", "partial"],
+  scored: []
+} as const satisfies Record<RunStatus, readonly RunStatus[]>;
 
 export interface Run {
   readonly id: string;
@@ -73,6 +90,7 @@ export interface RunStore {
   listByStudy(studyId: string): Promise<Run[]>;
   listByParticipantSlot(participantSlotId: string): Promise<Run[]>;
   create(run: Run, previousCurrentRuns: readonly Run[]): Promise<Run>;
+  updateStatus(run: Run, previousStatus: RunStatus): Promise<Run>;
 }
 
 export interface ParticipantAccessTokenStore {
@@ -325,6 +343,22 @@ export class RunService {
     };
   }
 
+  async transitionRunStatus(runId: string, status: RunStatus) {
+    const run = await this.runStore.getById(runId);
+
+    if (!run) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    const transitionedRun = applyRunStatusTransition(run, status, this.now());
+
+    if (transitionedRun === run) {
+      return run;
+    }
+
+    return this.runStore.updateStatus(transitionedRun, run.status);
+  }
+
   private async toResearcherRun(run: Run, rawToken?: string): Promise<ResearcherRun> {
     let token = rawToken;
     let tokenId: string | undefined;
@@ -389,6 +423,21 @@ export class InMemoryRunStore implements RunStore {
         currentRunForSlot: false,
         updatedAt: run.createdAt
       });
+    }
+
+    this.runs.set(run.id, run);
+    return run;
+  }
+
+  async updateStatus(run: Run, previousStatus: RunStatus) {
+    const currentRun = this.runs.get(run.id);
+
+    if (!currentRun) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    if (currentRun.status !== previousStatus) {
+      throw new RunValidationError(`Run cannot transition from ${currentRun.status} to ${run.status}.`);
     }
 
     this.runs.set(run.id, run);
@@ -470,21 +519,8 @@ export class DynamoDbRunStore implements RunStore {
   }
 
   async listByStudy(studyId: string) {
-    const statuses: RunStatus[] = [
-      "created",
-      "consented",
-      "survey_in_progress",
-      "survey_completed",
-      "interview_in_progress",
-      "interview_paused",
-      "interview_completed",
-      "stale",
-      "partial",
-      "technical_interruption",
-      "scored"
-    ];
     const resultSets = await Promise.all(
-      statuses.map((status) =>
+      RUN_STATUSES.map((status) =>
         this.documentClient.send(
           new QueryCommand({
             TableName: this.tableName,
@@ -551,6 +587,34 @@ export class DynamoDbRunStore implements RunStore {
     );
 
     return run;
+  }
+
+  async updateStatus(run: Run, previousStatus: RunStatus) {
+    const response = await this.documentClient.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: {
+          pk: `RUN#${run.id}`,
+          sk: "PROFILE"
+        },
+        UpdateExpression:
+          "SET #status = :status, updatedAt = :updatedAt, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
+        ConditionExpression: "attribute_exists(pk) AND #status = :previousStatus",
+        ExpressionAttributeNames: {
+          "#status": "status"
+        },
+        ExpressionAttributeValues: {
+          ":status": run.status,
+          ":previousStatus": previousStatus,
+          ":updatedAt": run.updatedAt,
+          ":gsi1pk": studyRunStatusPk(run.studyId, run.status),
+          ":gsi1sk": studyRunStatusSk(run)
+        },
+        ReturnValues: "ALL_NEW"
+      })
+    );
+
+    return toRun(response.Attributes as RunItem);
   }
 }
 
@@ -694,6 +758,28 @@ export function hashParticipantAccessTokenForTest(token: string) {
   return hashParticipantAccessToken(token);
 }
 
+export function isRunStatusTransitionAllowed(from: RunStatus, to: RunStatus) {
+  const allowedStatuses: readonly RunStatus[] = RUN_STATUS_TRANSITIONS[from];
+
+  return from === to || allowedStatuses.includes(to);
+}
+
+export function applyRunStatusTransition(run: Run, status: RunStatus, now: Date): Run {
+  if (run.status === status) {
+    return run;
+  }
+
+  if (!isRunStatusTransitionAllowed(run.status, status)) {
+    throw new RunValidationError(`Run cannot transition from ${run.status} to ${status}.`);
+  }
+
+  return {
+    ...run,
+    status,
+    updatedAt: now.toISOString()
+  };
+}
+
 function parseParticipantSlotIds(value: unknown) {
   if (!Array.isArray(value)) {
     throw new RunValidationError("Select at least one participant slot.");
@@ -826,7 +912,7 @@ function toRunItem(run: Run): RunItem {
     pk: `RUN#${run.id}`,
     sk: "PROFILE",
     gsi1pk: studyRunStatusPk(run.studyId, run.status),
-    gsi1sk: `FRESHNESS#${run.freshnessDeadlineAt}#RUN#${run.id}`,
+    gsi1sk: studyRunStatusSk(run),
     gsi2pk: `SLOT#${run.participantSlotId}`,
     gsi2sk: `RUN#${run.createdAt}#${run.id}`,
     id: run.id,
@@ -843,6 +929,10 @@ function toRunItem(run: Run): RunItem {
     createdAt: run.createdAt,
     updatedAt: run.updatedAt
   };
+}
+
+function studyRunStatusSk(run: Run) {
+  return `FRESHNESS#${run.freshnessDeadlineAt}#RUN#${run.id}`;
 }
 
 function toRun(item: RunItem): Run {
