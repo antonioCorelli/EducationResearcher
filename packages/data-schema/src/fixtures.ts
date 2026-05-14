@@ -290,7 +290,11 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
     gsi3sk: "GAP_MAP#2026-05-04T12:25:00.000Z#gap_map_001",
     attributes: {
       id: "gap_map_001",
+      studyId: "study_formative_001",
+      participantSlotId: "slot_fixture_001",
       runId: "run_fixture_001",
+      surveyVersionId: "survey_version_001",
+      objectiveVersionIds: ["objective_version_001"],
       status: "generated",
       modelName: "fake-gap-map",
       modelVersion: "local-1",

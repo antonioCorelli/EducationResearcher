@@ -1,4 +1,4 @@
-export const DATA_SCHEMA_VERSION = "2026-05-13-issue-15";
+export const DATA_SCHEMA_VERSION = "2026-05-13-issue-19";
 
 export const ENVIRONMENT_PLACEHOLDER = "{environment}";
 
@@ -543,7 +543,12 @@ export const DATA_DOMAIN_TABLES = [
         sortKeyPattern: "GAP_MAP#<gap_map_id>",
         requiredAttributes: [
           "id",
+          "studyId",
+          "participantSlotId",
           "runId",
+          "surveyVersionId",
+          "objectiveVersionIds",
+          "status",
           "modelName",
           "modelVersion",
           "alreadyAnswered",

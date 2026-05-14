@@ -21,6 +21,10 @@ import {
   type SaveObjectivesInput
 } from "./objectives.js";
 import {
+  createConfiguredGapMapGenerator,
+  type GapMapGenerator
+} from "./gap-map.js";
+import {
   ParticipantSlotService,
   createConfiguredParticipantSlotStore,
   toSafeParticipantSlotValidationResponse,
@@ -68,6 +72,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly authProvider?: AuthProvider;
   readonly consentVersionStore?: ConsentVersionStore;
   readonly corsOrigin?: string | string[];
+  readonly gapMapGenerator?: GapMapGenerator;
   readonly objectiveVersionStore?: ObjectiveVersionStore;
   readonly participantSlotServiceOptions?: ParticipantSlotServiceOptions;
   readonly participantSlotStore?: ParticipantSlotStore;
@@ -683,6 +688,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     authProvider,
     consentVersionStore = createConfiguredConsentVersionStore(),
     corsOrigin = true,
+    gapMapGenerator = createConfiguredGapMapGenerator(),
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
     participantAccessTokenStore = createConfiguredParticipantAccessTokenStore(),
     participantSlotServiceOptions,
@@ -705,7 +711,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     objectiveVersionStore,
     consentVersionStore,
     surveyVersionStore,
-    runServiceOptions
+    runServiceOptions,
+    gapMapGenerator
   );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));

@@ -9,7 +9,15 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { ConsentMethod, ConsentVersion, ConsentVersionStore } from "./consent.js";
-import type { ObjectiveVersionStore } from "./objectives.js";
+import {
+  GapMapValidationError,
+  createConfiguredGapMapGenerator,
+  parseGapMapGeneratorOutput,
+  type GapMap,
+  type GapMapFailureCategory,
+  type GapMapGenerator
+} from "./gap-map.js";
+import type { ObjectiveVersion, ObjectiveVersionStore } from "./objectives.js";
 import type { ParticipantSlotStore } from "./participant-slots.js";
 import type { StudyShell } from "./study-shell.js";
 import type { SurveyQuestion, SurveyVersion, SurveyVersionStore } from "./survey.js";
@@ -130,12 +138,15 @@ export interface SurveyResponse {
   readonly createdAt: string;
 }
 
+export type { GapMap } from "./gap-map.js";
+
 export interface RunStore {
   getById(runId: string): Promise<Run | undefined>;
   listByStudy(studyId: string): Promise<Run[]>;
   listByParticipantSlot(participantSlotId: string): Promise<Run[]>;
   listConsentRecordsByRun(runId: string): Promise<ConsentRecord[]>;
   listSurveyResponsesByRun(runId: string): Promise<SurveyResponse[]>;
+  listGapMapsByRun(runId: string): Promise<GapMap[]>;
   create(run: Run, previousCurrentRuns: readonly Run[]): Promise<Run>;
   updateStatus(run: Run, previousStatus: RunStatus): Promise<Run>;
   captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus): Promise<{
@@ -146,6 +157,7 @@ export interface RunStore {
     surveyResponses: readonly SurveyResponse[];
     run: Run;
   }>;
+  saveGapMap(gapMap: GapMap): Promise<GapMap>;
 }
 
 export interface ParticipantAccessTokenStore {
@@ -233,6 +245,31 @@ interface SurveyResponseItem {
   readonly createdAt: string;
 }
 
+interface GapMapItem {
+  readonly entity: "gap_map";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly surveyVersionId: string;
+  readonly objectiveVersionIds: readonly string[];
+  readonly status: "generated" | "failed";
+  readonly modelName: string;
+  readonly modelVersion: string;
+  readonly alreadyAnswered: readonly string[];
+  readonly ambiguities: readonly string[];
+  readonly contradictions: readonly unknown[];
+  readonly missingEvidence: readonly string[];
+  readonly recommendedProbes: readonly string[];
+  readonly failureCategory?: GapMapFailureCategory;
+  readonly generatedAt: string;
+  readonly createdAt: string;
+}
+
 export class RunValidationError extends Error {
   readonly statusCode = 400;
 
@@ -255,6 +292,7 @@ export interface RunServiceOptions {
   readonly now?: () => Date;
   readonly createRunId?: () => string;
   readonly createConsentRecordId?: () => string;
+  readonly createGapMapId?: () => string;
   readonly createSurveyResponseId?: () => string;
   readonly createParticipantAccessTokenId?: () => string;
   readonly participantAccessBaseUrl?: string;
@@ -265,6 +303,7 @@ export class RunService {
   private readonly now: () => Date;
   private readonly createRunId: () => string;
   private readonly createConsentRecordId: () => string;
+  private readonly createGapMapId: () => string;
   private readonly createSurveyResponseId: () => string;
   private readonly createParticipantAccessTokenId: () => string;
   private readonly participantAccessBaseUrl: string;
@@ -277,11 +316,13 @@ export class RunService {
     private readonly objectiveVersionStore: Pick<ObjectiveVersionStore, "listByStudy">,
     private readonly consentVersionStore: Pick<ConsentVersionStore, "listByStudy">,
     private readonly surveyVersionStore: Pick<SurveyVersionStore, "listByStudy">,
-    options: RunServiceOptions = {}
+    options: RunServiceOptions = {},
+    private readonly gapMapGenerator: GapMapGenerator = createConfiguredGapMapGenerator()
   ) {
     this.now = options.now ?? (() => new Date());
     this.createRunId = options.createRunId ?? (() => `run_${randomUUID()}`);
     this.createConsentRecordId = options.createConsentRecordId ?? (() => `consent_record_${randomUUID()}`);
+    this.createGapMapId = options.createGapMapId ?? (() => `gap_map_${randomUUID()}`);
     this.createSurveyResponseId = options.createSurveyResponseId ?? (() => `survey_response_${randomUUID()}`);
     this.createParticipantAccessTokenId =
       options.createParticipantAccessTokenId ?? (() => createSecureRandomTokenId());
@@ -459,7 +500,13 @@ export class RunService {
       run.status === "consented" ? applyRunStatusTransition(run, "survey_in_progress", this.now()) : run;
     const submittedRun = applyRunStatusTransition(startedRun, "survey_completed", this.now());
 
-    return this.runStore.submitSurvey(surveyResponses, submittedRun, run.status);
+    const result = await this.runStore.submitSurvey(surveyResponses, submittedRun, run.status);
+    const gapMap = await this.generateAndPersistGapMap(result.run, surveyVersion, result.surveyResponses);
+
+    return {
+      ...result,
+      gapMap
+    };
   }
 
   async transitionRunStatus(runId: string, status: RunStatus) {
@@ -582,6 +629,73 @@ export class RunService {
 
     return surveyVersion;
   }
+
+  private async getRunObjectiveVersions(run: Run) {
+    const versionsById = new Map((await this.objectiveVersionStore.listByStudy(run.studyId)).map((version) => [version.id, version]));
+    const objectiveVersions = run.objectiveVersionIds.map((objectiveVersionId) => versionsById.get(objectiveVersionId));
+
+    if (objectiveVersions.some((version) => !version)) {
+      throw new ParticipantAccessError();
+    }
+
+    return objectiveVersions as ObjectiveVersion[];
+  }
+
+  private async generateAndPersistGapMap(
+    run: Run,
+    surveyVersion: SurveyVersion,
+    surveyResponses: readonly SurveyResponse[]
+  ) {
+    const generatedAt = this.now().toISOString();
+
+    try {
+      const objectiveVersions = await this.getRunObjectiveVersions(run);
+      const output = parseGapMapGeneratorOutput(
+        await this.gapMapGenerator.generate({
+          run,
+          surveyVersion,
+          surveyResponses,
+          objectiveVersions
+        })
+      );
+
+      return this.runStore.saveGapMap({
+        id: this.createGapMapId(),
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        surveyVersionId: run.surveyVersionId,
+        objectiveVersionIds: run.objectiveVersionIds,
+        status: "generated",
+        ...output,
+        generatedAt,
+        createdAt: generatedAt
+      });
+    } catch (error) {
+      const failureCategory: GapMapFailureCategory =
+        error instanceof GapMapValidationError ? "invalid_ai_output" : "provider_failure";
+
+      return this.runStore.saveGapMap({
+        id: this.createGapMapId(),
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        surveyVersionId: run.surveyVersionId,
+        objectiveVersionIds: run.objectiveVersionIds,
+        status: "failed",
+        modelName: "unknown",
+        modelVersion: "unknown",
+        alreadyAnswered: [],
+        ambiguities: [],
+        contradictions: [],
+        missingEvidence: [],
+        recommendedProbes: [],
+        failureCategory,
+        generatedAt,
+        createdAt: generatedAt
+      });
+    }
+  }
 }
 
 export class InMemoryRunStore implements RunStore {
@@ -622,6 +736,12 @@ export class InMemoryRunStore implements RunStore {
       .sort((left, right) => left.surveyQuestionId.localeCompare(right.surveyQuestionId));
   }
 
+  async listGapMapsByRun(runId: string) {
+    return [...this.gapMaps.values()]
+      .filter((gapMap) => gapMap.runId === runId)
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       this.runs.set(previousRun.id, {
@@ -652,6 +772,7 @@ export class InMemoryRunStore implements RunStore {
 
   private readonly consentRecords = new Map<string, ConsentRecord>();
   private readonly surveyResponses = new Map<string, SurveyResponse>();
+  private readonly gapMaps = new Map<string, GapMap>();
 
   async captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus) {
     const currentRun = this.runs.get(run.id);
@@ -698,6 +819,11 @@ export class InMemoryRunStore implements RunStore {
       surveyResponses: responses,
       run
     };
+  }
+
+  async saveGapMap(gapMap: GapMap) {
+    this.gapMaps.set(gapMap.id, gapMap);
+    return gapMap;
   }
 }
 
@@ -851,6 +977,24 @@ export class DynamoDbRunStore implements RunStore {
       .sort((left, right) => left.surveyQuestionId.localeCompare(right.surveyQuestionId));
   }
 
+  async listGapMapsByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :run AND begins_with(sk, :gapMapPrefix)",
+        ExpressionAttributeValues: {
+          ":run": `RUN#${runId}`,
+          ":gapMapPrefix": "GAP_MAP#"
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "gap_map")
+      .map((item) => toGapMap(item as GapMapItem))
+      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       await this.documentClient.send(
@@ -993,6 +1137,18 @@ export class DynamoDbRunStore implements RunStore {
       surveyResponses: responses,
       run
     };
+  }
+
+  async saveGapMap(gapMap: GapMap) {
+    await this.documentClient.send(
+      new PutCommand({
+        TableName: this.tableName,
+        Item: toGapMapItem(gapMap),
+        ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+      })
+    );
+
+    return gapMap;
   }
 }
 
@@ -1563,6 +1719,55 @@ function toSurveyResponse(item: SurveyResponseItem): SurveyResponse {
     surveyQuestionId: item.surveyQuestionId,
     responseText: item.responseText,
     submittedAt: item.submittedAt,
+    createdAt: item.createdAt
+  };
+}
+
+function toGapMapItem(gapMap: GapMap): GapMapItem {
+  return {
+    entity: "gap_map",
+    pk: `RUN#${gapMap.runId}`,
+    sk: `GAP_MAP#${gapMap.id}`,
+    gsi3pk: `RUN#${gapMap.runId}#ARTIFACT#gap_map`,
+    gsi3sk: `GAP_MAP#${gapMap.generatedAt}#${gapMap.id}`,
+    id: gapMap.id,
+    studyId: gapMap.studyId,
+    participantSlotId: gapMap.participantSlotId,
+    runId: gapMap.runId,
+    surveyVersionId: gapMap.surveyVersionId,
+    objectiveVersionIds: gapMap.objectiveVersionIds,
+    status: gapMap.status,
+    modelName: gapMap.modelName,
+    modelVersion: gapMap.modelVersion,
+    alreadyAnswered: gapMap.alreadyAnswered,
+    ambiguities: gapMap.ambiguities,
+    contradictions: gapMap.contradictions,
+    missingEvidence: gapMap.missingEvidence,
+    recommendedProbes: gapMap.recommendedProbes,
+    ...(gapMap.failureCategory ? { failureCategory: gapMap.failureCategory } : {}),
+    generatedAt: gapMap.generatedAt,
+    createdAt: gapMap.createdAt
+  };
+}
+
+function toGapMap(item: GapMapItem): GapMap {
+  return {
+    id: item.id,
+    studyId: item.studyId,
+    participantSlotId: item.participantSlotId,
+    runId: item.runId,
+    surveyVersionId: item.surveyVersionId,
+    objectiveVersionIds: item.objectiveVersionIds,
+    status: item.status,
+    modelName: item.modelName,
+    modelVersion: item.modelVersion,
+    alreadyAnswered: item.alreadyAnswered,
+    ambiguities: item.ambiguities,
+    contradictions: item.contradictions as GapMap["contradictions"],
+    missingEvidence: item.missingEvidence,
+    recommendedProbes: item.recommendedProbes,
+    ...(item.failureCategory ? { failureCategory: item.failureCategory } : {}),
+    generatedAt: item.generatedAt,
     createdAt: item.createdAt
   };
 }

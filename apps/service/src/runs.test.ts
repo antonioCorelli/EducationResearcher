@@ -13,10 +13,14 @@ import {
   RunService,
   RunValidationError,
   applyRunStatusTransition,
+  createParticipantAccessTokenForTest,
+  hashParticipantAccessTokenForTest,
   isRunStatusTransitionAllowed,
   type Run,
   type RunStatus
 } from "./runs.js";
+import type { GapMapGenerator } from "./gap-map.js";
+import type { SurveyVersion } from "./survey.js";
 
 function createFixtureRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -80,6 +84,86 @@ function createRunService(runStore: InMemoryRunStore) {
       participantAccessTokenSecret: "test-participant-secret"
     }
   );
+}
+
+function createSurveyVersion(): SurveyVersion {
+  return {
+    id: "survey_version_active",
+    studyId: "study_fixture_001",
+    versionNumber: 1,
+    isActive: true,
+    createdAt: "2026-05-06T12:00:00.000Z",
+    layoutItems: [
+      {
+        type: "question",
+        sortOrder: 1,
+        question: {
+          id: "survey_question_001",
+          surveyVersionId: "survey_version_active",
+          prompt: "What did you notice first?",
+          required: true,
+          questionType: "long_text",
+          sortOrder: 1,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      }
+    ],
+    groups: [],
+    ungroupedQuestions: [
+      {
+        id: "survey_question_001",
+        surveyVersionId: "survey_version_active",
+        prompt: "What did you notice first?",
+        required: true,
+        questionType: "long_text",
+        sortOrder: 1,
+        createdAt: "2026-05-06T12:00:00.000Z"
+      }
+    ]
+  };
+}
+
+function createParticipantRunService(input: {
+  readonly runStore: InMemoryRunStore;
+  readonly gapMapGenerator?: GapMapGenerator;
+}) {
+  const rawToken = createParticipantAccessTokenForTest({
+    tokenId: "token_fixture_gap_map",
+    runId: "run_fixture_001",
+    participantSlotId: "slot_fixture_001",
+    secret: "test-participant-secret"
+  });
+
+  return {
+    rawToken,
+    service: new RunService(
+      input.runStore,
+      new InMemoryParticipantAccessTokenStore([
+        {
+          id: "participant_access_token_gap_map",
+          tokenId: "token_fixture_gap_map",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken),
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          runId: "run_fixture_001",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore,
+      objectiveVersionStore,
+      new InMemoryConsentVersionStore(),
+      new InMemorySurveyVersionStore([createSurveyVersion()]),
+      {
+        createGapMapId: () => "gap_map_fixture_001",
+        createSurveyResponseId: () => "survey_response_fixture_001",
+        now: () => new Date("2026-05-06T12:20:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      input.gapMapGenerator
+    )
+  };
 }
 
 describe("run state machine", () => {
@@ -225,6 +309,98 @@ describe("run state machine", () => {
     );
     await expect(service.transitionRunStatus("run_missing", "consented")).rejects.toMatchObject({
       safeMessage: "Run was not found."
+    });
+  });
+});
+
+describe("gap map generation", () => {
+  it("generates and persists a structured gap map after survey completion", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
+    const { rawToken, service } = createParticipantRunService({ runStore });
+    const result = await service.submitParticipantSurvey(rawToken, {
+      responses: [
+        {
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed the diagram first, but I am not sure why the labels changed my reasoning."
+        }
+      ]
+    });
+
+    expect(result.gapMap).toMatchObject({
+      id: "gap_map_fixture_001",
+      runId: "run_fixture_001",
+      surveyVersionId: "survey_version_active",
+      objectiveVersionIds: ["objective_version_001"],
+      status: "generated",
+      modelName: "fake-gap-map",
+      modelVersion: "local-1",
+      generatedAt: "2026-05-06T12:20:00.000Z",
+      contradictions: [
+        {
+          priority: "high"
+        }
+      ]
+    });
+    expect(await runStore.listGapMapsByRun("run_fixture_001")).toEqual([result.gapMap]);
+  });
+
+  it("persists a failed gap map artifact when AI output is invalid without losing survey data", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      gapMapGenerator: {
+        async generate() {
+          return {
+            modelName: "fake-gap-map",
+            modelVersion: "local-1",
+            alreadyAnswered: "not a list"
+          };
+        }
+      }
+    });
+    const result = await service.submitParticipantSurvey(rawToken, {
+      responses: [
+        {
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed the diagram first."
+        }
+      ]
+    });
+
+    expect(result.run.status).toBe("survey_completed");
+    expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toHaveLength(1);
+    expect(result.gapMap).toMatchObject({
+      status: "failed",
+      failureCategory: "invalid_ai_output",
+      modelName: "unknown",
+      modelVersion: "unknown"
+    });
+  });
+
+  it("persists a failed gap map artifact when the AI provider fails without losing survey data", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      gapMapGenerator: {
+        async generate() {
+          throw new Error("provider unavailable");
+        }
+      }
+    });
+    const result = await service.submitParticipantSurvey(rawToken, {
+      responses: [
+        {
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed the diagram first."
+        }
+      ]
+    });
+
+    expect(result.run.status).toBe("survey_completed");
+    expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toHaveLength(1);
+    expect(result.gapMap).toMatchObject({
+      status: "failed",
+      failureCategory: "provider_failure"
     });
   });
 });
