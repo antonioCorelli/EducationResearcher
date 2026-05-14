@@ -12,6 +12,7 @@ import type { ConsentMethod, ConsentVersion, ConsentVersionStore } from "./conse
 import type { ObjectiveVersionStore } from "./objectives.js";
 import type { ParticipantSlotStore } from "./participant-slots.js";
 import type { StudyShell } from "./study-shell.js";
+import type { SurveyQuestion, SurveyVersion, SurveyVersionStore } from "./survey.js";
 
 export const RUN_STATUSES = [
   "created",
@@ -88,6 +89,7 @@ export interface ParticipantRunAccess {
     readonly maxInterviewMinutes: number;
   };
   readonly consentVersion?: ConsentVersion;
+  readonly surveyVersion?: SurveyVersion;
 }
 
 export interface CreateRunsInput {
@@ -97,6 +99,10 @@ export interface CreateRunsInput {
 export interface CaptureParticipantConsentInput {
   readonly accepted?: unknown;
   readonly signatureText?: unknown;
+}
+
+export interface SubmitParticipantSurveyInput {
+  readonly responses?: unknown;
 }
 
 export interface ConsentRecord {
@@ -112,15 +118,32 @@ export interface ConsentRecord {
   readonly createdAt: string;
 }
 
+export interface SurveyResponse {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly surveyVersionId: string;
+  readonly surveyQuestionId: string;
+  readonly responseText: string;
+  readonly submittedAt: string;
+  readonly createdAt: string;
+}
+
 export interface RunStore {
   getById(runId: string): Promise<Run | undefined>;
   listByStudy(studyId: string): Promise<Run[]>;
   listByParticipantSlot(participantSlotId: string): Promise<Run[]>;
   listConsentRecordsByRun(runId: string): Promise<ConsentRecord[]>;
+  listSurveyResponsesByRun(runId: string): Promise<SurveyResponse[]>;
   create(run: Run, previousCurrentRuns: readonly Run[]): Promise<Run>;
   updateStatus(run: Run, previousStatus: RunStatus): Promise<Run>;
   captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus): Promise<{
     consentRecord: ConsentRecord;
+    run: Run;
+  }>;
+  submitSurvey(responses: readonly SurveyResponse[], run: Run, previousStatus: RunStatus): Promise<{
+    surveyResponses: readonly SurveyResponse[];
     run: Run;
   }>;
 }
@@ -193,6 +216,23 @@ interface ConsentRecordItem {
   readonly createdAt: string;
 }
 
+interface SurveyResponseItem {
+  readonly entity: "survey_response";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly surveyVersionId: string;
+  readonly surveyQuestionId: string;
+  readonly responseText: string;
+  readonly submittedAt: string;
+  readonly createdAt: string;
+}
+
 export class RunValidationError extends Error {
   readonly statusCode = 400;
 
@@ -215,6 +255,7 @@ export interface RunServiceOptions {
   readonly now?: () => Date;
   readonly createRunId?: () => string;
   readonly createConsentRecordId?: () => string;
+  readonly createSurveyResponseId?: () => string;
   readonly createParticipantAccessTokenId?: () => string;
   readonly participantAccessBaseUrl?: string;
   readonly participantAccessTokenSecret?: string;
@@ -224,6 +265,7 @@ export class RunService {
   private readonly now: () => Date;
   private readonly createRunId: () => string;
   private readonly createConsentRecordId: () => string;
+  private readonly createSurveyResponseId: () => string;
   private readonly createParticipantAccessTokenId: () => string;
   private readonly participantAccessBaseUrl: string;
   private readonly participantAccessTokenSecret: string;
@@ -234,11 +276,13 @@ export class RunService {
     private readonly participantSlotStore: Pick<ParticipantSlotStore, "listByStudy">,
     private readonly objectiveVersionStore: Pick<ObjectiveVersionStore, "listByStudy">,
     private readonly consentVersionStore: Pick<ConsentVersionStore, "listByStudy">,
+    private readonly surveyVersionStore: Pick<SurveyVersionStore, "listByStudy">,
     options: RunServiceOptions = {}
   ) {
     this.now = options.now ?? (() => new Date());
     this.createRunId = options.createRunId ?? (() => `run_${randomUUID()}`);
     this.createConsentRecordId = options.createConsentRecordId ?? (() => `consent_record_${randomUUID()}`);
+    this.createSurveyResponseId = options.createSurveyResponseId ?? (() => `survey_response_${randomUUID()}`);
     this.createParticipantAccessTokenId =
       options.createParticipantAccessTokenId ?? (() => createSecureRandomTokenId());
     this.participantAccessBaseUrl =
@@ -341,6 +385,9 @@ export class RunService {
   async validateParticipantAccess(rawToken: string): Promise<ParticipantRunAccess> {
     const run = await this.resolveParticipantRun(rawToken);
     const consentVersion = run.status === "created" ? await this.getRunConsentVersion(run) : undefined;
+    const surveyVersion = isParticipantSurveyRenderableRunStatus(run.status)
+      ? await this.getRunSurveyVersion(run)
+      : undefined;
 
     return {
       run: {
@@ -351,7 +398,8 @@ export class RunService {
         freshnessDeadlineAt: run.freshnessDeadlineAt,
         maxInterviewMinutes: run.maxInterviewMinutes
       },
-      ...(consentVersion ? { consentVersion } : {})
+      ...(consentVersion ? { consentVersion } : {}),
+      ...(surveyVersion ? { surveyVersion } : {})
     };
   }
 
@@ -379,6 +427,39 @@ export class RunService {
     const consentedRun = applyRunStatusTransition(run, "consented", this.now());
 
     return this.runStore.captureConsent(record, consentedRun, run.status);
+  }
+
+  async submitParticipantSurvey(rawToken: string, input: SubmitParticipantSurveyInput) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (!isParticipantSurveySubmittableRunStatus(run.status)) {
+      throw new ParticipantAccessError("Survey cannot be submitted for this run.");
+    }
+
+    const existingResponses = await this.runStore.listSurveyResponsesByRun(run.id);
+
+    if (existingResponses.length > 0) {
+      throw new ParticipantAccessError("Survey has already been submitted for this run.");
+    }
+
+    const surveyVersion = await this.getRunSurveyVersion(run);
+    const submittedAt = this.now().toISOString();
+    const surveyResponses = parseSurveyResponses(input, surveyVersion).map((response) => ({
+      id: this.createSurveyResponseId(),
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      surveyVersionId: run.surveyVersionId,
+      surveyQuestionId: response.surveyQuestionId,
+      responseText: response.responseText,
+      submittedAt,
+      createdAt: submittedAt
+    }));
+    const startedRun =
+      run.status === "consented" ? applyRunStatusTransition(run, "survey_in_progress", this.now()) : run;
+    const submittedRun = applyRunStatusTransition(startedRun, "survey_completed", this.now());
+
+    return this.runStore.submitSurvey(surveyResponses, submittedRun, run.status);
   }
 
   async transitionRunStatus(runId: string, status: RunStatus) {
@@ -489,6 +570,18 @@ export class RunService {
 
     return consentVersion;
   }
+
+  private async getRunSurveyVersion(run: Run) {
+    const surveyVersion = (await this.surveyVersionStore.listByStudy(run.studyId)).find(
+      (version) => version.id === run.surveyVersionId
+    );
+
+    if (!surveyVersion) {
+      throw new ParticipantAccessError();
+    }
+
+    return surveyVersion;
+  }
 }
 
 export class InMemoryRunStore implements RunStore {
@@ -523,6 +616,12 @@ export class InMemoryRunStore implements RunStore {
       .sort((left, right) => right.acceptedAt.localeCompare(left.acceptedAt));
   }
 
+  async listSurveyResponsesByRun(runId: string) {
+    return [...this.surveyResponses.values()]
+      .filter((response) => response.runId === runId)
+      .sort((left, right) => left.surveyQuestionId.localeCompare(right.surveyQuestionId));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       this.runs.set(previousRun.id, {
@@ -552,6 +651,7 @@ export class InMemoryRunStore implements RunStore {
   }
 
   private readonly consentRecords = new Map<string, ConsentRecord>();
+  private readonly surveyResponses = new Map<string, SurveyResponse>();
 
   async captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus) {
     const currentRun = this.runs.get(run.id);
@@ -569,6 +669,33 @@ export class InMemoryRunStore implements RunStore {
 
     return {
       consentRecord: record,
+      run
+    };
+  }
+
+  async submitSurvey(responses: readonly SurveyResponse[], run: Run, previousStatus: RunStatus) {
+    const currentRun = this.runs.get(run.id);
+
+    if (!currentRun) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    if (currentRun.status !== previousStatus) {
+      throw new RunValidationError(`Run cannot transition from ${currentRun.status} to ${run.status}.`);
+    }
+
+    if ((await this.listSurveyResponsesByRun(run.id)).length > 0) {
+      throw new RunValidationError("Survey has already been submitted for this run.");
+    }
+
+    for (const response of responses) {
+      this.surveyResponses.set(response.id, response);
+    }
+
+    this.runs.set(run.id, run);
+
+    return {
+      surveyResponses: responses,
       run
     };
   }
@@ -706,6 +833,24 @@ export class DynamoDbRunStore implements RunStore {
       .sort((left, right) => right.acceptedAt.localeCompare(left.acceptedAt));
   }
 
+  async listSurveyResponsesByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :run AND begins_with(sk, :responsePrefix)",
+        ExpressionAttributeValues: {
+          ":run": `RUN#${runId}`,
+          ":responsePrefix": "SURVEY_RESPONSE#"
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "survey_response")
+      .map((item) => toSurveyResponse(item as SurveyResponseItem))
+      .sort((left, right) => left.surveyQuestionId.localeCompare(right.surveyQuestionId));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       await this.documentClient.send(
@@ -803,6 +948,49 @@ export class DynamoDbRunStore implements RunStore {
 
     return {
       consentRecord: record,
+      run
+    };
+  }
+
+  async submitSurvey(responses: readonly SurveyResponse[], run: Run, previousStatus: RunStatus) {
+    await this.documentClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          ...responses.map((response) => ({
+            Put: {
+              TableName: this.tableName,
+              Item: toSurveyResponseItem(response),
+              ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+            }
+          })),
+          {
+            Update: {
+              TableName: this.tableName,
+              Key: {
+                pk: `RUN#${run.id}`,
+                sk: "PROFILE"
+              },
+              UpdateExpression:
+                "SET #status = :status, updatedAt = :updatedAt, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
+              ConditionExpression: "attribute_exists(pk) AND #status = :previousStatus",
+              ExpressionAttributeNames: {
+                "#status": "status"
+              },
+              ExpressionAttributeValues: {
+                ":status": run.status,
+                ":previousStatus": previousStatus,
+                ":updatedAt": run.updatedAt,
+                ":gsi1pk": studyRunStatusPk(run.studyId, run.status),
+                ":gsi1sk": studyRunStatusSk(run)
+              }
+            }
+          }
+        ]
+      })
+    );
+
+    return {
+      surveyResponses: responses,
       run
     };
   }
@@ -1060,6 +1248,14 @@ function isParticipantAccessibleRunStatus(status: RunStatus) {
   ].includes(status);
 }
 
+function isParticipantSurveyRenderableRunStatus(status: RunStatus) {
+  return status === "consented" || status === "survey_in_progress";
+}
+
+function isParticipantSurveySubmittableRunStatus(status: RunStatus) {
+  return status === "consented" || status === "survey_in_progress";
+}
+
 function parseConsentAcceptance(method: ConsentMethod, input: CaptureParticipantConsentInput) {
   if (method === "checkmark") {
     if (input.accepted !== true) {
@@ -1090,6 +1286,81 @@ function parseSignatureText(value: unknown) {
   }
 
   return signatureText;
+}
+
+function parseSurveyResponses(input: SubmitParticipantSurveyInput, surveyVersion: SurveyVersion) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RunValidationError("Survey responses are required.");
+  }
+
+  if (!Array.isArray(input.responses)) {
+    throw new RunValidationError("Survey responses must be a list.");
+  }
+
+  const questions = getSurveyQuestions(surveyVersion);
+  const questionsById = new Map(questions.map((question) => [question.id, question]));
+  const responseByQuestionId = new Map<string, { surveyQuestionId: string; responseText: string }>();
+
+  for (const [index, response] of input.responses.entries()) {
+    if (!response || typeof response !== "object" || Array.isArray(response)) {
+      throw new RunValidationError(`Survey response ${index + 1} is invalid.`);
+    }
+
+    const record = response as Record<string, unknown>;
+
+    if (typeof record.surveyQuestionId !== "string" || !questionsById.has(record.surveyQuestionId)) {
+      throw new RunValidationError("Survey response references an unknown question.");
+    }
+
+    if (responseByQuestionId.has(record.surveyQuestionId)) {
+      throw new RunValidationError("Each survey question can only be answered once.");
+    }
+
+    responseByQuestionId.set(record.surveyQuestionId, {
+      surveyQuestionId: record.surveyQuestionId,
+      responseText: parseSurveyResponseText(record.responseText, questionsById.get(record.surveyQuestionId)!)
+    });
+  }
+
+  const missingQuestion = questions.find((question) => !responseByQuestionId.has(question.id));
+
+  if (missingQuestion) {
+    throw new RunValidationError("All required survey questions must be answered.");
+  }
+
+  if (responseByQuestionId.size !== questions.length) {
+    throw new RunValidationError("Survey responses do not match the run survey version.");
+  }
+
+  return questions.map((question) => responseByQuestionId.get(question.id)!);
+}
+
+function parseSurveyResponseText(value: unknown, question: SurveyQuestion) {
+  if (typeof value !== "string") {
+    throw new RunValidationError("All required survey questions must be answered.");
+  }
+
+  const responseText = value.trim();
+
+  if (!responseText) {
+    throw new RunValidationError("All required survey questions must be answered.");
+  }
+
+  if (responseText.length > 20000) {
+    throw new RunValidationError(`Response to "${question.prompt}" must be 20,000 characters or fewer.`);
+  }
+
+  return responseText;
+}
+
+function getSurveyQuestions(surveyVersion: SurveyVersion) {
+  return surveyVersion.layoutItems.flatMap((item) => {
+    if (item.type === "question") {
+      return [item.question];
+    }
+
+    return item.group.questions;
+  });
 }
 
 function createParticipantAccessUrl(baseUrl: string, token: string) {
@@ -1243,6 +1514,39 @@ function toConsentRecord(item: ConsentRecordItem): ConsentRecord {
     ...(item.signatureText ? { signatureText: item.signatureText } : {}),
     renderedConsentSnapshot: item.renderedConsentSnapshot,
     acceptedAt: item.acceptedAt,
+    createdAt: item.createdAt
+  };
+}
+
+function toSurveyResponseItem(response: SurveyResponse): SurveyResponseItem {
+  return {
+    entity: "survey_response",
+    pk: `RUN#${response.runId}`,
+    sk: `SURVEY_RESPONSE#${response.surveyQuestionId}`,
+    gsi3pk: `RUN#${response.runId}#ARTIFACT#survey_response`,
+    gsi3sk: `QUESTION#${response.surveyQuestionId}#${response.id}`,
+    id: response.id,
+    studyId: response.studyId,
+    participantSlotId: response.participantSlotId,
+    runId: response.runId,
+    surveyVersionId: response.surveyVersionId,
+    surveyQuestionId: response.surveyQuestionId,
+    responseText: response.responseText,
+    submittedAt: response.submittedAt,
+    createdAt: response.createdAt
+  };
+}
+
+function toSurveyResponse(item: SurveyResponseItem): SurveyResponse {
+  return {
+    id: item.id,
+    studyId: item.studyId,
+    participantSlotId: item.participantSlotId,
+    runId: item.runId,
+    surveyVersionId: item.surveyVersionId,
+    surveyQuestionId: item.surveyQuestionId,
+    responseText: item.responseText,
+    submittedAt: item.submittedAt,
     createdAt: item.createdAt
   };
 }

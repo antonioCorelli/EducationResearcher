@@ -75,6 +75,36 @@ textarea {
   margin-top: 4px;
 }
 
+.participant-survey-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.participant-survey-form,
+.participant-survey-items {
+  display: grid;
+  gap: 18px;
+}
+
+.participant-survey-group {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.participant-survey-group legend {
+  padding: 0 6px;
+  color: #2c3648;
+  font-weight: 800;
+}
+
+.participant-survey-question textarea {
+  min-height: 144px;
+}
+
 .auth-layout,
 .workspace-panel {
   width: min(100%, 760px);

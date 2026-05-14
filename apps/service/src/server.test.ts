@@ -530,6 +530,313 @@ describe("participant routes", () => {
     await server.close();
   });
 
+  it("renders and submits a run's snapshotted long-form survey exactly once", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_survey",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
+    const surveyVersion: SurveyVersion = {
+      id: "survey_version_active",
+      studyId: "study_fixture_001",
+      versionNumber: 1,
+      isActive: false,
+      createdAt: "2026-05-06T12:00:00.000Z",
+      layoutItems: [
+        {
+          type: "question",
+          sortOrder: 1,
+          question: {
+            id: "survey_question_ungrouped",
+            surveyVersionId: "survey_version_active",
+            prompt: "What did you notice first?",
+            required: true,
+            questionType: "long_text",
+            sortOrder: 1,
+            createdAt: "2026-05-06T12:00:00.000Z"
+          }
+        },
+        {
+          type: "group",
+          sortOrder: 2,
+          group: {
+            id: "survey_group_reasoning",
+            surveyVersionId: "survey_version_active",
+            title: "Reasoning",
+            sortOrder: 2,
+            createdAt: "2026-05-06T12:00:00.000Z",
+            questions: [
+              {
+                id: "survey_question_grouped",
+                surveyVersionId: "survey_version_active",
+                surveyGroupId: "survey_group_reasoning",
+                prompt: "What evidence supports your answer?",
+                required: true,
+                questionType: "long_text",
+                sortOrder: 1,
+                createdAt: "2026-05-06T12:00:00.000Z"
+              }
+            ]
+          }
+        }
+      ],
+      groups: [
+        {
+          id: "survey_group_reasoning",
+          surveyVersionId: "survey_version_active",
+          title: "Reasoning",
+          sortOrder: 2,
+          createdAt: "2026-05-06T12:00:00.000Z",
+          questions: [
+            {
+              id: "survey_question_grouped",
+              surveyVersionId: "survey_version_active",
+              surveyGroupId: "survey_group_reasoning",
+              prompt: "What evidence supports your answer?",
+              required: true,
+              questionType: "long_text",
+              sortOrder: 1,
+              createdAt: "2026-05-06T12:00:00.000Z"
+            }
+          ]
+        }
+      ],
+      ungroupedQuestions: [
+        {
+          id: "survey_question_ungrouped",
+          surveyVersionId: "survey_version_active",
+          prompt: "What did you notice first?",
+          required: true,
+          questionType: "long_text",
+          sortOrder: 1,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]
+    };
+    let surveyResponseSequence = 0;
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_survey",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createSurveyResponseId: () => `survey_response_fixture_${++surveyResponseSequence}`,
+        now: () => new Date("2026-05-06T12:20:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore,
+      surveyVersionStore: new InMemorySurveyVersionStore([surveyVersion])
+    });
+    const renderResponse = await server.inject({
+      method: "GET",
+      url: `/participant/runs/${rawToken}`
+    });
+    const missingRequiredResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/survey`,
+      payload: {
+        responses: [
+          {
+            surveyQuestionId: "survey_question_ungrouped",
+            responseText: "I noticed the diagram first."
+          }
+        ]
+      }
+    });
+    const metadataResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/survey`,
+      payload: {
+        responses: [
+          {
+            id: "client_response_id",
+            surveyQuestionId: "survey_question_ungrouped",
+            responseText: "I noticed the diagram first."
+          }
+        ]
+      }
+    });
+    const submitResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/survey`,
+      payload: {
+        responses: [
+          {
+            surveyQuestionId: "survey_question_ungrouped",
+            responseText: "  I noticed the diagram first.  "
+          },
+          {
+            surveyQuestionId: "survey_question_grouped",
+            responseText: "The example and the labels supported my answer."
+          }
+        ]
+      }
+    });
+    const duplicateResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/survey`,
+      payload: {
+        responses: [
+          {
+            surveyQuestionId: "survey_question_ungrouped",
+            responseText: "Another answer."
+          },
+          {
+            surveyQuestionId: "survey_question_grouped",
+            responseText: "Another grouped answer."
+          }
+        ]
+      }
+    });
+
+    expect(renderResponse.statusCode).toBe(200);
+    expect(renderResponse.json()).toMatchObject({
+      run: {
+        id: "run_fixture_001",
+        status: "consented"
+      },
+      surveyVersion: {
+        id: "survey_version_active",
+        isActive: false,
+        layoutItems: [
+          {
+            type: "question",
+            question: {
+              id: "survey_question_ungrouped",
+              prompt: "What did you notice first?"
+            }
+          },
+          {
+            type: "group",
+            group: {
+              title: "Reasoning",
+              questions: [
+                {
+                  id: "survey_question_grouped",
+                  prompt: "What evidence supports your answer?"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    });
+    expect(missingRequiredResponse.statusCode).toBe(400);
+    expect(missingRequiredResponse.json()).toEqual({
+      error: "Bad Request",
+      message: "All required survey questions must be answered."
+    });
+    expect(metadataResponse.statusCode).toBe(400);
+    expect(metadataResponse.json()).toEqual({
+      error: "Bad Request",
+      message: "Survey response metadata is assigned by the service."
+    });
+    expect(submitResponse.statusCode).toBe(201);
+    expect(submitResponse.json()).toMatchObject({
+      surveyResponses: [
+        {
+          runId: "run_fixture_001",
+          surveyQuestionId: "survey_question_ungrouped",
+          responseText: "I noticed the diagram first.",
+          submittedAt: "2026-05-06T12:20:00.000Z"
+        },
+        {
+          runId: "run_fixture_001",
+          surveyQuestionId: "survey_question_grouped",
+          responseText: "The example and the labels supported my answer.",
+          submittedAt: "2026-05-06T12:20:00.000Z"
+        }
+      ],
+      run: {
+        id: "run_fixture_001",
+        status: "survey_completed",
+        updatedAt: "2026-05-06T12:20:00.000Z"
+      }
+    });
+    expect((await runStore.getById("run_fixture_001"))?.status).toBe("survey_completed");
+    expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toHaveLength(2);
+    expect(duplicateResponse.statusCode).toBe(403);
+    expect(duplicateResponse.json()).toEqual({
+      error: "Forbidden",
+      message: "Survey cannot be submitted for this run."
+    });
+
+    await server.close();
+  });
+
+  it("blocks stale participant survey submission", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_stale_survey",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_stale_survey",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        now: () => new Date("2026-05-21T12:00:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore: new InMemoryRunStore([
+        createFixtureRun({
+          status: "consented",
+          freshnessDeadlineAt: "2026-05-20T12:00:00.000Z"
+        })
+      ]),
+      surveyVersionStore: new InMemorySurveyVersionStore([])
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/survey`,
+      payload: {
+        responses: []
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "Forbidden",
+      message: "This participant link is not available."
+    });
+
+    await server.close();
+  });
+
   it("blocks consent submission for unauthorized, stale, and already-started runs", async () => {
     const validToken = createParticipantAccessTokenForTest({
       tokenId: "token_fixture_valid",

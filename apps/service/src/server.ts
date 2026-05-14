@@ -47,7 +47,8 @@ import {
   type CreateRunsInput,
   type ParticipantAccessTokenStore,
   type RunServiceOptions,
-  type RunStore
+  type RunStore,
+  type SubmitParticipantSurveyInput
 } from "./runs.js";
 import {
   StudyAuthorizationService,
@@ -481,6 +482,76 @@ function coerceCaptureParticipantConsentInput(body: unknown): CaptureParticipant
   };
 }
 
+function coerceSubmitParticipantSurveyInput(body: unknown): SubmitParticipantSurveyInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Survey responses are required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "participantSlotId" in record ||
+    "runId" in record ||
+    "surveyVersionId" in record ||
+    "submittedAt" in record ||
+    "createdAt" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Survey response metadata is assigned by the service."
+      }
+    };
+  }
+
+  rejectSurveyResponseMetadata(record.responses);
+
+  return {
+    responses: record.responses
+  };
+}
+
+function rejectSurveyResponseMetadata(value: unknown) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (
+      "id" in record ||
+      "studyId" in record ||
+      "participantSlotId" in record ||
+      "runId" in record ||
+      "surveyVersionId" in record ||
+      "submittedAt" in record ||
+      "createdAt" in record
+    ) {
+      throw {
+        statusCode: 400,
+        body: {
+          error: "Bad Request",
+          message: "Survey response metadata is assigned by the service."
+        }
+      };
+    }
+  }
+}
+
 function rejectObjectiveMetadata(value: unknown) {
   if (!Array.isArray(value)) {
     return;
@@ -633,6 +704,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     participantSlotStore,
     objectiveVersionStore,
     consentVersionStore,
+    surveyVersionStore,
     runServiceOptions
   );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
@@ -1293,6 +1365,26 @@ export function buildServer(options: BuildServerOptions = {}) {
       const result = await runService.captureParticipantConsent(
         request.params.accessToken,
         coerceCaptureParticipantConsentInput(request.body)
+      );
+
+      return reply.code(201).send(result);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/survey", async (request, reply) => {
+    try {
+      const result = await runService.submitParticipantSurvey(
+        request.params.accessToken,
+        coerceSubmitParticipantSurveyInput(request.body)
       );
 
       return reply.code(201).send(result);

@@ -5,6 +5,7 @@ import {
   type ObjectiveVersion
 } from "./objectives.js";
 import { InMemoryParticipantSlotStore } from "./participant-slots.js";
+import { InMemorySurveyVersionStore } from "./survey.js";
 import {
   RUN_STATUSES,
   InMemoryParticipantAccessTokenStore,
@@ -73,6 +74,7 @@ function createRunService(runStore: InMemoryRunStore) {
     participantSlotStore,
     objectiveVersionStore,
     new InMemoryConsentVersionStore(),
+    new InMemorySurveyVersionStore(),
     {
       now: () => new Date("2026-05-06T12:15:00.000Z"),
       participantAccessTokenSecret: "test-participant-secret"
