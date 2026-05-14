@@ -43,6 +43,7 @@ import {
   createConfiguredRunStore,
   toSafeParticipantAccessResponse,
   toSafeRunValidationResponse,
+  type CaptureParticipantConsentInput,
   type CreateRunsInput,
   type ParticipantAccessTokenStore,
   type RunServiceOptions,
@@ -441,6 +442,45 @@ function coerceCreateRunsInput(body: unknown): CreateRunsInput {
   };
 }
 
+function coerceCaptureParticipantConsentInput(body: unknown): CaptureParticipantConsentInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Consent acceptance is required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "participantSlotId" in record ||
+    "runId" in record ||
+    "consentVersionId" in record ||
+    "consentMethod" in record ||
+    "renderedConsentSnapshot" in record ||
+    "acceptedAt" in record ||
+    "createdAt" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Consent record metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    accepted: record.accepted,
+    signatureText: record.signatureText
+  };
+}
+
 function rejectObjectiveMetadata(value: unknown) {
   if (!Array.isArray(value)) {
     return;
@@ -592,6 +632,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     participantAccessTokenStore,
     participantSlotStore,
     objectiveVersionStore,
+    consentVersionStore,
     runServiceOptions
   );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
@@ -1238,6 +1279,26 @@ export function buildServer(options: BuildServerOptions = {}) {
       return await runService.validateParticipantAccess(request.params.accessToken);
     } catch (error) {
       const safeResponse = toSafeParticipantAccessResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/consent", async (request, reply) => {
+    try {
+      const result = await runService.captureParticipantConsent(
+        request.params.accessToken,
+        coerceCaptureParticipantConsentInput(request.body)
+      );
+
+      return reply.code(201).send(result);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
 
       if (safeResponse) {
         return reply.code(safeResponse.statusCode).send(safeResponse.body);

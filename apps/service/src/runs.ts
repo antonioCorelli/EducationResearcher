@@ -1,6 +1,14 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  TransactWriteCommand,
+  UpdateCommand
+} from "@aws-sdk/lib-dynamodb";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { ConsentMethod, ConsentVersion, ConsentVersionStore } from "./consent.js";
 import type { ObjectiveVersionStore } from "./objectives.js";
 import type { ParticipantSlotStore } from "./participant-slots.js";
 import type { StudyShell } from "./study-shell.js";
@@ -79,18 +87,42 @@ export interface ParticipantRunAccess {
     readonly freshnessDeadlineAt: string;
     readonly maxInterviewMinutes: number;
   };
+  readonly consentVersion?: ConsentVersion;
 }
 
 export interface CreateRunsInput {
   readonly participantSlotIds: unknown;
 }
 
+export interface CaptureParticipantConsentInput {
+  readonly accepted?: unknown;
+  readonly signatureText?: unknown;
+}
+
+export interface ConsentRecord {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly consentVersionId: string;
+  readonly consentMethod: ConsentMethod;
+  readonly signatureText?: string;
+  readonly renderedConsentSnapshot: string;
+  readonly acceptedAt: string;
+  readonly createdAt: string;
+}
+
 export interface RunStore {
   getById(runId: string): Promise<Run | undefined>;
   listByStudy(studyId: string): Promise<Run[]>;
   listByParticipantSlot(participantSlotId: string): Promise<Run[]>;
+  listConsentRecordsByRun(runId: string): Promise<ConsentRecord[]>;
   create(run: Run, previousCurrentRuns: readonly Run[]): Promise<Run>;
   updateStatus(run: Run, previousStatus: RunStatus): Promise<Run>;
+  captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus): Promise<{
+    consentRecord: ConsentRecord;
+    run: Run;
+  }>;
 }
 
 export interface ParticipantAccessTokenStore {
@@ -143,6 +175,24 @@ interface ParticipantAccessTokenItem {
   readonly updatedAt: string;
 }
 
+interface ConsentRecordItem {
+  readonly entity: "consent_record";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly consentVersionId: string;
+  readonly consentMethod: ConsentMethod;
+  readonly signatureText?: string;
+  readonly renderedConsentSnapshot: string;
+  readonly acceptedAt: string;
+  readonly createdAt: string;
+}
+
 export class RunValidationError extends Error {
   readonly statusCode = 400;
 
@@ -164,6 +214,7 @@ export class ParticipantAccessError extends Error {
 export interface RunServiceOptions {
   readonly now?: () => Date;
   readonly createRunId?: () => string;
+  readonly createConsentRecordId?: () => string;
   readonly createParticipantAccessTokenId?: () => string;
   readonly participantAccessBaseUrl?: string;
   readonly participantAccessTokenSecret?: string;
@@ -172,6 +223,7 @@ export interface RunServiceOptions {
 export class RunService {
   private readonly now: () => Date;
   private readonly createRunId: () => string;
+  private readonly createConsentRecordId: () => string;
   private readonly createParticipantAccessTokenId: () => string;
   private readonly participantAccessBaseUrl: string;
   private readonly participantAccessTokenSecret: string;
@@ -181,10 +233,12 @@ export class RunService {
     private readonly participantAccessTokenStore: ParticipantAccessTokenStore,
     private readonly participantSlotStore: Pick<ParticipantSlotStore, "listByStudy">,
     private readonly objectiveVersionStore: Pick<ObjectiveVersionStore, "listByStudy">,
+    private readonly consentVersionStore: Pick<ConsentVersionStore, "listByStudy">,
     options: RunServiceOptions = {}
   ) {
     this.now = options.now ?? (() => new Date());
     this.createRunId = options.createRunId ?? (() => `run_${randomUUID()}`);
+    this.createConsentRecordId = options.createConsentRecordId ?? (() => `consent_record_${randomUUID()}`);
     this.createParticipantAccessTokenId =
       options.createParticipantAccessTokenId ?? (() => createSecureRandomTokenId());
     this.participantAccessBaseUrl =
@@ -285,6 +339,96 @@ export class RunService {
   }
 
   async validateParticipantAccess(rawToken: string): Promise<ParticipantRunAccess> {
+    const run = await this.resolveParticipantRun(rawToken);
+    const consentVersion = run.status === "created" ? await this.getRunConsentVersion(run) : undefined;
+
+    return {
+      run: {
+        id: run.id,
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        status: run.status,
+        freshnessDeadlineAt: run.freshnessDeadlineAt,
+        maxInterviewMinutes: run.maxInterviewMinutes
+      },
+      ...(consentVersion ? { consentVersion } : {})
+    };
+  }
+
+  async captureParticipantConsent(rawToken: string, input: CaptureParticipantConsentInput) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status !== "created") {
+      throw new ParticipantAccessError("Consent cannot be submitted for this run.");
+    }
+
+    const consentVersion = await this.getRunConsentVersion(run);
+    const acceptedAt = this.now().toISOString();
+    const record: ConsentRecord = {
+      id: this.createConsentRecordId(),
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      consentVersionId: consentVersion.id,
+      consentMethod: consentVersion.consentMethod,
+      ...parseConsentAcceptance(consentVersion.consentMethod, input),
+      renderedConsentSnapshot: consentVersion.consentText,
+      acceptedAt,
+      createdAt: acceptedAt
+    };
+    const consentedRun = applyRunStatusTransition(run, "consented", this.now());
+
+    return this.runStore.captureConsent(record, consentedRun, run.status);
+  }
+
+  async transitionRunStatus(runId: string, status: RunStatus) {
+    const run = await this.runStore.getById(runId);
+
+    if (!run) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    const transitionedRun = applyRunStatusTransition(run, status, this.now());
+
+    if (transitionedRun === run) {
+      return run;
+    }
+
+    return this.runStore.updateStatus(transitionedRun, run.status);
+  }
+
+  private async toResearcherRun(run: Run, rawToken?: string): Promise<ResearcherRun> {
+    let token = rawToken;
+    let tokenId: string | undefined;
+
+    if (!token) {
+      const activeTokenRecord = (await this.participantAccessTokenStore.listByRun(run.id)).find(
+        (record) => record.status === "active"
+      );
+
+      if (activeTokenRecord) {
+        tokenId = activeTokenRecord.tokenId;
+        token = createParticipantAccessTokenValue({
+          tokenId: activeTokenRecord.tokenId,
+          runId: run.id,
+          participantSlotId: run.participantSlotId,
+          secret: this.participantAccessTokenSecret
+        });
+      }
+    }
+
+    return {
+      ...run,
+      ...(token
+        ? {
+            participantAccessUrl: createParticipantAccessUrl(this.participantAccessBaseUrl, token),
+            participantAccessTokenId: tokenId ?? parseParticipantAccessTokenValue(token)?.tokenId
+          }
+      : {})
+    };
+  }
+
+  private async resolveParticipantRun(rawToken: string) {
     const parsedToken = parseParticipantAccessTokenValue(rawToken);
 
     if (!parsedToken) {
@@ -331,63 +475,19 @@ export class RunService {
       throw new ParticipantAccessError();
     }
 
-    return {
-      run: {
-        id: run.id,
-        studyId: run.studyId,
-        participantSlotId: run.participantSlotId,
-        status: run.status,
-        freshnessDeadlineAt: run.freshnessDeadlineAt,
-        maxInterviewMinutes: run.maxInterviewMinutes
-      }
-    };
+    return run;
   }
 
-  async transitionRunStatus(runId: string, status: RunStatus) {
-    const run = await this.runStore.getById(runId);
+  private async getRunConsentVersion(run: Run) {
+    const consentVersion = (await this.consentVersionStore.listByStudy(run.studyId)).find(
+      (version) => version.id === run.consentVersionId
+    );
 
-    if (!run) {
-      throw new RunValidationError("Run was not found.");
+    if (!consentVersion) {
+      throw new ParticipantAccessError();
     }
 
-    const transitionedRun = applyRunStatusTransition(run, status, this.now());
-
-    if (transitionedRun === run) {
-      return run;
-    }
-
-    return this.runStore.updateStatus(transitionedRun, run.status);
-  }
-
-  private async toResearcherRun(run: Run, rawToken?: string): Promise<ResearcherRun> {
-    let token = rawToken;
-    let tokenId: string | undefined;
-
-    if (!token) {
-      const activeTokenRecord = (await this.participantAccessTokenStore.listByRun(run.id)).find(
-        (record) => record.status === "active"
-      );
-
-      if (activeTokenRecord) {
-        tokenId = activeTokenRecord.tokenId;
-        token = createParticipantAccessTokenValue({
-          tokenId: activeTokenRecord.tokenId,
-          runId: run.id,
-          participantSlotId: run.participantSlotId,
-          secret: this.participantAccessTokenSecret
-        });
-      }
-    }
-
-    return {
-      ...run,
-      ...(token
-        ? {
-            participantAccessUrl: createParticipantAccessUrl(this.participantAccessBaseUrl, token),
-            participantAccessTokenId: tokenId ?? parseParticipantAccessTokenValue(token)?.tokenId
-          }
-        : {})
-    };
+    return consentVersion;
   }
 }
 
@@ -416,6 +516,13 @@ export class InMemoryRunStore implements RunStore {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  async listConsentRecordsByRun(runId: string) {
+    return [...this.runs.values()]
+      .filter((run) => run.id === runId)
+      .flatMap(() => [...this.consentRecords.values()].filter((record) => record.runId === runId))
+      .sort((left, right) => right.acceptedAt.localeCompare(left.acceptedAt));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       this.runs.set(previousRun.id, {
@@ -442,6 +549,28 @@ export class InMemoryRunStore implements RunStore {
 
     this.runs.set(run.id, run);
     return run;
+  }
+
+  private readonly consentRecords = new Map<string, ConsentRecord>();
+
+  async captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus) {
+    const currentRun = this.runs.get(run.id);
+
+    if (!currentRun) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    if (currentRun.status !== previousStatus) {
+      throw new RunValidationError(`Run cannot transition from ${currentRun.status} to ${run.status}.`);
+    }
+
+    this.consentRecords.set(record.id, record);
+    this.runs.set(run.id, run);
+
+    return {
+      consentRecord: record,
+      run
+    };
   }
 }
 
@@ -559,6 +688,24 @@ export class DynamoDbRunStore implements RunStore {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  async listConsentRecordsByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :run AND begins_with(sk, :recordPrefix)",
+        ExpressionAttributeValues: {
+          ":run": `RUN#${runId}`,
+          ":recordPrefix": "CONSENT_RECORD#"
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "consent_record")
+      .map((item) => toConsentRecord(item as ConsentRecordItem))
+      .sort((left, right) => right.acceptedAt.localeCompare(left.acceptedAt));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       await this.documentClient.send(
@@ -615,6 +762,49 @@ export class DynamoDbRunStore implements RunStore {
     );
 
     return toRun(response.Attributes as RunItem);
+  }
+
+  async captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus) {
+    await this.documentClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: toConsentRecordItem(record),
+              ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+            }
+          },
+          {
+            Update: {
+              TableName: this.tableName,
+              Key: {
+                pk: `RUN#${run.id}`,
+                sk: "PROFILE"
+              },
+              UpdateExpression:
+                "SET #status = :status, updatedAt = :updatedAt, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
+              ConditionExpression: "attribute_exists(pk) AND #status = :previousStatus",
+              ExpressionAttributeNames: {
+                "#status": "status"
+              },
+              ExpressionAttributeValues: {
+                ":status": run.status,
+                ":previousStatus": previousStatus,
+                ":updatedAt": run.updatedAt,
+                ":gsi1pk": studyRunStatusPk(run.studyId, run.status),
+                ":gsi1sk": studyRunStatusSk(run)
+              }
+            }
+          }
+        ]
+      })
+    );
+
+    return {
+      consentRecord: record,
+      run
+    };
   }
 }
 
@@ -836,7 +1026,7 @@ function createParticipantAccessTokenValue({
 }
 
 function parseParticipantAccessTokenValue(token: string) {
-  const match = /^pat_([A-Za-z0-9_-]{12,})_([A-Za-z0-9_-]{32,})$/.exec(token);
+  const match = /^pat_([A-Za-z0-9_-]{12,})_([A-Za-z0-9_-]{43})$/.exec(token);
 
   if (!match) {
     return undefined;
@@ -868,6 +1058,38 @@ function isParticipantAccessibleRunStatus(status: RunStatus) {
     "interview_in_progress",
     "interview_paused"
   ].includes(status);
+}
+
+function parseConsentAcceptance(method: ConsentMethod, input: CaptureParticipantConsentInput) {
+  if (method === "checkmark") {
+    if (input.accepted !== true) {
+      throw new RunValidationError("Consent must be accepted before continuing.");
+    }
+
+    return {};
+  }
+
+  return {
+    signatureText: parseSignatureText(input.signatureText)
+  };
+}
+
+function parseSignatureText(value: unknown) {
+  if (typeof value !== "string") {
+    throw new RunValidationError("Signature text is required.");
+  }
+
+  const signatureText = value.trim();
+
+  if (!signatureText) {
+    throw new RunValidationError("Signature text is required.");
+  }
+
+  if (signatureText.length > 200) {
+    throw new RunValidationError("Signature text must be 200 characters or fewer.");
+  }
+
+  return signatureText;
 }
 
 function createParticipantAccessUrl(baseUrl: string, token: string) {
@@ -987,5 +1209,40 @@ function toParticipantAccessToken(item: ParticipantAccessTokenItem): Participant
     status: item.status,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
+  };
+}
+
+function toConsentRecordItem(record: ConsentRecord): ConsentRecordItem {
+  return {
+    entity: "consent_record",
+    pk: `RUN#${record.runId}`,
+    sk: `CONSENT_RECORD#${record.id}`,
+    gsi3pk: `RUN#${record.runId}#ARTIFACT#consent_record`,
+    gsi3sk: `CONSENT_RECORD#${record.acceptedAt}#${record.id}`,
+    id: record.id,
+    studyId: record.studyId,
+    participantSlotId: record.participantSlotId,
+    runId: record.runId,
+    consentVersionId: record.consentVersionId,
+    consentMethod: record.consentMethod,
+    ...(record.signatureText ? { signatureText: record.signatureText } : {}),
+    renderedConsentSnapshot: record.renderedConsentSnapshot,
+    acceptedAt: record.acceptedAt,
+    createdAt: record.createdAt
+  };
+}
+
+function toConsentRecord(item: ConsentRecordItem): ConsentRecord {
+  return {
+    id: item.id,
+    studyId: item.studyId,
+    participantSlotId: item.participantSlotId,
+    runId: item.runId,
+    consentVersionId: item.consentVersionId,
+    consentMethod: item.consentMethod,
+    ...(item.signatureText ? { signatureText: item.signatureText } : {}),
+    renderedConsentSnapshot: item.renderedConsentSnapshot,
+    acceptedAt: item.acceptedAt,
+    createdAt: item.createdAt
   };
 }

@@ -39,6 +39,42 @@ textarea {
     #f5f7f4;
 }
 
+.participant-consent-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.participant-consent-text {
+  max-height: min(44vh, 420px);
+  overflow: auto;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #fbfcfa;
+  color: #2c3648;
+  padding: 16px;
+  white-space: pre-wrap;
+}
+
+.participant-consent-form {
+  display: grid;
+  gap: 14px;
+}
+
+.participant-consent-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.participant-consent-option input {
+  width: auto;
+  margin-top: 4px;
+}
+
 .auth-layout,
 .workspace-panel {
   width: min(100%, 760px);

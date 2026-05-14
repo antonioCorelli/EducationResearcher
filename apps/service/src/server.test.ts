@@ -293,6 +293,17 @@ describe("participant routes", () => {
           tokenHash: hashParticipantAccessTokenForTest(rawToken)
         })
       ]),
+      consentVersionStore: new InMemoryConsentVersionStore([
+        {
+          id: "consent_version_active",
+          studyId: "study_fixture_001",
+          versionNumber: 1,
+          consentText: "Please review and accept this study consent.",
+          consentMethod: "checkmark",
+          isActive: true,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
       participantSlotStore: new InMemoryParticipantSlotStore([
         {
           id: "slot_fixture_001",
@@ -324,7 +335,308 @@ describe("participant routes", () => {
         status: "created",
         freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
         maxInterviewMinutes: 45
+      },
+      consentVersion: {
+        id: "consent_version_active",
+        studyId: "study_fixture_001",
+        versionNumber: 1,
+        consentText: "Please review and accept this study consent.",
+        consentMethod: "checkmark",
+        isActive: true,
+        createdAt: "2026-05-06T12:00:00.000Z"
       }
+    });
+
+    await server.close();
+  });
+
+  it("captures checkmark consent with the server-rendered version snapshot and transitions the run", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_checkmark",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const runStore = new InMemoryRunStore([createFixtureRun()]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_checkmark",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      consentVersionStore: new InMemoryConsentVersionStore([
+        {
+          id: "consent_version_active",
+          studyId: "study_fixture_001",
+          versionNumber: 1,
+          consentText: "Original consent snapshot.",
+          consentMethod: "checkmark",
+          isActive: true,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createConsentRecordId: () => "consent_record_checkmark_001",
+        now: () => new Date("2026-05-06T12:05:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/consent`,
+      payload: {
+        accepted: true,
+        renderedConsentSnapshot: "Client-tampered consent text"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: "Bad Request",
+      message: "Consent record metadata is assigned by the service."
+    });
+
+    const acceptedResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/consent`,
+      payload: {
+        accepted: true
+      }
+    });
+
+    expect(acceptedResponse.statusCode).toBe(201);
+    expect(acceptedResponse.json()).toMatchObject({
+      consentRecord: {
+        id: "consent_record_checkmark_001",
+        studyId: "study_fixture_001",
+        participantSlotId: "slot_fixture_001",
+        runId: "run_fixture_001",
+        consentVersionId: "consent_version_active",
+        consentMethod: "checkmark",
+        renderedConsentSnapshot: "Original consent snapshot.",
+        acceptedAt: "2026-05-06T12:05:00.000Z",
+        createdAt: "2026-05-06T12:05:00.000Z"
+      },
+      run: {
+        id: "run_fixture_001",
+        status: "consented",
+        updatedAt: "2026-05-06T12:05:00.000Z"
+      }
+    });
+    expect((await runStore.getById("run_fixture_001"))?.status).toBe("consented");
+    expect(await runStore.listConsentRecordsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: "consent_record_checkmark_001",
+        renderedConsentSnapshot: "Original consent snapshot."
+      })
+    ]);
+
+    await server.close();
+  });
+
+  it("captures electronic signature consent text when configured", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_signature",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_signature",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      consentVersionStore: new InMemoryConsentVersionStore([
+        {
+          id: "consent_version_active",
+          studyId: "study_fixture_001",
+          versionNumber: 2,
+          consentText: "Signature consent snapshot.",
+          consentMethod: "electronic_signature",
+          isActive: true,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createConsentRecordId: () => "consent_record_signature_001",
+        now: () => new Date("2026-05-06T12:06:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore: new InMemoryRunStore([createFixtureRun()])
+    });
+    const missingSignature = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/consent`,
+      payload: {
+        signatureText: " "
+      }
+    });
+    const acceptedResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/consent`,
+      payload: {
+        signatureText: "  Taylor Participant  "
+      }
+    });
+
+    expect(missingSignature.statusCode).toBe(400);
+    expect(missingSignature.json()).toEqual({
+      error: "Bad Request",
+      message: "Signature text is required."
+    });
+    expect(acceptedResponse.statusCode).toBe(201);
+    expect(acceptedResponse.json()).toMatchObject({
+      consentRecord: {
+        id: "consent_record_signature_001",
+        consentMethod: "electronic_signature",
+        signatureText: "Taylor Participant",
+        renderedConsentSnapshot: "Signature consent snapshot."
+      },
+      run: {
+        status: "consented"
+      }
+    });
+
+    await server.close();
+  });
+
+  it("blocks consent submission for unauthorized, stale, and already-started runs", async () => {
+    const validToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_valid",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const staleToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_stale",
+      runId: "run_stale_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const consentedToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_consented",
+      runId: "run_consented_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_valid",
+          tokenHash: hashParticipantAccessTokenForTest(validToken)
+        }),
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_stale",
+          tokenHash: hashParticipantAccessTokenForTest(staleToken),
+          runId: "run_stale_001"
+        }),
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_consented",
+          tokenHash: hashParticipantAccessTokenForTest(consentedToken),
+          runId: "run_consented_001"
+        })
+      ]),
+      consentVersionStore: new InMemoryConsentVersionStore([
+        {
+          id: "consent_version_active",
+          studyId: "study_fixture_001",
+          versionNumber: 1,
+          consentText: "Consent snapshot.",
+          consentMethod: "checkmark",
+          isActive: true,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        now: () => new Date("2026-05-21T12:00:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore: new InMemoryRunStore([
+        createFixtureRun({
+          freshnessDeadlineAt: "2026-05-22T12:00:00.000Z"
+        }),
+        createFixtureRun({
+          id: "run_stale_001",
+          freshnessDeadlineAt: "2026-05-20T12:00:00.000Z"
+        }),
+        createFixtureRun({
+          id: "run_consented_001",
+          status: "consented",
+          freshnessDeadlineAt: "2026-05-22T12:00:00.000Z"
+        })
+      ])
+    });
+    const invalidTokenResponse = await server.inject({
+      method: "POST",
+      url: "/participant/runs/not-a-token/consent",
+      payload: {
+        accepted: true
+      }
+    });
+    const staleResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${staleToken}/consent`,
+      payload: {
+        accepted: true
+      }
+    });
+    const alreadyStartedResponse = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${consentedToken}/consent`,
+      payload: {
+        accepted: true
+      }
+    });
+
+    expect(invalidTokenResponse.statusCode).toBe(403);
+    expect(staleResponse.statusCode).toBe(403);
+    expect(alreadyStartedResponse.statusCode).toBe(403);
+    expect(alreadyStartedResponse.json()).toEqual({
+      error: "Forbidden",
+      message: "Consent cannot be submitted for this run."
     });
 
     await server.close();

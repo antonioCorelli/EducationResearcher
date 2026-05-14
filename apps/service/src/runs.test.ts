@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { InMemoryConsentVersionStore } from "./consent.js";
 import {
   InMemoryObjectiveVersionStore,
   type ObjectiveVersion
@@ -71,6 +72,7 @@ function createRunService(runStore: InMemoryRunStore) {
     new InMemoryParticipantAccessTokenStore(),
     participantSlotStore,
     objectiveVersionStore,
+    new InMemoryConsentVersionStore(),
     {
       now: () => new Date("2026-05-06T12:15:00.000Z"),
       participantAccessTokenSecret: "test-participant-secret"
