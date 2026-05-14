@@ -543,7 +543,7 @@ export class RunService {
       run.studyId !== tokenRecord.studyId ||
       run.participantSlotId !== tokenRecord.participantSlotId ||
       !isParticipantAccessibleRunStatus(run.status) ||
-      new Date(run.freshnessDeadlineAt).getTime() <= this.now().getTime()
+      (isParticipantActiveRunStatus(run.status) && new Date(run.freshnessDeadlineAt).getTime() <= this.now().getTime())
     ) {
       throw new ParticipantAccessError();
     }
@@ -1238,6 +1238,22 @@ function safeEqual(left: string, right: string) {
 }
 
 function isParticipantAccessibleRunStatus(status: RunStatus) {
+  return [
+    "created",
+    "consented",
+    "survey_in_progress",
+    "survey_completed",
+    "interview_in_progress",
+    "interview_paused",
+    "interview_completed",
+    "stale",
+    "partial",
+    "technical_interruption",
+    "scored"
+  ].includes(status);
+}
+
+function isParticipantActiveRunStatus(status: RunStatus) {
   return [
     "created",
     "consented",

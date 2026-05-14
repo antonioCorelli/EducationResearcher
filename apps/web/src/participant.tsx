@@ -50,6 +50,19 @@ interface ParticipantProps {
   readonly onNavigateToResearcherSignIn: () => void;
 }
 
+type RunStatus =
+  | "created"
+  | "consented"
+  | "survey_in_progress"
+  | "survey_completed"
+  | "interview_in_progress"
+  | "interview_paused"
+  | "interview_completed"
+  | "stale"
+  | "partial"
+  | "technical_interruption"
+  | "scored";
+
 type ParticipantAccessState =
   | { readonly status: "demo" }
   | { readonly status: "checking" }
@@ -57,7 +70,7 @@ type ParticipantAccessState =
       readonly status: "ready";
       readonly run: {
         readonly id: string;
-        readonly status: string;
+        readonly status: RunStatus;
         readonly freshnessDeadlineAt: string;
       };
       readonly consentVersion?: ConsentVersion;
@@ -167,7 +180,7 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
         )
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: string; freshnessDeadlineAt: string };
+        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string };
         message?: string;
       };
 
@@ -219,7 +232,7 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
         })
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: string; freshnessDeadlineAt: string };
+        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string };
         message?: string;
       };
 
@@ -237,25 +250,21 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
 
   if (accessState.status === "checking") {
     return (
-      <main className="app-shell participant-shell">
-        <section className="workspace-panel" aria-labelledby="participant-title">
-          <p className="eyebrow">Participant access</p>
-          <h1 id="participant-title">Checking link</h1>
-          <p className="panel-copy">Please wait while we confirm this run is available.</p>
-        </section>
-      </main>
+      <ParticipantStatusScreen
+        eyebrow="Participant access"
+        title="Checking link"
+        message="Please wait while we confirm this run is available."
+      />
     );
   }
 
   if (accessState.status === "blocked") {
     return (
-      <main className="app-shell participant-shell">
-        <section className="workspace-panel" aria-labelledby="participant-title">
-          <p className="eyebrow">Participant access</p>
-          <h1 id="participant-title">This link is not available</h1>
-          <p className="panel-copy">{accessState.message}</p>
-        </section>
-      </main>
+      <ParticipantStatusScreen
+        eyebrow="Participant access"
+        title="This link is not available"
+        message={accessState.message}
+      />
     );
   }
 
@@ -365,24 +374,26 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
 
     if (accessState.run.status === "survey_completed") {
       return (
-        <main className="app-shell participant-shell">
-          <section className="workspace-panel" aria-labelledby="participant-title">
-            <p className="eyebrow">Participant survey</p>
-            <h1 id="participant-title">Survey submitted</h1>
-            <p className="panel-copy">Your study run is ready for the interview.</p>
-          </section>
-        </main>
+        <ParticipantStatusScreen
+          eyebrow="Participant survey"
+          title="Survey submitted"
+          message="Your study run is ready for the interview."
+        />
       );
     }
 
+    const terminalScreen = getParticipantTerminalScreen(accessState.run.status);
+
+    if (terminalScreen) {
+      return <ParticipantStatusScreen {...terminalScreen} />;
+    }
+
     return (
-      <main className="app-shell participant-shell">
-        <section className="workspace-panel" aria-labelledby="participant-title">
-          <p className="eyebrow">Participant access</p>
-          <h1 id="participant-title">This step is not available</h1>
-          <p className="panel-copy">This participant link cannot continue from the current run state.</p>
-        </section>
-      </main>
+      <ParticipantStatusScreen
+        eyebrow="Participant access"
+        title="This step is not available"
+        message="This participant link cannot continue from the current run state."
+      />
     );
   }
 
@@ -398,6 +409,62 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
       </section>
     </main>
   );
+}
+
+function ParticipantStatusScreen({
+  eyebrow,
+  message,
+  title
+}: {
+  readonly eyebrow: string;
+  readonly message: string;
+  readonly title: string;
+}) {
+  return (
+    <main className="app-shell participant-shell">
+      <section className="workspace-panel participant-status-panel" aria-labelledby="participant-title">
+        <p className="eyebrow">{eyebrow}</p>
+        <h1 id="participant-title">{title}</h1>
+        <p className="panel-copy">{message}</p>
+      </section>
+    </main>
+  );
+}
+
+function getParticipantTerminalScreen(status: RunStatus) {
+  if (status === "interview_completed" || status === "scored") {
+    return {
+      eyebrow: "Study complete",
+      title: "Thank you",
+      message: "Your participation for this run is complete. You may close this page."
+    };
+  }
+
+  if (status === "stale") {
+    return {
+      eyebrow: "Run unavailable",
+      title: "This run can no longer continue",
+      message: "This participant run is no longer active. You may close this page."
+    };
+  }
+
+  if (status === "technical_interruption") {
+    return {
+      eyebrow: "Unable to continue",
+      title: "We could not continue this session",
+      message: "Your responses submitted so far have been saved. You may close this page."
+    };
+  }
+
+  if (status === "partial") {
+    return {
+      eyebrow: "Unable to continue",
+      title: "This run cannot continue",
+      message: "Your responses submitted so far have been saved. You may close this page."
+    };
+  }
+
+  return undefined;
 }
 
 function SurveyQuestionField({
@@ -428,7 +495,7 @@ function SurveyQuestionField({
 async function fetchParticipantAccess(accessToken: string) {
   const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}`);
   const payload = (await response.json()) as {
-    run?: { id: string; status: string; freshnessDeadlineAt: string };
+    run?: { id: string; status: RunStatus; freshnessDeadlineAt: string };
     consentVersion?: ConsentVersion;
     surveyVersion?: SurveyVersion;
     message?: string;

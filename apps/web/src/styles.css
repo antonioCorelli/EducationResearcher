@@ -105,6 +105,11 @@ textarea {
   min-height: 144px;
 }
 
+.participant-status-panel {
+  display: grid;
+  gap: 8px;
+}
+
 .auth-layout,
 .workspace-panel {
   width: min(100%, 760px);
