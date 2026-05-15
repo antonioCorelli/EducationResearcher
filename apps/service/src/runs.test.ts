@@ -17,7 +17,9 @@ import {
   hashParticipantAccessTokenForTest,
   isRunStatusTransitionAllowed,
   type Run,
-  type RunStatus
+  type RunStatus,
+  type SurveyResponse,
+  type StaleRunScoringTriggerInput
 } from "./runs.js";
 import type { GapMapGenerator } from "./gap-map.js";
 import type { SurveyVersion } from "./survey.js";
@@ -313,6 +315,151 @@ describe("run state machine", () => {
     await expect(service.transitionRunStatus("run_missing", "consented")).rejects.toMatchObject({
       safeMessage: "Run was not found."
     });
+  });
+});
+
+describe("run freshness enforcement", () => {
+  it("allows participant access before the freshness deadline and blocks it at and after the deadline", async () => {
+    const deadline = "2026-05-20T12:00:00.000Z";
+
+    const beforeStore = new InMemoryRunStore([createFixtureRun({ status: "consented", freshnessDeadlineAt: deadline })]);
+    const before = createParticipantRunService({
+      runStore: beforeStore,
+      now: () => new Date("2026-05-20T11:59:59.999Z")
+    });
+
+    await expect(before.service.validateParticipantAccess(before.rawToken)).resolves.toMatchObject({
+      run: {
+        id: "run_fixture_001",
+        status: "consented",
+        freshnessDeadlineAt: deadline
+      }
+    });
+
+    for (const nowIso of ["2026-05-20T12:00:00.000Z", "2026-05-20T12:00:00.001Z"]) {
+      const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented", freshnessDeadlineAt: deadline })]);
+      const { rawToken, service } = createParticipantRunService({
+        runStore,
+        now: () => new Date(nowIso)
+      });
+
+      await expect(service.validateParticipantAccess(rawToken)).rejects.toMatchObject({
+        safeMessage: "This participant link is not available."
+      });
+    }
+  });
+
+  it("sweeps stale runs at the deadline, preserves artifacts, and triggers stale partial scoring context", async () => {
+    const runStore = new InMemoryRunStore([
+      createFixtureRun({
+        status: "consented",
+        freshnessDeadlineAt: "2026-05-20T12:00:00.000Z"
+      }),
+      createFixtureRun({
+        id: "run_future_001",
+        participantSlotId: "slot_fixture_002",
+        status: "survey_completed",
+        freshnessDeadlineAt: "2026-05-20T12:00:00.001Z"
+      }),
+      createFixtureRun({
+        id: "run_other_study_001",
+        studyId: "study_other_001",
+        status: "survey_completed",
+        freshnessDeadlineAt: "2026-05-20T12:00:00.000Z"
+      })
+    ]);
+    const surveyResponse: SurveyResponse = {
+      id: "survey_response_stale_001",
+      studyId: "study_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      runId: "run_fixture_001",
+      surveyVersionId: "survey_version_active",
+      surveyQuestionId: "survey_question_001",
+      responseText: "The example changed my reasoning.",
+      submittedAt: "2026-05-19T12:00:00.000Z",
+      createdAt: "2026-05-19T12:00:00.000Z"
+    };
+    const scoringTriggers: StaleRunScoringTriggerInput[] = [];
+    const service = new RunService(
+      runStore,
+      new InMemoryParticipantAccessTokenStore(),
+      participantSlotStore,
+      objectiveVersionStore,
+      new InMemoryConsentVersionStore(),
+      new InMemorySurveyVersionStore([createSurveyVersion()]),
+      {
+        now: () => new Date("2026-05-20T12:00:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret",
+        staleRunScoringTrigger: {
+          async triggerStaleRunScoring(input) {
+            scoringTriggers.push(input);
+          }
+        }
+      }
+    );
+
+    await runStore.submitSurvey(
+      [surveyResponse],
+      createFixtureRun({
+        status: "survey_completed",
+        freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+        updatedAt: "2026-05-19T12:00:00.000Z"
+      }),
+      "consented"
+    );
+    await runStore.saveGapMap({
+      id: "gap_map_stale_001",
+      studyId: "study_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      runId: "run_fixture_001",
+      surveyVersionId: "survey_version_active",
+      objectiveVersionIds: ["objective_version_001"],
+      status: "generated",
+      modelName: "fake-gap-map",
+      modelVersion: "local-1",
+      serviceRequestId: "fake-gap-map-request",
+      promptVersion: "gap-map-v1",
+      alreadyAnswered: ["The survey captured a change in reasoning."],
+      ambiguities: [],
+      contradictions: [],
+      missingEvidence: ["Need interview evidence."],
+      recommendedProbes: ["What example changed your reasoning?"],
+      generatedAt: "2026-05-19T12:01:00.000Z",
+      createdAt: "2026-05-19T12:01:00.000Z"
+    });
+
+    const result = await service.sweepStaleRunsForStudy("study_fixture_001");
+
+    expect(result.staleRuns).toEqual([
+      expect.objectContaining({
+        id: "run_fixture_001",
+        status: "stale",
+        updatedAt: "2026-05-20T12:00:00.000Z"
+      })
+    ]);
+    expect(await runStore.getById("run_future_001")).toMatchObject({ status: "survey_completed" });
+    expect(await runStore.getById("run_other_study_001")).toMatchObject({ status: "survey_completed" });
+    expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toEqual([surveyResponse]);
+    expect(await runStore.listGapMapsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: "gap_map_stale_001",
+        status: "generated"
+      })
+    ]);
+    expect(scoringTriggers).toEqual([
+      expect.objectContaining({
+        previousStatus: "survey_completed",
+        triggeredAt: "2026-05-20T12:00:00.000Z",
+        run: expect.objectContaining({
+          id: "run_fixture_001",
+          status: "stale"
+        }),
+        context: {
+          staleRun: true,
+          partialRun: true
+        }
+      })
+    ]);
   });
 });
 

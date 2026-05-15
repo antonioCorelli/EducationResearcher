@@ -57,6 +57,13 @@ export const RUN_STATUS_TRANSITIONS = {
   scored: []
 } as const satisfies Record<RunStatus, readonly RunStatus[]>;
 
+export const STALE_SWEEP_SOURCE_STATUSES = [
+  "survey_in_progress",
+  "survey_completed",
+  "interview_in_progress",
+  "interview_paused"
+] as const satisfies readonly RunStatus[];
+
 export interface Run {
   readonly id: string;
   readonly studyId: string;
@@ -212,6 +219,7 @@ export interface RunStore {
   getById(runId: string): Promise<Run | undefined>;
   listByStudy(studyId: string): Promise<Run[]>;
   listByParticipantSlot(participantSlotId: string): Promise<Run[]>;
+  listStaleCandidatesByStudy(studyId: string, now: Date): Promise<Run[]>;
   listConsentRecordsByRun(runId: string): Promise<ConsentRecord[]>;
   listSurveyResponsesByRun(runId: string): Promise<SurveyResponse[]>;
   listGapMapsByRun(runId: string): Promise<GapMap[]>;
@@ -257,6 +265,20 @@ export interface ParticipantAccessTokenStore {
   getByTokenId(tokenId: string): Promise<ParticipantAccessToken | undefined>;
   listByRun(runId: string): Promise<ParticipantAccessToken[]>;
   create(token: ParticipantAccessToken): Promise<ParticipantAccessToken>;
+}
+
+export interface StaleRunScoringTriggerInput {
+  readonly run: Run;
+  readonly previousStatus: (typeof STALE_SWEEP_SOURCE_STATUSES)[number];
+  readonly triggeredAt: string;
+  readonly context: {
+    readonly staleRun: true;
+    readonly partialRun: true;
+  };
+}
+
+export interface StaleRunScoringTrigger {
+  triggerStaleRunScoring(input: StaleRunScoringTriggerInput): Promise<void>;
 }
 
 interface RunItem {
@@ -455,6 +477,7 @@ export interface RunServiceOptions {
   readonly createParticipantAccessTokenId?: () => string;
   readonly participantAccessBaseUrl?: string;
   readonly participantAccessTokenSecret?: string;
+  readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
 }
 
 export class RunService {
@@ -469,6 +492,7 @@ export class RunService {
   private readonly createParticipantAccessTokenId: () => string;
   private readonly participantAccessBaseUrl: string;
   private readonly participantAccessTokenSecret: string;
+  private readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
 
   constructor(
     private readonly runStore: RunStore,
@@ -495,6 +519,7 @@ export class RunService {
       options.participantAccessBaseUrl ?? process.env.PARTICIPANT_ACCESS_BASE_URL ?? "http://localhost:5173";
     this.participantAccessTokenSecret =
       options.participantAccessTokenSecret ?? getConfiguredParticipantAccessTokenSecret();
+    this.staleRunScoringTrigger = options.staleRunScoringTrigger;
   }
 
   async listForStudy(studyId: string) {
@@ -924,6 +949,42 @@ export class RunService {
     return this.runStore.updateStatus(transitionedRun, run.status);
   }
 
+  async sweepStaleRunsForStudy(studyId: string) {
+    const sweepTime = this.now();
+    const triggeredAt = sweepTime.toISOString();
+    const candidates = await this.runStore.listStaleCandidatesByStudy(studyId, sweepTime);
+    const staleRuns: Run[] = [];
+
+    for (const candidate of candidates) {
+      if (!isStaleSweepSourceStatus(candidate.status)) {
+        continue;
+      }
+
+      const staleRun = applyRunStatusTransition(candidate, "stale", sweepTime);
+
+      if (staleRun === candidate) {
+        continue;
+      }
+
+      const persistedRun = await this.runStore.updateStatus(staleRun, candidate.status);
+      staleRuns.push(persistedRun);
+
+      await this.staleRunScoringTrigger?.triggerStaleRunScoring({
+        run: persistedRun,
+        previousStatus: candidate.status,
+        triggeredAt,
+        context: {
+          staleRun: true,
+          partialRun: true
+        }
+      });
+    }
+
+    return {
+      staleRuns
+    };
+  }
+
   private async createInterviewSessionForRun(run: Run) {
     const startedAt = this.now().toISOString();
     const sessionNumber = (await this.runStore.listInterviewSessionsByRun(run.id)).reduce(
@@ -1161,6 +1222,19 @@ export class InMemoryRunStore implements RunStore {
     return [...this.runs.values()]
       .filter((run) => run.participantSlotId === participantSlotId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async listStaleCandidatesByStudy(studyId: string, now: Date) {
+    const nowTime = now.getTime();
+
+    return [...this.runs.values()]
+      .filter(
+        (run) =>
+          run.studyId === studyId &&
+          isStaleSweepSourceStatus(run.status) &&
+          new Date(run.freshnessDeadlineAt).getTime() <= nowTime
+      )
+      .sort((left, right) => left.freshnessDeadlineAt.localeCompare(right.freshnessDeadlineAt));
   }
 
   async listConsentRecordsByRun(runId: string) {
@@ -1500,6 +1574,32 @@ export class DynamoDbRunStore implements RunStore {
       .filter((item) => item.entity === "run")
       .map((item) => toRun(item as RunItem))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  async listStaleCandidatesByStudy(studyId: string, now: Date) {
+    const deadlineSk = `FRESHNESS#${now.toISOString()}~`;
+    const resultSets = await Promise.all(
+      STALE_SWEEP_SOURCE_STATUSES.map((status) =>
+        this.documentClient.send(
+          new QueryCommand({
+            TableName: this.tableName,
+            IndexName: "byStudyRunStatus",
+            KeyConditionExpression: "gsi1pk = :status AND gsi1sk <= :deadline",
+            ExpressionAttributeValues: {
+              ":status": studyRunStatusPk(studyId, status),
+              ":deadline": deadlineSk
+            }
+          })
+        )
+      )
+    );
+
+    return resultSets
+      .flatMap((response) => response.Items ?? [])
+      .filter((item) => item.entity === "run")
+      .map((item) => toRun(item as RunItem))
+      .filter((run) => new Date(run.freshnessDeadlineAt).getTime() <= now.getTime())
+      .sort((left, right) => left.freshnessDeadlineAt.localeCompare(right.freshnessDeadlineAt));
   }
 
   async listConsentRecordsByRun(runId: string) {
@@ -2199,6 +2299,10 @@ function isParticipantActiveRunStatus(status: RunStatus) {
     "interview_in_progress",
     "interview_paused"
   ].includes(status);
+}
+
+function isStaleSweepSourceStatus(status: RunStatus): status is (typeof STALE_SWEEP_SOURCE_STATUSES)[number] {
+  return STALE_SWEEP_SOURCE_STATUSES.includes(status as (typeof STALE_SWEEP_SOURCE_STATUSES)[number]);
 }
 
 function isParticipantSurveyRenderableRunStatus(status: RunStatus) {
