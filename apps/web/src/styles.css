@@ -110,6 +110,162 @@ textarea {
   gap: 8px;
 }
 
+.participant-interview-shell {
+  place-items: stretch;
+  padding: 0;
+}
+
+.participant-interview-surface {
+  display: grid;
+  min-height: 100vh;
+  align-content: center;
+  gap: 28px;
+  padding: clamp(24px, 6vw, 72px);
+}
+
+.participant-interview-topline {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  width: min(100%, 760px);
+  margin: 0 auto;
+}
+
+.participant-interview-topline .eyebrow {
+  margin: 0;
+}
+
+.participant-interview-topline span {
+  color: #566173;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.ai-caption-panel {
+  display: grid;
+  width: min(100%, 760px);
+  min-height: 230px;
+  align-content: center;
+  gap: 16px;
+  margin: 0 auto;
+  border-top: 1px solid #d7e0da;
+  border-bottom: 1px solid #d7e0da;
+  padding: 34px 0;
+}
+
+.ai-caption-panel h1 {
+  margin: 0;
+}
+
+.ai-caption-panel p {
+  margin: 0;
+  color: #172033;
+  font-size: 1.45rem;
+  font-weight: 750;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.voice-wave-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  width: min(100%, 520px);
+  margin: 0 auto;
+}
+
+.voice-wave {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  align-items: center;
+  height: 76px;
+  border: 1px solid #d7e0da;
+  border-radius: 8px;
+  background: #fbfcfa;
+  padding: 14px;
+}
+
+.voice-wave span {
+  display: block;
+  width: 100%;
+  height: 18px;
+  border-radius: 999px;
+  background: #bdc9c2;
+  transition:
+    background 160ms ease,
+    height 160ms ease;
+}
+
+.voice-wave span:nth-child(2),
+.voice-wave span:nth-child(4) {
+  height: 30px;
+}
+
+.voice-wave span:nth-child(3) {
+  height: 44px;
+}
+
+.active-voice-wave span {
+  background: #2f6f5a;
+}
+
+.active-voice-wave span:nth-child(1) {
+  height: 28px;
+}
+
+.active-voice-wave span:nth-child(2) {
+  height: 54px;
+}
+
+.active-voice-wave span:nth-child(3) {
+  height: 68px;
+}
+
+.active-voice-wave span:nth-child(4) {
+  height: 46px;
+}
+
+.active-voice-wave span:nth-child(5) {
+  height: 34px;
+}
+
+.participant-voice-state {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  color: #485466;
+  font-weight: 800;
+}
+
+.voice-state-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #bdc9c2;
+}
+
+.active-voice-state-dot {
+  background: #c2410c;
+  box-shadow: 0 0 0 6px rgb(194 65 12 / 14%);
+}
+
+.participant-interview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  width: min(100%, 620px);
+  margin: 0 auto;
+}
+
+.record-control-button {
+  min-width: 168px;
+}
+
 .auth-layout,
 .workspace-panel {
   width: min(100%, 760px);
@@ -935,6 +1091,7 @@ button.version-chip:hover {
     .participant-slot-bulk-grid,
     .participant-slot-rejection-row,
     .rubric-grid,
+    .voice-wave-grid,
   .grade-label-row,
   .grade-example-row,
   .version-diff-row dd {

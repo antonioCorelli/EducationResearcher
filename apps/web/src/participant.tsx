@@ -72,11 +72,14 @@ type ParticipantAccessState =
         readonly id: string;
         readonly status: RunStatus;
         readonly freshnessDeadlineAt: string;
+        readonly maxInterviewMinutes: number;
       };
       readonly consentVersion?: ConsentVersion;
       readonly surveyVersion?: SurveyVersion;
     }
   | { readonly status: "blocked"; readonly message: string };
+
+type InterviewMode = "ready" | "active" | "paused";
 
 export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) {
   const [accepted, setAccepted] = useState(false);
@@ -86,6 +89,10 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   const [surveyResponses, setSurveyResponses] = useState<Record<string, string>>({});
   const [surveyError, setSurveyError] = useState("");
   const [isSubmittingSurvey, setIsSubmittingSurvey] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [interviewError, setInterviewError] = useState("");
+  const [isSubmittingInterviewAction, setIsSubmittingInterviewAction] = useState(false);
+  const [simulatedAiQuestionIndex, setSimulatedAiQuestionIndex] = useState(0);
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
     const accessToken = getParticipantAccessTokenFromPath();
 
@@ -144,6 +151,63 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
     });
   }, [accessState]);
 
+  useEffect(() => {
+    if (accessState.status !== "ready" || accessState.run.status !== "interview_in_progress") {
+      setIsRecording(false);
+    }
+  }, [accessState]);
+
+  async function submitInterviewAction(action: "start" | "pause" | "resume" | "complete") {
+    setInterviewError("");
+
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    if (!accessToken || accessState.status !== "ready") {
+      setInterviewError("This participant link is not available.");
+      return;
+    }
+
+    setIsSubmittingInterviewAction(true);
+
+    try {
+      const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/${action}`, {
+        method: "POST"
+      });
+      const payload = (await response.json()) as {
+        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+        message?: string;
+      };
+
+      if (!response.ok || !payload.run) {
+        throw new Error(payload.message ?? "Unable to update the interview.");
+      }
+
+      setAccessState({ status: "ready", run: payload.run });
+      setIsRecording(false);
+
+      if (action === "start" || action === "resume") {
+        setSimulatedAiQuestionIndex(0);
+      }
+    } catch (error) {
+      setInterviewError(error instanceof Error ? error.message : "Unable to update the interview.");
+    } finally {
+      setIsSubmittingInterviewAction(false);
+    }
+  }
+
+  function toggleRecording() {
+    setInterviewError("");
+    setIsRecording((currentValue) => {
+      if (currentValue) {
+        setSimulatedAiQuestionIndex((currentIndex) =>
+          Math.min(currentIndex + 1, simulatedAiQuestions.length - 1)
+        );
+      }
+
+      return !currentValue;
+    });
+  }
+
   async function submitConsent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setConsentError("");
@@ -180,7 +244,7 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
         )
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string };
+        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
         message?: string;
       };
 
@@ -232,7 +296,7 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
         })
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string };
+        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
         message?: string;
       };
 
@@ -372,12 +436,26 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
       );
     }
 
-    if (accessState.run.status === "survey_completed") {
+    if (
+      accessState.run.status === "survey_completed" ||
+      accessState.run.status === "interview_in_progress" ||
+      accessState.run.status === "interview_paused"
+    ) {
+      const interviewMode = getInterviewMode(accessState.run.status);
+
       return (
-        <ParticipantStatusScreen
-          eyebrow="Participant survey"
-          title="Survey submitted"
-          message="Your study run is ready for the interview."
+        <ParticipantInterviewScreen
+          aiQuestion={simulatedAiQuestions[simulatedAiQuestionIndex] ?? simulatedAiQuestions[0]}
+          error={interviewError}
+          isActionPending={isSubmittingInterviewAction}
+          isRecording={isRecording}
+          maxInterviewMinutes={accessState.run.maxInterviewMinutes}
+          mode={interviewMode}
+          onComplete={() => void submitInterviewAction("complete")}
+          onPause={() => void submitInterviewAction("pause")}
+          onRecordToggle={toggleRecording}
+          onResume={() => void submitInterviewAction("resume")}
+          onStart={() => void submitInterviewAction("start")}
         />
       );
     }
@@ -411,6 +489,105 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   );
 }
 
+export function ParticipantInterviewScreen({
+  aiQuestion,
+  error,
+  isActionPending,
+  isRecording,
+  maxInterviewMinutes,
+  mode,
+  onComplete,
+  onPause,
+  onRecordToggle,
+  onResume,
+  onStart
+}: {
+  readonly aiQuestion: string;
+  readonly error: string;
+  readonly isActionPending: boolean;
+  readonly isRecording: boolean;
+  readonly maxInterviewMinutes: number;
+  readonly mode: InterviewMode;
+  readonly onComplete: () => void;
+  readonly onPause: () => void;
+  readonly onRecordToggle: () => void;
+  readonly onResume: () => void;
+  readonly onStart: () => void;
+}) {
+  const isActive = mode === "active";
+  const participantVoiceState = isRecording ? "Recording" : isActive ? "Ready" : "Paused";
+
+  return (
+    <main className="app-shell participant-shell participant-interview-shell">
+      <section className="participant-interview-surface" aria-labelledby="participant-title">
+        <div className="participant-interview-topline">
+          <p className="eyebrow">Voice interview</p>
+          <span>{maxInterviewMinutes} min max</span>
+        </div>
+        <div className="ai-caption-panel" aria-live="polite">
+          <h1 id="participant-title">{mode === "paused" ? "Interview paused" : "Interview"}</h1>
+          <p>{mode === "paused" ? "When you are ready, we can continue with the next question." : aiQuestion}</p>
+        </div>
+
+        <div className="voice-wave-grid" aria-hidden="true">
+          <VoiceWave isActive={isActive && !isRecording} label="AI" />
+          <VoiceWave isActive={isRecording} label="You" />
+        </div>
+
+        <div className="participant-voice-state" aria-live="polite">
+          <span className={isRecording ? "voice-state-dot active-voice-state-dot" : "voice-state-dot"} />
+          <span>Voice input {participantVoiceState.toLowerCase()}</span>
+        </div>
+
+        {error ? <p className="form-error">{error}</p> : null}
+
+        <div className="participant-interview-controls">
+          {mode === "ready" ? (
+            <button className="primary-button record-control-button" disabled={isActionPending} onClick={onStart} type="button">
+              {isActionPending ? "Starting" : "Start interview"}
+            </button>
+          ) : null}
+          {mode === "paused" ? (
+            <button className="primary-button record-control-button" disabled={isActionPending} onClick={onResume} type="button">
+              {isActionPending ? "Resuming" : "Resume interview"}
+            </button>
+          ) : null}
+          {isActive ? (
+            <>
+              <button
+                className={isRecording ? "danger-button record-control-button" : "primary-button record-control-button"}
+                disabled={isActionPending}
+                onClick={onRecordToggle}
+                type="button"
+              >
+                {isRecording ? "Stop recording" : "Record"}
+              </button>
+              <button className="secondary-button" disabled={isActionPending || isRecording} onClick={onPause} type="button">
+                Pause
+              </button>
+              <button className="secondary-button" disabled={isActionPending || isRecording} onClick={onComplete} type="button">
+                Complete
+              </button>
+            </>
+          ) : null}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function VoiceWave({ isActive, label }: { readonly isActive: boolean; readonly label: string }) {
+  return (
+    <div className={isActive ? "voice-wave active-voice-wave" : "voice-wave"} title={`${label} voice wave`}>
+      <span />
+      <span />
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
 function ParticipantStatusScreen({
   eyebrow,
   message,
@@ -429,6 +606,24 @@ function ParticipantStatusScreen({
       </section>
     </main>
   );
+}
+
+const simulatedAiQuestions = [
+  "To begin, tell me more about the main idea from your survey response.",
+  "Thank you. Could you share a concrete example that helps explain that?",
+  "What felt uncertain or worth thinking about more?"
+] as const;
+
+function getInterviewMode(status: "survey_completed" | "interview_in_progress" | "interview_paused"): InterviewMode {
+  if (status === "interview_in_progress") {
+    return "active";
+  }
+
+  if (status === "interview_paused") {
+    return "paused";
+  }
+
+  return "ready";
 }
 
 function getParticipantTerminalScreen(status: RunStatus) {
@@ -495,7 +690,7 @@ function SurveyQuestionField({
 async function fetchParticipantAccess(accessToken: string) {
   const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}`);
   const payload = (await response.json()) as {
-    run?: { id: string; status: RunStatus; freshnessDeadlineAt: string };
+    run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
     consentVersion?: ConsentVersion;
     surveyVersion?: SurveyVersion;
     message?: string;
