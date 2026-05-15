@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore, type ConsentVersion } from "./consent.js";
 import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
+import { InMemoryOperationalEventStore } from "./operational-events.js";
 import { InMemoryParticipantSlotStore } from "./participant-slots.js";
 import {
   InMemoryParticipantAccessTokenStore,
@@ -14,6 +15,7 @@ import {
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
+import type { RealtimeVoiceProvider } from "./voice-provider.js";
 
 const researcher: SessionUser = {
   id: "user_researcher_001",
@@ -130,6 +132,61 @@ function createFixtureParticipantAccessToken(
     createdAt: "2026-05-06T12:00:00.000Z",
     updatedAt: "2026-05-06T12:00:00.000Z",
     ...optionalOverrides
+  };
+}
+
+function createFixtureSurveyVersion(): SurveyVersion {
+  return {
+    id: "survey_version_active",
+    studyId: "study_fixture_001",
+    versionNumber: 1,
+    isActive: true,
+    createdAt: "2026-05-06T12:00:00.000Z",
+    layoutItems: [
+      {
+        type: "question",
+        sortOrder: 1,
+        question: {
+          id: "survey_question_001",
+          surveyVersionId: "survey_version_active",
+          prompt: "What did you notice first?",
+          required: true,
+          questionType: "long_text",
+          sortOrder: 1,
+          createdAt: "2026-05-06T12:00:00.000Z"
+        }
+      }
+    ],
+    groups: [],
+    ungroupedQuestions: [
+      {
+        id: "survey_question_001",
+        surveyVersionId: "survey_version_active",
+        prompt: "What did you notice first?",
+        required: true,
+        questionType: "long_text",
+        sortOrder: 1,
+        createdAt: "2026-05-06T12:00:00.000Z"
+      }
+    ]
+  };
+}
+
+function createFixtureObjectiveVersion(): ObjectiveVersion {
+  return {
+    id: "objective_version_001",
+    studyId: "study_fixture_001",
+    objectiveKey: "reasoning_quality",
+    versionNumber: 1,
+    title: "Reasoning Quality",
+    description: "Explains reasoning clearly.",
+    gradeScale: ["1", "2"],
+    gradeExamples: [],
+    evidenceRequirements: "Use survey and interview evidence.",
+    sortOrder: 1,
+    isEnabled: true,
+    isActive: true,
+    createdAt: "2026-05-06T12:00:00.000Z"
   };
 }
 
@@ -3835,6 +3892,161 @@ describe("participant interview routes", () => {
     expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
       expect.objectContaining({ id: "interview_session_route_002", status: "completed" }),
       expect.objectContaining({ id: "interview_session_route_001", status: "paused" })
+    ]);
+
+    await server.close();
+  });
+
+  it("creates realtime voice sessions with prompt context and records safe connection telemetry", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_realtime",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const run = createFixtureRun({ status: "survey_completed" });
+    const runStore = new InMemoryRunStore([run]);
+    const surveyVersion = createFixtureSurveyVersion();
+    const objectiveVersion = createFixtureObjectiveVersion();
+    const operationalEventStore = new InMemoryOperationalEventStore();
+    const capturedInstructions: string[] = [];
+    const realtimeVoiceProvider: RealtimeVoiceProvider = {
+      async createSession(request) {
+        capturedInstructions.push(request.instructions);
+
+        return {
+          provider: "fake",
+          model: "fake-realtime",
+          voice: "fake-voice",
+          clientSecret: "client-secret",
+          realtimeUrl: "https://api.openai.com/v1/realtime/calls",
+          serviceRequestId: "req_realtime_fixture_001",
+          promptVersion: request.promptVersion
+        };
+      }
+    };
+
+    await runStore.submitSurvey(
+      [
+        {
+          id: "survey_response_001",
+          studyId: run.studyId,
+          participantSlotId: run.participantSlotId,
+          runId: run.id,
+          surveyVersionId: run.surveyVersionId,
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed that the worked example changed how I justified the answer.",
+          submittedAt: "2026-05-06T12:10:00.000Z",
+          createdAt: "2026-05-06T12:10:00.000Z"
+        }
+      ],
+      run,
+      "survey_completed"
+    );
+    await runStore.saveGapMap({
+      id: "gap_map_realtime_001",
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      surveyVersionId: run.surveyVersionId,
+      objectiveVersionIds: run.objectiveVersionIds,
+      status: "generated",
+      modelName: "fake-gap-map",
+      modelVersion: "local-1",
+      serviceRequestId: "req_gap_map_realtime_001",
+      promptVersion: "gap-map-v1",
+      alreadyAnswered: ["The survey gives initial evidence."],
+      ambiguities: ["The causal explanation needs clarification."],
+      contradictions: [],
+      missingEvidence: ["Need a concrete example for reasoning quality."],
+      recommendedProbes: ["Could you share a concrete example?"],
+      generatedAt: "2026-05-06T12:11:00.000Z",
+      createdAt: "2026-05-06T12:11:00.000Z"
+    });
+
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_realtime",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([objectiveVersion]),
+      operationalEventStore,
+      operationalEventServiceOptions: {
+        createOperationalEventId: () => `operational_event_${Date.now()}`
+      },
+      realtimeVoiceProvider,
+      runServiceOptions: {
+        createInterviewSessionId: () => "interview_session_route_realtime_001",
+        now: () => new Date("2026-05-06T12:30:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore,
+      surveyVersionStore: new InMemorySurveyVersionStore([surveyVersion])
+    });
+
+    const started = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/start`
+    });
+    const realtimeSession = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/realtime-session`
+    });
+    const connectionState = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/connection-state`,
+      payload: {
+        serviceRequestId: "req_realtime_fixture_001",
+        audioConnectionState: "connected"
+      }
+    });
+
+    expect(started.statusCode).toBe(201);
+    expect(realtimeSession.statusCode).toBe(201);
+    expect(realtimeSession.json()).toMatchObject({
+      realtimeSession: {
+        provider: "fake",
+        model: "fake-realtime",
+        clientSecret: "client-secret",
+        serviceRequestId: "req_realtime_fixture_001",
+        promptVersion: "realtime-interview-v1"
+      },
+      interviewSession: {
+        id: "interview_session_route_realtime_001"
+      }
+    });
+    expect(capturedInstructions[0]).toContain("I noticed that the worked example changed");
+    expect(capturedInstructions[0]).toContain("Reasoning Quality");
+    expect(capturedInstructions[0]).toContain("Could you share a concrete example?");
+    expect(capturedInstructions[0]).toContain("Remaining interview time: 2700 seconds");
+    expect(capturedInstructions[0]).toContain("Run state: interview_in_progress");
+    expect(capturedInstructions[0]).toContain("Do not reveal scoring objectives");
+    expect(connectionState.statusCode).toBe(204);
+    expect(await operationalEventStore.listByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        eventType: "realtime_session_created",
+        audioConnectionState: "session_requested",
+        provider: "fake"
+      }),
+      expect.objectContaining({
+        eventType: "audio_connection_state_changed",
+        audioConnectionState: "connected"
+      })
     ]);
 
     await server.close();

@@ -19,8 +19,13 @@ import {
 } from "./gap-map.js";
 import type { ObjectiveVersion, ObjectiveVersionStore } from "./objectives.js";
 import type { ParticipantSlotStore } from "./participant-slots.js";
-import type { StudyShell } from "./study-shell.js";
+import { V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import type { SurveyQuestion, SurveyVersion, SurveyVersionStore } from "./survey.js";
+import {
+  REALTIME_INTERVIEW_PROMPT_VERSION,
+  buildRealtimeInterviewInstructions,
+  type RealtimeVoiceProvider
+} from "./voice-provider.js";
 
 export const RUN_STATUSES = [
   "created",
@@ -705,6 +710,49 @@ export class RunService {
     const interruptedRun = applyRunStatusTransition(run, "technical_interruption", this.now());
 
     return this.runStore.updateInterviewSession(interruptedSession, interruptedRun, run.status, activeSession.status);
+  }
+
+  async createParticipantRealtimeVoiceSession(rawToken: string, voiceProvider: RealtimeVoiceProvider) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status !== "interview_in_progress") {
+      throw new ParticipantAccessError("Realtime voice is only available during an active interview.");
+    }
+
+    const interviewSession = await this.requireActiveInterviewSession(run.id);
+    const surveyVersion = await this.getRunSurveyVersion(run);
+    const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
+    const objectiveVersions = await this.getRunObjectiveVersions(run);
+    const latestGeneratedGapMap = (await this.runStore.listGapMapsByRun(run.id)).find(
+      (gapMap) => gapMap.status === "generated"
+    );
+    const promptInput = {
+      run,
+      interviewSession,
+      surveyVersion,
+      surveyResponses,
+      objectiveVersions,
+      ...(latestGeneratedGapMap ? { gapMap: latestGeneratedGapMap } : {}),
+      personaStylePrompt: V1_DEFAULT_PERSONA_STYLE_PROMPT,
+      remainingSeconds: calculateRemainingInterviewSeconds(
+        run,
+        await this.runStore.listInterviewSessionsByRun(run.id),
+        this.now()
+      ),
+      nowIso: this.now().toISOString()
+    };
+    const instructions = buildRealtimeInterviewInstructions(promptInput);
+    const realtimeSession = await voiceProvider.createSession({
+      promptInput,
+      instructions,
+      promptVersion: REALTIME_INTERVIEW_PROMPT_VERSION
+    });
+
+    return {
+      realtimeSession,
+      run: toParticipantRunSummary(run),
+      interviewSession
+    };
   }
 
   async transitionRunStatus(runId: string, status: RunStatus) {
@@ -1951,6 +1999,33 @@ function parseSurveyResponseText(value: unknown, question: SurveyQuestion) {
   }
 
   return responseText;
+}
+
+function toParticipantRunSummary(run: Run): ParticipantRunAccess["run"] {
+  return {
+    id: run.id,
+    studyId: run.studyId,
+    participantSlotId: run.participantSlotId,
+    status: run.status,
+    freshnessDeadlineAt: run.freshnessDeadlineAt,
+    maxInterviewMinutes: run.maxInterviewMinutes
+  };
+}
+
+function calculateRemainingInterviewSeconds(run: Run, sessions: readonly InterviewSession[], now: Date) {
+  const elapsedMilliseconds = sessions.reduce((total, session) => {
+    const startedAt = new Date(session.startedAt).getTime();
+    const endedAt = session.endedAt ? new Date(session.endedAt).getTime() : now.getTime();
+
+    if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt <= startedAt) {
+      return total;
+    }
+
+    return total + (endedAt - startedAt);
+  }, 0);
+  const capSeconds = run.maxInterviewMinutes * 60;
+
+  return Math.max(0, capSeconds - Math.floor(elapsedMilliseconds / 1000));
 }
 
 function parseInterviewInterruptionSafeStatus(value: unknown): InterviewInterruptionSafeStatus {

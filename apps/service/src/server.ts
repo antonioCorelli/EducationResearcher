@@ -25,6 +25,13 @@ import {
   type GapMapGenerator
 } from "./gap-map.js";
 import {
+  OperationalEventService,
+  createConfiguredOperationalEventStore,
+  parseAudioConnectionState,
+  type OperationalEventServiceOptions,
+  type OperationalEventStore
+} from "./operational-events.js";
+import {
   ParticipantSlotService,
   createConfiguredParticipantSlotStore,
   toSafeParticipantSlotValidationResponse,
@@ -56,6 +63,10 @@ import {
   type SubmitParticipantSurveyInput
 } from "./runs.js";
 import {
+  createConfiguredRealtimeVoiceProvider,
+  type RealtimeVoiceProvider
+} from "./voice-provider.js";
+import {
   StudyAuthorizationService,
   toSafeAuthorizationResponse
 } from "./authorization.js";
@@ -75,6 +86,8 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly corsOrigin?: string | string[];
   readonly gapMapGenerator?: GapMapGenerator;
   readonly objectiveVersionStore?: ObjectiveVersionStore;
+  readonly operationalEventServiceOptions?: OperationalEventServiceOptions;
+  readonly operationalEventStore?: OperationalEventStore;
   readonly participantSlotServiceOptions?: ParticipantSlotServiceOptions;
   readonly participantSlotStore?: ParticipantSlotStore;
   readonly participantAccessTokenStore?: ParticipantAccessTokenStore;
@@ -82,6 +95,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly runStore?: RunStore;
   readonly studyShellStore?: StudyShellStore;
   readonly surveyVersionStore?: SurveyVersionStore;
+  readonly realtimeVoiceProvider?: RealtimeVoiceProvider;
 }
 
 interface SignInBody {
@@ -569,6 +583,58 @@ function coerceInterruptInterviewInput(body: unknown): InterruptInterviewInput {
   };
 }
 
+function coerceAudioConnectionStateInput(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Audio connection state is required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "runId" in record ||
+    "participantSlotId" in record ||
+    "eventType" in record ||
+    "createdAt" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Operational event metadata is assigned by the service."
+      }
+    };
+  }
+
+  const serviceRequestId =
+    typeof record.serviceRequestId === "string" && record.serviceRequestId.trim()
+      ? record.serviceRequestId.trim()
+      : undefined;
+
+  if (!serviceRequestId) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Service request ID is required."
+      }
+    };
+  }
+
+  return {
+    serviceRequestId,
+    audioConnectionState: parseAudioConnectionState(record.audioConnectionState),
+    retryCount: coerceOptionalNonNegativeInteger(record.retryCount, "retry count")
+  };
+}
+
 function rejectSurveyResponseMetadata(value: unknown) {
   if (!Array.isArray(value)) {
     return;
@@ -716,6 +782,24 @@ function coerceOptionalInteger(value: unknown, label: string) {
   return value;
 }
 
+function coerceOptionalNonNegativeInteger(value: unknown, label: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: `${label} must be a non-negative whole number.`
+      }
+    };
+  }
+
+  return value;
+}
+
 function toStudyBodyError(error: unknown) {
   const message = error instanceof Error ? error.message : "Study settings are invalid.";
   return {
@@ -734,6 +818,8 @@ export function buildServer(options: BuildServerOptions = {}) {
     corsOrigin = true,
     gapMapGenerator = createConfiguredGapMapGenerator(),
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
+    operationalEventServiceOptions,
+    operationalEventStore = createConfiguredOperationalEventStore(),
     participantAccessTokenStore = createConfiguredParticipantAccessTokenStore(),
     participantSlotServiceOptions,
     participantSlotStore = createConfiguredParticipantSlotStore(),
@@ -741,12 +827,14 @@ export function buildServer(options: BuildServerOptions = {}) {
     runStore = createConfiguredRunStore(),
     studyShellStore = createConfiguredStudyShellStore(),
     surveyVersionStore = createConfiguredSurveyVersionStore(),
+    realtimeVoiceProvider = createConfiguredRealtimeVoiceProvider(),
     ...fastifyOptions
   } = options;
   let resolvedAuthProvider = authProvider;
   const studyShellService = new StudyShellService(studyShellStore);
   const consentService = new ConsentService(consentVersionStore, studyShellStore);
   const objectiveService = new ObjectiveService(objectiveVersionStore);
+  const operationalEventService = new OperationalEventService(operationalEventStore, operationalEventServiceOptions);
   const participantSlotService = new ParticipantSlotService(participantSlotStore, participantSlotServiceOptions);
   const runService = new RunService(
     runStore,
@@ -1467,6 +1555,71 @@ export function buildServer(options: BuildServerOptions = {}) {
       throw error;
     }
   });
+
+  server.post<{ Params: { accessToken: string } }>(
+    "/participant/runs/:accessToken/interview/realtime-session",
+    async (request, reply) => {
+      try {
+        const result = await runService.createParticipantRealtimeVoiceSession(
+          request.params.accessToken,
+          realtimeVoiceProvider
+        );
+
+        await operationalEventService.recordRealtimeSessionCreated({
+          studyId: result.run.studyId,
+          runId: result.run.id,
+          participantSlotId: result.run.participantSlotId,
+          serviceRequestId: result.realtimeSession.serviceRequestId,
+          provider: result.realtimeSession.provider,
+          modelName: result.realtimeSession.model
+        });
+
+        return reply.code(201).send(result);
+      } catch (error) {
+        const safeResponse =
+          toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        return reply.code(502).send({
+          error: "Bad Gateway",
+          message: "Unable to prepare the voice interview."
+        });
+      }
+    }
+  );
+
+  server.post<{ Params: { accessToken: string } }>(
+    "/participant/runs/:accessToken/interview/connection-state",
+    async (request, reply) => {
+      try {
+        const input = coerceAudioConnectionStateInput(request.body);
+        const result = await runService.validateParticipantAccess(request.params.accessToken);
+
+        await operationalEventService.recordAudioConnectionState({
+          studyId: result.run.studyId,
+          runId: result.run.id,
+          participantSlotId: result.run.participantSlotId,
+          serviceRequestId: input.serviceRequestId,
+          audioConnectionState: input.audioConnectionState,
+          retryCount: input.retryCount
+        });
+
+        return reply.code(204).send();
+      } catch (error) {
+        const safeResponse =
+          toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
 
   server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/pause", async (request, reply) => {
     try {

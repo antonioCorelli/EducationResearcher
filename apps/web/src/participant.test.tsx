@@ -15,6 +15,7 @@ describe("ParticipantInterviewScreen", () => {
         isRecording={false}
         maxInterviewMinutes={45}
         mode="active"
+        realtimeConnectionState="connected"
         onComplete={noop}
         onPause={noop}
         onRecordToggle={noop}
@@ -38,6 +39,7 @@ describe("ParticipantInterviewScreen", () => {
         isRecording
         maxInterviewMinutes={45}
         mode="active"
+        realtimeConnectionState="connected"
         onComplete={noop}
         onPause={noop}
         onRecordToggle={noop}

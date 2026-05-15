@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://localhost:4000";
 
@@ -80,6 +80,18 @@ type ParticipantAccessState =
   | { readonly status: "blocked"; readonly message: string };
 
 type InterviewMode = "ready" | "active" | "paused";
+type RealtimeConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
+
+interface RealtimeVoiceSession {
+  readonly provider: "fake" | "openai";
+  readonly model: string;
+  readonly voice: string;
+  readonly clientSecret: string;
+  readonly expiresAt?: number;
+  readonly realtimeUrl: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
+}
 
 export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) {
   const [accepted, setAccepted] = useState(false);
@@ -93,6 +105,12 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   const [interviewError, setInterviewError] = useState("");
   const [isSubmittingInterviewAction, setIsSubmittingInterviewAction] = useState(false);
   const [simulatedAiQuestionIndex, setSimulatedAiQuestionIndex] = useState(0);
+  const [realtimeConnectionState, setRealtimeConnectionState] = useState<RealtimeConnectionState>("idle");
+  const [realtimeServiceRequestId, setRealtimeServiceRequestId] = useState<string>();
+  const peerConnectionRef = useRef<RTCPeerConnection | undefined>(undefined);
+  const dataChannelRef = useRef<RTCDataChannel | undefined>(undefined);
+  const mediaStreamRef = useRef<MediaStream | undefined>(undefined);
+  const remoteAudioRef = useRef<HTMLAudioElement | undefined>(undefined);
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
     const accessToken = getParticipantAccessTokenFromPath();
 
@@ -154,8 +172,11 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   useEffect(() => {
     if (accessState.status !== "ready" || accessState.run.status !== "interview_in_progress") {
       setIsRecording(false);
+      disconnectRealtimeVoice("closed");
     }
   }, [accessState]);
+
+  useEffect(() => () => disconnectRealtimeVoice("closed"), []);
 
   async function submitInterviewAction(action: "start" | "pause" | "resume" | "complete") {
     setInterviewError("");
@@ -187,6 +208,9 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
 
       if (action === "start" || action === "resume") {
         setSimulatedAiQuestionIndex(0);
+        await connectRealtimeVoice(accessToken);
+      } else {
+        disconnectRealtimeVoice("closed");
       }
     } catch (error) {
       setInterviewError(error instanceof Error ? error.message : "Unable to update the interview.");
@@ -198,13 +222,71 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   function toggleRecording() {
     setInterviewError("");
     setIsRecording((currentValue) => {
+      const nextValue = !currentValue;
+
+      setMicrophoneEnabled(nextValue);
+
       if (currentValue) {
         setSimulatedAiQuestionIndex((currentIndex) =>
           Math.min(currentIndex + 1, simulatedAiQuestions.length - 1)
         );
       }
 
-      return !currentValue;
+      return nextValue;
+    });
+  }
+
+  async function connectRealtimeVoice(accessToken: string) {
+    disconnectRealtimeVoice("closed");
+    setRealtimeConnectionState("connecting");
+    let activeServiceRequestId = realtimeServiceRequestId;
+
+    try {
+      const realtimeSession = await fetchRealtimeVoiceSession(accessToken);
+      activeServiceRequestId = realtimeSession.serviceRequestId;
+      setRealtimeServiceRequestId(realtimeSession.serviceRequestId);
+      await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connecting");
+
+      if (realtimeSession.provider === "fake") {
+        setRealtimeConnectionState("connected");
+        await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected");
+        return;
+      }
+
+      const connection = await connectOpenAiRealtimeVoice(realtimeSession);
+      peerConnectionRef.current = connection.peerConnection;
+      dataChannelRef.current = connection.dataChannel;
+      mediaStreamRef.current = connection.mediaStream;
+      remoteAudioRef.current = connection.remoteAudio;
+      setMicrophoneEnabled(false);
+      setRealtimeConnectionState("connected");
+      await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected");
+    } catch (error) {
+      setRealtimeConnectionState("failed");
+
+      if (activeServiceRequestId) {
+        await reportAudioConnectionState(accessToken, activeServiceRequestId, "failed");
+      }
+
+      setInterviewError(error instanceof Error ? error.message : "Unable to connect voice interview.");
+    }
+  }
+
+  function disconnectRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
+    dataChannelRef.current?.close();
+    peerConnectionRef.current?.close();
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    remoteAudioRef.current?.remove();
+    dataChannelRef.current = undefined;
+    peerConnectionRef.current = undefined;
+    mediaStreamRef.current = undefined;
+    remoteAudioRef.current = undefined;
+    setRealtimeConnectionState((currentState) => (currentState === "idle" ? currentState : state));
+  }
+
+  function setMicrophoneEnabled(enabled: boolean) {
+    mediaStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = enabled;
     });
   }
 
@@ -451,6 +533,7 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
           isRecording={isRecording}
           maxInterviewMinutes={accessState.run.maxInterviewMinutes}
           mode={interviewMode}
+          realtimeConnectionState={realtimeConnectionState}
           onComplete={() => void submitInterviewAction("complete")}
           onPause={() => void submitInterviewAction("pause")}
           onRecordToggle={toggleRecording}
@@ -496,6 +579,7 @@ export function ParticipantInterviewScreen({
   isRecording,
   maxInterviewMinutes,
   mode,
+  realtimeConnectionState,
   onComplete,
   onPause,
   onRecordToggle,
@@ -508,6 +592,7 @@ export function ParticipantInterviewScreen({
   readonly isRecording: boolean;
   readonly maxInterviewMinutes: number;
   readonly mode: InterviewMode;
+  readonly realtimeConnectionState: RealtimeConnectionState;
   readonly onComplete: () => void;
   readonly onPause: () => void;
   readonly onRecordToggle: () => void;
@@ -516,6 +601,7 @@ export function ParticipantInterviewScreen({
 }) {
   const isActive = mode === "active";
   const participantVoiceState = isRecording ? "Recording" : isActive ? "Ready" : "Paused";
+  const connectionLabel = getConnectionLabel(realtimeConnectionState);
 
   return (
     <main className="app-shell participant-shell participant-interview-shell">
@@ -537,6 +623,7 @@ export function ParticipantInterviewScreen({
         <div className="participant-voice-state" aria-live="polite">
           <span className={isRecording ? "voice-state-dot active-voice-state-dot" : "voice-state-dot"} />
           <span>Voice input {participantVoiceState.toLowerCase()}</span>
+          <span className="connection-state-label">{connectionLabel}</span>
         </div>
 
         {error ? <p className="form-error">{error}</p> : null}
@@ -556,7 +643,7 @@ export function ParticipantInterviewScreen({
             <>
               <button
                 className={isRecording ? "danger-button record-control-button" : "primary-button record-control-button"}
-                disabled={isActionPending}
+                disabled={isActionPending || realtimeConnectionState === "connecting" || realtimeConnectionState === "failed"}
                 onClick={onRecordToggle}
                 type="button"
               >
@@ -586,6 +673,26 @@ function VoiceWave({ isActive, label }: { readonly isActive: boolean; readonly l
       <span />
     </div>
   );
+}
+
+function getConnectionLabel(state: RealtimeConnectionState) {
+  if (state === "connected") {
+    return "Connected";
+  }
+
+  if (state === "connecting") {
+    return "Connecting";
+  }
+
+  if (state === "failed") {
+    return "Connection issue";
+  }
+
+  if (state === "disconnected") {
+    return "Disconnected";
+  }
+
+  return "Voice ready";
 }
 
 function ParticipantStatusScreen({
@@ -704,6 +811,93 @@ async function fetchParticipantAccess(accessToken: string) {
     run: payload.run,
     consentVersion: payload.consentVersion,
     surveyVersion: payload.surveyVersion
+  };
+}
+
+async function fetchRealtimeVoiceSession(accessToken: string) {
+  const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/realtime-session`, {
+    method: "POST"
+  });
+  const payload = (await response.json()) as {
+    realtimeSession?: RealtimeVoiceSession;
+    message?: string;
+  };
+
+  if (!response.ok || !payload.realtimeSession) {
+    throw new Error(payload.message ?? "Unable to prepare the voice interview.");
+  }
+
+  return payload.realtimeSession;
+}
+
+async function reportAudioConnectionState(
+  accessToken: string,
+  serviceRequestId: string,
+  audioConnectionState: Exclude<RealtimeConnectionState, "idle">
+) {
+  await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/connection-state`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      serviceRequestId,
+      audioConnectionState
+    })
+  }).catch(() => undefined);
+}
+
+async function connectOpenAiRealtimeVoice(realtimeSession: RealtimeVoiceSession) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Microphone access is not available in this browser.");
+  }
+
+  const peerConnection = new RTCPeerConnection();
+  const remoteAudio = document.createElement("audio");
+  remoteAudio.autoplay = true;
+  remoteAudio.hidden = true;
+  document.body.append(remoteAudio);
+  peerConnection.ontrack = (event) => {
+    remoteAudio.srcObject = event.streams[0] ?? null;
+  };
+
+  const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  for (const track of mediaStream.getAudioTracks()) {
+    track.enabled = false;
+    peerConnection.addTrack(track, mediaStream);
+  }
+
+  const dataChannel = peerConnection.createDataChannel("oai-events");
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+
+  if (!offer.sdp) {
+    throw new Error("Unable to prepare the realtime voice connection.");
+  }
+
+  const sdpResponse = await fetch(realtimeSession.realtimeUrl, {
+    method: "POST",
+    body: offer.sdp,
+    headers: {
+      authorization: `Bearer ${realtimeSession.clientSecret}`,
+      "content-type": "application/sdp"
+    }
+  });
+
+  if (!sdpResponse.ok) {
+    throw new Error("Unable to connect the voice interview.");
+  }
+
+  await peerConnection.setRemoteDescription({
+    type: "answer",
+    sdp: await sdpResponse.text()
+  });
+
+  return {
+    peerConnection,
+    dataChannel,
+    mediaStream,
+    remoteAudio
   };
 }
 
