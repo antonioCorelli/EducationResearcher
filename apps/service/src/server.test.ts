@@ -3734,6 +3734,166 @@ describe("researcher objective routes", () => {
   });
 });
 
+describe("participant interview routes", () => {
+  it("exposes the interview session lifecycle through participant access tokens", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_interview",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    let sessionSequence = 0;
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_interview",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createInterviewSessionId: () => `interview_session_route_00${++sessionSequence}`,
+        now: () => new Date("2026-05-06T12:30:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore
+    });
+
+    const started = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/start`
+    });
+    const paused = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/pause`
+    });
+    const resumed = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/resume`
+    });
+    const completed = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/complete`
+    });
+
+    expect(started.statusCode).toBe(201);
+    expect(started.json()).toMatchObject({
+      interviewSession: {
+        id: "interview_session_route_001",
+        sessionNumber: 1,
+        status: "active"
+      },
+      run: {
+        status: "interview_in_progress"
+      }
+    });
+    expect(paused.statusCode).toBe(200);
+    expect(paused.json()).toMatchObject({
+      interviewSession: {
+        id: "interview_session_route_001",
+        status: "paused",
+        endedAt: "2026-05-06T12:30:00.000Z"
+      },
+      run: {
+        status: "interview_paused"
+      }
+    });
+    expect(resumed.statusCode).toBe(201);
+    expect(resumed.json()).toMatchObject({
+      interviewSession: {
+        id: "interview_session_route_002",
+        sessionNumber: 2,
+        status: "active"
+      },
+      run: {
+        status: "interview_in_progress"
+      }
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toMatchObject({
+      interviewSession: {
+        id: "interview_session_route_002",
+        status: "completed"
+      },
+      run: {
+        status: "interview_completed"
+      }
+    });
+    expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({ id: "interview_session_route_002", status: "completed" }),
+      expect.objectContaining({ id: "interview_session_route_001", status: "paused" })
+    ]);
+
+    await server.close();
+  });
+
+  it("accepts only participant-safe interruption status values", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_interruption",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_interruption",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createInterviewSessionId: () => "interview_session_route_interrupted_001",
+        now: () => new Date("2026-05-06T12:30:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore: new InMemoryRunStore([createFixtureRun({ status: "interview_in_progress" })])
+    });
+
+    const unsafeStatus = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/interrupt`,
+      payload: {
+        safeStatus: "openai_realtime_error",
+        status: "interrupted"
+      }
+    });
+
+    expect(unsafeStatus.statusCode).toBe(400);
+    expect(unsafeStatus.json()).toEqual({
+      error: "Bad Request",
+      message: "Interview session metadata is assigned by the service."
+    });
+
+    await server.close();
+  });
+});
+
 describe("researcher create survey end-to-end workflows", () => {
   it("saves a complete created survey with consent, interleaved grouped questions, and a full grading system", async () => {
     const studyStore = new InMemoryStudyShellStore();

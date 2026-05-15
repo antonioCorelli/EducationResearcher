@@ -125,7 +125,9 @@ function createSurveyVersion(): SurveyVersion {
 
 function createParticipantRunService(input: {
   readonly runStore: InMemoryRunStore;
+  readonly createInterviewSessionId?: () => string;
   readonly gapMapGenerator?: GapMapGenerator;
+  readonly now?: () => Date;
 }) {
   const rawToken = createParticipantAccessTokenForTest({
     tokenId: "token_fixture_gap_map",
@@ -157,8 +159,9 @@ function createParticipantRunService(input: {
       new InMemorySurveyVersionStore([createSurveyVersion()]),
       {
         createGapMapId: () => "gap_map_fixture_001",
+        createInterviewSessionId: input.createInterviewSessionId,
         createSurveyResponseId: () => "survey_response_fixture_001",
-        now: () => new Date("2026-05-06T12:20:00.000Z"),
+        now: input.now ?? (() => new Date("2026-05-06T12:20:00.000Z")),
         participantAccessTokenSecret: "test-participant-secret"
       },
       input.gapMapGenerator
@@ -406,5 +409,127 @@ describe("gap map generation", () => {
       status: "failed",
       failureCategory: "provider_failure"
     });
+  });
+});
+
+describe("interview session lifecycle", () => {
+  it("starts, pauses, resumes, and completes numbered interview sessions", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    let sessionSequence = 0;
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      createInterviewSessionId: () => `interview_session_fixture_00${++sessionSequence}`
+    });
+
+    const started = await service.startParticipantInterview(rawToken);
+    const repeatedStart = await service.startParticipantInterview(rawToken);
+    const paused = await service.pauseParticipantInterview(rawToken);
+    const resumed = await service.resumeParticipantInterview(rawToken);
+    const completed = await service.completeParticipantInterview(rawToken);
+
+    expect(started).toMatchObject({
+      interviewSession: {
+        id: "interview_session_fixture_001",
+        runId: "run_fixture_001",
+        sessionNumber: 1,
+        status: "active",
+        startedAt: "2026-05-06T12:20:00.000Z"
+      },
+      run: {
+        status: "interview_in_progress"
+      }
+    });
+    expect(repeatedStart.interviewSession).toEqual(started.interviewSession);
+    expect(paused).toMatchObject({
+      interviewSession: {
+        id: "interview_session_fixture_001",
+        sessionNumber: 1,
+        status: "paused",
+        endedAt: "2026-05-06T12:20:00.000Z"
+      },
+      run: {
+        status: "interview_paused"
+      }
+    });
+    expect(resumed).toMatchObject({
+      interviewSession: {
+        id: "interview_session_fixture_002",
+        sessionNumber: 2,
+        status: "active"
+      },
+      run: {
+        status: "interview_in_progress"
+      }
+    });
+    expect(completed).toMatchObject({
+      interviewSession: {
+        id: "interview_session_fixture_002",
+        sessionNumber: 2,
+        status: "completed",
+        endedAt: "2026-05-06T12:20:00.000Z"
+      },
+      run: {
+        status: "interview_completed"
+      }
+    });
+    expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({ id: "interview_session_fixture_002", sessionNumber: 2, status: "completed" }),
+      expect.objectContaining({ id: "interview_session_fixture_001", sessionNumber: 1, status: "paused" })
+    ]);
+  });
+
+  it("blocks interview lifecycle changes when the participant run is stale", async () => {
+    const runStore = new InMemoryRunStore([
+      createFixtureRun({
+        status: "survey_completed",
+        freshnessDeadlineAt: "2026-05-06T12:19:59.000Z"
+      })
+    ]);
+    const { rawToken, service } = createParticipantRunService({ runStore });
+
+    await expect(service.startParticipantInterview(rawToken)).rejects.toMatchObject({
+      safeMessage: "This participant link is not available."
+    });
+    expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([]);
+  });
+
+  it("records a safe interruption status and preserves the interrupted session", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      createInterviewSessionId: () => "interview_session_interrupted_001"
+    });
+
+    await service.startParticipantInterview(rawToken);
+    await expect(
+      service.interruptParticipantInterview(rawToken, {
+        safeStatus: "provider_error"
+      })
+    ).rejects.toMatchObject({
+      safeMessage: "Interview interruption status is invalid."
+    });
+    const interrupted = await service.interruptParticipantInterview(rawToken, {
+      safeStatus: "unable_to_complete_interview"
+    });
+
+    expect(interrupted).toMatchObject({
+      interviewSession: {
+        id: "interview_session_interrupted_001",
+        sessionNumber: 1,
+        status: "interrupted",
+        safeStatus: "unable_to_complete_interview",
+        endedAt: "2026-05-06T12:20:00.000Z"
+      },
+      run: {
+        status: "technical_interruption"
+      }
+    });
+    expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: "interview_session_interrupted_001",
+        status: "interrupted",
+        safeStatus: "unable_to_complete_interview"
+      })
+    ]);
   });
 });

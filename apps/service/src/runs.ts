@@ -113,6 +113,16 @@ export interface SubmitParticipantSurveyInput {
   readonly responses?: unknown;
 }
 
+export const INTERVIEW_SESSION_STATUSES = ["active", "paused", "completed", "interrupted"] as const;
+
+export type InterviewSessionStatus = (typeof INTERVIEW_SESSION_STATUSES)[number];
+
+export type InterviewInterruptionSafeStatus = "technical_interruption" | "unable_to_complete_interview";
+
+export interface InterruptInterviewInput {
+  readonly safeStatus?: unknown;
+}
+
 export interface ConsentRecord {
   readonly id: string;
   readonly studyId: string;
@@ -138,6 +148,20 @@ export interface SurveyResponse {
   readonly createdAt: string;
 }
 
+export interface InterviewSession {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly sessionNumber: number;
+  readonly status: InterviewSessionStatus;
+  readonly safeStatus?: InterviewInterruptionSafeStatus;
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export type { GapMap } from "./gap-map.js";
 
 export interface RunStore {
@@ -147,6 +171,7 @@ export interface RunStore {
   listConsentRecordsByRun(runId: string): Promise<ConsentRecord[]>;
   listSurveyResponsesByRun(runId: string): Promise<SurveyResponse[]>;
   listGapMapsByRun(runId: string): Promise<GapMap[]>;
+  listInterviewSessionsByRun(runId: string): Promise<InterviewSession[]>;
   create(run: Run, previousCurrentRuns: readonly Run[]): Promise<Run>;
   updateStatus(run: Run, previousStatus: RunStatus): Promise<Run>;
   captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus): Promise<{
@@ -155,6 +180,19 @@ export interface RunStore {
   }>;
   submitSurvey(responses: readonly SurveyResponse[], run: Run, previousStatus: RunStatus): Promise<{
     surveyResponses: readonly SurveyResponse[];
+    run: Run;
+  }>;
+  createInterviewSession(session: InterviewSession, run: Run, previousStatus: RunStatus): Promise<{
+    interviewSession: InterviewSession;
+    run: Run;
+  }>;
+  updateInterviewSession(
+    session: InterviewSession,
+    run: Run,
+    previousRunStatus: RunStatus,
+    previousSessionStatus: InterviewSessionStatus
+  ): Promise<{
+    interviewSession: InterviewSession;
     run: Run;
   }>;
   saveGapMap(gapMap: GapMap): Promise<GapMap>;
@@ -272,6 +310,25 @@ interface GapMapItem {
   readonly createdAt: string;
 }
 
+interface InterviewSessionItem {
+  readonly entity: "interview_session";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly sessionNumber: number;
+  readonly status: InterviewSessionStatus;
+  readonly safeStatus?: InterviewInterruptionSafeStatus;
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
 export class RunValidationError extends Error {
   readonly statusCode = 400;
 
@@ -295,6 +352,7 @@ export interface RunServiceOptions {
   readonly createRunId?: () => string;
   readonly createConsentRecordId?: () => string;
   readonly createGapMapId?: () => string;
+  readonly createInterviewSessionId?: () => string;
   readonly createSurveyResponseId?: () => string;
   readonly createParticipantAccessTokenId?: () => string;
   readonly participantAccessBaseUrl?: string;
@@ -306,6 +364,7 @@ export class RunService {
   private readonly createRunId: () => string;
   private readonly createConsentRecordId: () => string;
   private readonly createGapMapId: () => string;
+  private readonly createInterviewSessionId: () => string;
   private readonly createSurveyResponseId: () => string;
   private readonly createParticipantAccessTokenId: () => string;
   private readonly participantAccessBaseUrl: string;
@@ -325,6 +384,7 @@ export class RunService {
     this.createRunId = options.createRunId ?? (() => `run_${randomUUID()}`);
     this.createConsentRecordId = options.createConsentRecordId ?? (() => `consent_record_${randomUUID()}`);
     this.createGapMapId = options.createGapMapId ?? (() => `gap_map_${randomUUID()}`);
+    this.createInterviewSessionId = options.createInterviewSessionId ?? (() => `interview_session_${randomUUID()}`);
     this.createSurveyResponseId = options.createSurveyResponseId ?? (() => `survey_response_${randomUUID()}`);
     this.createParticipantAccessTokenId =
       options.createParticipantAccessTokenId ?? (() => createSecureRandomTokenId());
@@ -511,6 +571,142 @@ export class RunService {
     };
   }
 
+  async startParticipantInterview(rawToken: string) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status === "interview_in_progress") {
+      const activeSession = await this.getActiveInterviewSession(run.id);
+
+      if (activeSession) {
+        return {
+          interviewSession: activeSession,
+          run
+        };
+      }
+    }
+
+    if (run.status !== "survey_completed") {
+      throw new ParticipantAccessError("Interview cannot be started for this run.");
+    }
+
+    return this.createInterviewSessionForRun(run);
+  }
+
+  async pauseParticipantInterview(rawToken: string) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status === "interview_paused") {
+      const pausedSession = await this.getLatestInterviewSession(run.id, "paused");
+
+      if (pausedSession) {
+        return {
+          interviewSession: pausedSession,
+          run
+        };
+      }
+    }
+
+    if (run.status !== "interview_in_progress") {
+      throw new ParticipantAccessError("Interview cannot be paused for this run.");
+    }
+
+    const activeSession = await this.requireActiveInterviewSession(run.id);
+    const pausedAt = this.now().toISOString();
+    const pausedSession: InterviewSession = {
+      ...activeSession,
+      status: "paused",
+      endedAt: pausedAt,
+      updatedAt: pausedAt
+    };
+    const pausedRun = applyRunStatusTransition(run, "interview_paused", this.now());
+
+    return this.runStore.updateInterviewSession(pausedSession, pausedRun, run.status, activeSession.status);
+  }
+
+  async resumeParticipantInterview(rawToken: string) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status === "interview_in_progress") {
+      const activeSession = await this.getActiveInterviewSession(run.id);
+
+      if (activeSession) {
+        return {
+          interviewSession: activeSession,
+          run
+        };
+      }
+    }
+
+    if (run.status !== "interview_paused") {
+      throw new ParticipantAccessError("Interview cannot be resumed for this run.");
+    }
+
+    return this.createInterviewSessionForRun(run);
+  }
+
+  async completeParticipantInterview(rawToken: string) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status === "interview_completed") {
+      const completedSession = await this.getLatestInterviewSession(run.id, "completed");
+
+      if (completedSession) {
+        return {
+          interviewSession: completedSession,
+          run
+        };
+      }
+    }
+
+    if (run.status !== "interview_in_progress") {
+      throw new ParticipantAccessError("Interview cannot be completed for this run.");
+    }
+
+    const activeSession = await this.requireActiveInterviewSession(run.id);
+    const completedAt = this.now().toISOString();
+    const completedSession: InterviewSession = {
+      ...activeSession,
+      status: "completed",
+      endedAt: completedAt,
+      updatedAt: completedAt
+    };
+    const completedRun = applyRunStatusTransition(run, "interview_completed", this.now());
+
+    return this.runStore.updateInterviewSession(completedSession, completedRun, run.status, activeSession.status);
+  }
+
+  async interruptParticipantInterview(rawToken: string, input: InterruptInterviewInput = {}) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status === "technical_interruption") {
+      const interruptedSession = await this.getLatestInterviewSession(run.id, "interrupted");
+
+      if (interruptedSession) {
+        return {
+          interviewSession: interruptedSession,
+          run
+        };
+      }
+    }
+
+    if (run.status !== "interview_in_progress") {
+      throw new ParticipantAccessError("Interview cannot be interrupted for this run.");
+    }
+
+    const activeSession = await this.requireActiveInterviewSession(run.id);
+    const interruptedAt = this.now().toISOString();
+    const interruptedSession: InterviewSession = {
+      ...activeSession,
+      status: "interrupted",
+      safeStatus: parseInterviewInterruptionSafeStatus(input.safeStatus),
+      endedAt: interruptedAt,
+      updatedAt: interruptedAt
+    };
+    const interruptedRun = applyRunStatusTransition(run, "technical_interruption", this.now());
+
+    return this.runStore.updateInterviewSession(interruptedSession, interruptedRun, run.status, activeSession.status);
+  }
+
   async transitionRunStatus(runId: string, status: RunStatus) {
     const run = await this.runStore.getById(runId);
 
@@ -525,6 +721,28 @@ export class RunService {
     }
 
     return this.runStore.updateStatus(transitionedRun, run.status);
+  }
+
+  private async createInterviewSessionForRun(run: Run) {
+    const startedAt = this.now().toISOString();
+    const sessionNumber = (await this.runStore.listInterviewSessionsByRun(run.id)).reduce(
+      (highestSessionNumber, session) => Math.max(highestSessionNumber, session.sessionNumber),
+      0
+    ) + 1;
+    const session: InterviewSession = {
+      id: this.createInterviewSessionId(),
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      sessionNumber,
+      status: "active",
+      startedAt,
+      createdAt: startedAt,
+      updatedAt: startedAt
+    };
+    const activeRun = applyRunStatusTransition(run, "interview_in_progress", this.now());
+
+    return this.runStore.createInterviewSession(session, activeRun, run.status);
   }
 
   private async toResearcherRun(run: Run, rawToken?: string): Promise<ResearcherRun> {
@@ -643,6 +861,24 @@ export class RunService {
     return objectiveVersions as ObjectiveVersion[];
   }
 
+  private async getActiveInterviewSession(runId: string) {
+    return (await this.runStore.listInterviewSessionsByRun(runId)).find((session) => session.status === "active");
+  }
+
+  private async getLatestInterviewSession(runId: string, status: InterviewSessionStatus) {
+    return (await this.runStore.listInterviewSessionsByRun(runId)).find((session) => session.status === status);
+  }
+
+  private async requireActiveInterviewSession(runId: string) {
+    const activeSession = await this.getActiveInterviewSession(runId);
+
+    if (!activeSession) {
+      throw new RunValidationError("Active interview session was not found.");
+    }
+
+    return activeSession;
+  }
+
   private async generateAndPersistGapMap(
     run: Run,
     surveyVersion: SurveyVersion,
@@ -745,6 +981,12 @@ export class InMemoryRunStore implements RunStore {
       .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
   }
 
+  async listInterviewSessionsByRun(runId: string) {
+    return [...this.interviewSessions.values()]
+      .filter((session) => session.runId === runId)
+      .sort((left, right) => right.sessionNumber - left.sessionNumber);
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       this.runs.set(previousRun.id, {
@@ -776,6 +1018,7 @@ export class InMemoryRunStore implements RunStore {
   private readonly consentRecords = new Map<string, ConsentRecord>();
   private readonly surveyResponses = new Map<string, SurveyResponse>();
   private readonly gapMaps = new Map<string, GapMap>();
+  private readonly interviewSessions = new Map<string, InterviewSession>();
 
   async captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus) {
     const currentRun = this.runs.get(run.id);
@@ -820,6 +1063,64 @@ export class InMemoryRunStore implements RunStore {
 
     return {
       surveyResponses: responses,
+      run
+    };
+  }
+
+  async createInterviewSession(session: InterviewSession, run: Run, previousStatus: RunStatus) {
+    const currentRun = this.runs.get(run.id);
+
+    if (!currentRun) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    if (currentRun.status !== previousStatus) {
+      throw new RunValidationError(`Run cannot transition from ${currentRun.status} to ${run.status}.`);
+    }
+
+    if ((await this.listInterviewSessionsByRun(run.id)).some((existingSession) => existingSession.status === "active")) {
+      throw new RunValidationError("An active interview session already exists for this run.");
+    }
+
+    this.interviewSessions.set(session.id, session);
+    this.runs.set(run.id, run);
+
+    return {
+      interviewSession: session,
+      run
+    };
+  }
+
+  async updateInterviewSession(
+    session: InterviewSession,
+    run: Run,
+    previousRunStatus: RunStatus,
+    previousSessionStatus: InterviewSessionStatus
+  ) {
+    const currentRun = this.runs.get(run.id);
+    const currentSession = this.interviewSessions.get(session.id);
+
+    if (!currentRun) {
+      throw new RunValidationError("Run was not found.");
+    }
+
+    if (!currentSession) {
+      throw new RunValidationError("Interview session was not found.");
+    }
+
+    if (currentRun.status !== previousRunStatus) {
+      throw new RunValidationError(`Run cannot transition from ${currentRun.status} to ${run.status}.`);
+    }
+
+    if (currentSession.status !== previousSessionStatus) {
+      throw new RunValidationError(`Interview session cannot transition from ${currentSession.status} to ${session.status}.`);
+    }
+
+    this.interviewSessions.set(session.id, session);
+    this.runs.set(run.id, run);
+
+    return {
+      interviewSession: session,
       run
     };
   }
@@ -998,6 +1299,24 @@ export class DynamoDbRunStore implements RunStore {
       .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
   }
 
+  async listInterviewSessionsByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        KeyConditionExpression: "pk = :run AND begins_with(sk, :sessionPrefix)",
+        ExpressionAttributeValues: {
+          ":run": `RUN#${runId}`,
+          ":sessionPrefix": "INTERVIEW_SESSION#"
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "interview_session")
+      .map((item) => toInterviewSession(item as InterviewSessionItem))
+      .sort((left, right) => right.sessionNumber - left.sessionNumber);
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       await this.documentClient.send(
@@ -1138,6 +1457,112 @@ export class DynamoDbRunStore implements RunStore {
 
     return {
       surveyResponses: responses,
+      run
+    };
+  }
+
+  async createInterviewSession(session: InterviewSession, run: Run, previousStatus: RunStatus) {
+    await this.documentClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: this.tableName,
+              Item: toInterviewSessionItem(session),
+              ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+            }
+          },
+          {
+            Update: {
+              TableName: this.tableName,
+              Key: {
+                pk: `RUN#${run.id}`,
+                sk: "PROFILE"
+              },
+              UpdateExpression:
+                "SET #status = :status, updatedAt = :updatedAt, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
+              ConditionExpression: "attribute_exists(pk) AND #status = :previousStatus",
+              ExpressionAttributeNames: {
+                "#status": "status"
+              },
+              ExpressionAttributeValues: {
+                ":status": run.status,
+                ":previousStatus": previousStatus,
+                ":updatedAt": run.updatedAt,
+                ":gsi1pk": studyRunStatusPk(run.studyId, run.status),
+                ":gsi1sk": studyRunStatusSk(run)
+              }
+            }
+          }
+        ]
+      })
+    );
+
+    return {
+      interviewSession: session,
+      run
+    };
+  }
+
+  async updateInterviewSession(
+    session: InterviewSession,
+    run: Run,
+    previousRunStatus: RunStatus,
+    previousSessionStatus: InterviewSessionStatus
+  ) {
+    await this.documentClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: this.tableName,
+              Key: {
+                pk: `RUN#${run.id}`,
+                sk: `INTERVIEW_SESSION#${session.sessionNumber.toString().padStart(6, "0")}#${session.id}`
+              },
+              UpdateExpression:
+                "SET #status = :status, safeStatus = :safeStatus, endedAt = :endedAt, updatedAt = :updatedAt",
+              ConditionExpression: "attribute_exists(pk) AND #status = :previousSessionStatus",
+              ExpressionAttributeNames: {
+                "#status": "status"
+              },
+              ExpressionAttributeValues: {
+                ":status": session.status,
+                ":safeStatus": session.safeStatus ?? null,
+                ":endedAt": session.endedAt,
+                ":updatedAt": session.updatedAt,
+                ":previousSessionStatus": previousSessionStatus
+              }
+            }
+          },
+          {
+            Update: {
+              TableName: this.tableName,
+              Key: {
+                pk: `RUN#${run.id}`,
+                sk: "PROFILE"
+              },
+              UpdateExpression:
+                "SET #status = :status, updatedAt = :updatedAt, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
+              ConditionExpression: "attribute_exists(pk) AND #status = :previousRunStatus",
+              ExpressionAttributeNames: {
+                "#status": "status"
+              },
+              ExpressionAttributeValues: {
+                ":status": run.status,
+                ":previousRunStatus": previousRunStatus,
+                ":updatedAt": run.updatedAt,
+                ":gsi1pk": studyRunStatusPk(run.studyId, run.status),
+                ":gsi1sk": studyRunStatusSk(run)
+              }
+            }
+          }
+        ]
+      })
+    );
+
+    return {
+      interviewSession: session,
       run
     };
   }
@@ -1528,6 +1953,18 @@ function parseSurveyResponseText(value: unknown, question: SurveyQuestion) {
   return responseText;
 }
 
+function parseInterviewInterruptionSafeStatus(value: unknown): InterviewInterruptionSafeStatus {
+  if (value === undefined) {
+    return "technical_interruption";
+  }
+
+  if (value === "technical_interruption" || value === "unable_to_complete_interview") {
+    return value;
+  }
+
+  throw new RunValidationError("Interview interruption status is invalid.");
+}
+
 function getSurveyQuestions(surveyVersion: SurveyVersion) {
   return surveyVersion.layoutItems.flatMap((item) => {
     if (item.type === "question") {
@@ -1776,5 +2213,42 @@ function toGapMap(item: GapMapItem): GapMap {
     ...(item.failureCategory ? { failureCategory: item.failureCategory } : {}),
     generatedAt: item.generatedAt,
     createdAt: item.createdAt
+  };
+}
+
+function toInterviewSessionItem(session: InterviewSession): InterviewSessionItem {
+  return {
+    entity: "interview_session",
+    pk: `RUN#${session.runId}`,
+    sk: `INTERVIEW_SESSION#${session.sessionNumber.toString().padStart(6, "0")}#${session.id}`,
+    gsi3pk: `RUN#${session.runId}#ARTIFACT#interview_session`,
+    gsi3sk: `INTERVIEW_SESSION#${session.sessionNumber.toString().padStart(6, "0")}#${session.id}`,
+    id: session.id,
+    studyId: session.studyId,
+    participantSlotId: session.participantSlotId,
+    runId: session.runId,
+    sessionNumber: session.sessionNumber,
+    status: session.status,
+    ...(session.safeStatus ? { safeStatus: session.safeStatus } : {}),
+    startedAt: session.startedAt,
+    ...(session.endedAt ? { endedAt: session.endedAt } : {}),
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt
+  };
+}
+
+function toInterviewSession(item: InterviewSessionItem): InterviewSession {
+  return {
+    id: item.id,
+    studyId: item.studyId,
+    participantSlotId: item.participantSlotId,
+    runId: item.runId,
+    sessionNumber: item.sessionNumber,
+    status: item.status,
+    ...(item.safeStatus ? { safeStatus: item.safeStatus } : {}),
+    startedAt: item.startedAt,
+    ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
   };
 }

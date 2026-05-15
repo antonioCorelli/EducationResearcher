@@ -49,6 +49,7 @@ import {
   toSafeRunValidationResponse,
   type CaptureParticipantConsentInput,
   type CreateRunsInput,
+  type InterruptInterviewInput,
   type ParticipantAccessTokenStore,
   type RunServiceOptions,
   type RunStore,
@@ -522,6 +523,49 @@ function coerceSubmitParticipantSurveyInput(body: unknown): SubmitParticipantSur
 
   return {
     responses: record.responses
+  };
+}
+
+function coerceInterruptInterviewInput(body: unknown): InterruptInterviewInput {
+  if (body === undefined) {
+    return {};
+  }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Interview interruption details are invalid."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "participantSlotId" in record ||
+    "runId" in record ||
+    "sessionNumber" in record ||
+    "status" in record ||
+    "startedAt" in record ||
+    "endedAt" in record ||
+    "createdAt" in record ||
+    "updatedAt" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Interview session metadata is assigned by the service."
+      }
+    };
+  }
+
+  return {
+    safeStatus: record.safeStatus
   };
 }
 
@@ -1395,6 +1439,88 @@ export function buildServer(options: BuildServerOptions = {}) {
       );
 
       return reply.code(201).send(result);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/start", async (request, reply) => {
+    try {
+      const result = await runService.startParticipantInterview(request.params.accessToken);
+
+      return reply.code(201).send(result);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/pause", async (request, reply) => {
+    try {
+      return await runService.pauseParticipantInterview(request.params.accessToken);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/resume", async (request, reply) => {
+    try {
+      const result = await runService.resumeParticipantInterview(request.params.accessToken);
+
+      return reply.code(201).send(result);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/complete", async (request, reply) => {
+    try {
+      return await runService.completeParticipantInterview(request.params.accessToken);
+    } catch (error) {
+      const safeResponse =
+        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      throw error;
+    }
+  });
+
+  server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/interrupt", async (request, reply) => {
+    try {
+      return await runService.interruptParticipantInterview(
+        request.params.accessToken,
+        coerceInterruptInterviewInput(request.body)
+      );
     } catch (error) {
       const safeResponse =
         toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
