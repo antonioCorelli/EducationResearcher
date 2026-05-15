@@ -334,6 +334,8 @@ describe("gap map generation", () => {
       status: "generated",
       modelName: "fake-gap-map",
       modelVersion: "local-1",
+      serviceRequestId: "fake-gap-map-request",
+      promptVersion: "gap-map-v1",
       generatedAt: "2026-05-06T12:20:00.000Z",
       contradictions: [
         {
@@ -373,7 +375,9 @@ describe("gap map generation", () => {
       status: "failed",
       failureCategory: "invalid_ai_output",
       modelName: "unknown",
-      modelVersion: "unknown"
+      modelVersion: "unknown",
+      serviceRequestId: "unknown",
+      promptVersion: "unknown"
     });
   });
 

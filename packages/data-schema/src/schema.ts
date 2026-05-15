@@ -551,6 +551,8 @@ export const DATA_DOMAIN_TABLES = [
           "status",
           "modelName",
           "modelVersion",
+          "serviceRequestId",
+          "promptVersion",
           "alreadyAnswered",
           "ambiguities",
           "contradictions",
@@ -661,7 +663,16 @@ export const DATA_DOMAIN_TABLES = [
         description: "Automatic or manual scoring attempt for a run.",
         partitionKeyPattern: "RUN#<run_id>",
         sortKeyPattern: "SCORING_RUN#<scored_at>#<scoring_run_id>",
-        requiredAttributes: ["id", "runId", "trigger", "modelName", "modelVersion", "objectiveVersionSetHash"],
+        requiredAttributes: [
+          "id",
+          "runId",
+          "trigger",
+          "modelName",
+          "modelVersion",
+          "serviceRequestId",
+          "promptVersion",
+          "objectiveVersionSetHash"
+        ],
         statusAttributes: ["status"],
         timestampAttributes: ["createdAt", "scoredAt"],
         references: [

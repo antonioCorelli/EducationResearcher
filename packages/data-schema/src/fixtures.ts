@@ -306,6 +306,8 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       status: "generated",
       modelName: "fake-gap-map",
       modelVersion: "local-1",
+      serviceRequestId: "req_gap_map_fixture_001",
+      promptVersion: "gap-map-v1",
       alreadyAnswered: ["The participant noticed a change in thinking."],
       ambiguities: ["The reason for the change is underspecified."],
       contradictions: [],
@@ -383,6 +385,8 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       trigger: "automatic",
       modelName: "fake-scoring",
       modelVersion: "local-1",
+      serviceRequestId: "req_scoring_fixture_001",
+      promptVersion: "scoring-v1",
       objectiveVersionSetHash: "sha256:fixture-objective-version-set",
       scoredAt,
       createdAt: scoredAt
@@ -442,6 +446,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
         device: "desktop"
       },
       audioConnectionState: "connected",
+      modelApiErrorCategory: "service_unavailable",
       latencyMs: 120,
       retryCount: 0,
       serviceRequestId: "req_fixture_001",

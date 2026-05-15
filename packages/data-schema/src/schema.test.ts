@@ -226,4 +226,36 @@ describe("data domain schema", () => {
       gradeLabel: "4"
     });
   });
+
+  it("captures AI model metadata and safe provider categories", () => {
+    const gapMapDefinition = getEntityDefinition("gap_map")?.definition;
+    const scoringRunDefinition = getEntityDefinition("scoring_run")?.definition;
+    const operationalEventDefinition = getEntityDefinition("operational_event")?.definition;
+    const gapMap = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "gap_map");
+    const scoringRun = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "scoring_run");
+    const operationalEvent = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "operational_event");
+
+    expect(gapMapDefinition?.requiredAttributes).toEqual(
+      expect.arrayContaining(["modelName", "modelVersion", "serviceRequestId", "promptVersion"])
+    );
+    expect(scoringRunDefinition?.requiredAttributes).toEqual(
+      expect.arrayContaining(["modelName", "modelVersion", "serviceRequestId", "promptVersion"])
+    );
+    expect(operationalEventDefinition?.statusAttributes).toEqual(expect.arrayContaining(["modelApiErrorCategory"]));
+    expect(gapMap?.attributes).toMatchObject({
+      modelName: "fake-gap-map",
+      modelVersion: "local-1",
+      serviceRequestId: "req_gap_map_fixture_001",
+      promptVersion: "gap-map-v1"
+    });
+    expect(scoringRun?.attributes).toMatchObject({
+      modelName: "fake-scoring",
+      modelVersion: "local-1",
+      serviceRequestId: "req_scoring_fixture_001",
+      promptVersion: "scoring-v1"
+    });
+    expect(operationalEvent?.attributes).toMatchObject({
+      modelApiErrorCategory: "service_unavailable"
+    });
+  });
 });

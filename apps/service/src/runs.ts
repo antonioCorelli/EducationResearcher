@@ -8,9 +8,9 @@ import {
   UpdateCommand
 } from "@aws-sdk/lib-dynamodb";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { toAiProviderError } from "./ai-provider.js";
 import type { ConsentMethod, ConsentVersion, ConsentVersionStore } from "./consent.js";
 import {
-  GapMapValidationError,
   createConfiguredGapMapGenerator,
   parseGapMapGeneratorOutput,
   type GapMap,
@@ -260,6 +260,8 @@ interface GapMapItem {
   readonly status: "generated" | "failed";
   readonly modelName: string;
   readonly modelVersion: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
   readonly alreadyAnswered: readonly string[];
   readonly ambiguities: readonly string[];
   readonly contradictions: readonly unknown[];
@@ -672,8 +674,7 @@ export class RunService {
         createdAt: generatedAt
       });
     } catch (error) {
-      const failureCategory: GapMapFailureCategory =
-        error instanceof GapMapValidationError ? "invalid_ai_output" : "provider_failure";
+      const failureCategory: GapMapFailureCategory = toAiProviderError(error).safeCategory;
 
       return this.runStore.saveGapMap({
         id: this.createGapMapId(),
@@ -685,6 +686,8 @@ export class RunService {
         status: "failed",
         modelName: "unknown",
         modelVersion: "unknown",
+        serviceRequestId: toAiProviderError(error).serviceRequestId ?? "unknown",
+        promptVersion: "unknown",
         alreadyAnswered: [],
         ambiguities: [],
         contradictions: [],
@@ -1739,6 +1742,8 @@ function toGapMapItem(gapMap: GapMap): GapMapItem {
     status: gapMap.status,
     modelName: gapMap.modelName,
     modelVersion: gapMap.modelVersion,
+    serviceRequestId: gapMap.serviceRequestId,
+    promptVersion: gapMap.promptVersion,
     alreadyAnswered: gapMap.alreadyAnswered,
     ambiguities: gapMap.ambiguities,
     contradictions: gapMap.contradictions,
@@ -1761,6 +1766,8 @@ function toGapMap(item: GapMapItem): GapMap {
     status: item.status,
     modelName: item.modelName,
     modelVersion: item.modelVersion,
+    serviceRequestId: item.serviceRequestId,
+    promptVersion: item.promptVersion,
     alreadyAnswered: item.alreadyAnswered,
     ambiguities: item.ambiguities,
     contradictions: item.contradictions as GapMap["contradictions"],

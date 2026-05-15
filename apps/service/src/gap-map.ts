@@ -1,9 +1,17 @@
+import {
+  StructuredOutputValidationError,
+  executeStructuredAiCall,
+  type AiModelMetadata,
+  type AiProviderErrorCategory,
+  type StructuredAiProvider
+} from "./ai-provider.js";
 import type { ObjectiveVersion } from "./objectives.js";
 import type { Run, SurveyResponse } from "./runs.js";
 import type { SurveyVersion } from "./survey.js";
 
 export type GapMapStatus = "generated" | "failed";
-export type GapMapFailureCategory = "invalid_ai_output" | "provider_failure";
+export type GapMapFailureCategory = AiProviderErrorCategory;
+export const GAP_MAP_PROMPT_VERSION = "gap-map-v1";
 
 export interface GapMapContradiction {
   readonly summary: string;
@@ -21,6 +29,8 @@ export interface GapMap {
   readonly status: GapMapStatus;
   readonly modelName: string;
   readonly modelVersion: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
   readonly alreadyAnswered: readonly string[];
   readonly ambiguities: readonly string[];
   readonly contradictions: readonly GapMapContradiction[];
@@ -41,6 +51,8 @@ export interface GapMapGenerationInput {
 export interface GapMapGeneratorOutput {
   readonly modelName: string;
   readonly modelVersion: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
   readonly alreadyAnswered: readonly string[];
   readonly ambiguities: readonly string[];
   readonly contradictions: readonly GapMapContradiction[];
@@ -52,15 +64,19 @@ export interface GapMapGenerator {
   generate(input: GapMapGenerationInput): Promise<unknown>;
 }
 
-export class GapMapValidationError extends Error {
+export class GapMapValidationError extends StructuredOutputValidationError {
   constructor(readonly safeMessage = "Gap map output was invalid.") {
     super(safeMessage);
     this.name = "GapMapValidationError";
   }
 }
 
-export class FakeGapMapGenerator implements GapMapGenerator {
-  async generate(input: GapMapGenerationInput): Promise<GapMapGeneratorOutput> {
+export class FakeGapMapAiProvider implements StructuredAiProvider<GapMapGenerationInput> {
+  async completeStructured(request: {
+    readonly promptVersion: string;
+    readonly input: GapMapGenerationInput;
+  }) {
+    const input = request.input;
     const responsesByQuestionId = new Map(
       input.surveyResponses.map((response) => [response.surveyQuestionId, response.responseText])
     );
@@ -93,22 +109,44 @@ export class FakeGapMapGenerator implements GapMapGenerator {
     ];
 
     return {
-      modelName: "fake-gap-map",
-      modelVersion: "local-1",
-      alreadyAnswered,
-      ambiguities,
-      contradictions,
-      missingEvidence,
-      recommendedProbes
+      output: {
+        alreadyAnswered,
+        ambiguities,
+        contradictions,
+        missingEvidence,
+        recommendedProbes
+      },
+      metadata: {
+        modelName: "fake-gap-map",
+        modelVersion: "local-1",
+        serviceRequestId: "fake-gap-map-request",
+        promptVersion: request.promptVersion
+      }
     };
   }
 }
 
-export function createConfiguredGapMapGenerator() {
-  return new FakeGapMapGenerator();
+export class AiProviderGapMapGenerator implements GapMapGenerator {
+  constructor(private readonly provider: StructuredAiProvider<GapMapGenerationInput> = new FakeGapMapAiProvider()) {}
+
+  async generate(input: GapMapGenerationInput): Promise<GapMapGeneratorOutput> {
+    return executeStructuredAiCall({
+      provider: this.provider,
+      request: {
+        passKind: "gap_map",
+        promptVersion: GAP_MAP_PROMPT_VERSION,
+        input
+      },
+      validate: parseGapMapGeneratorOutput
+    });
+  }
 }
 
-export function parseGapMapGeneratorOutput(output: unknown): GapMapGeneratorOutput {
+export function createConfiguredGapMapGenerator() {
+  return new AiProviderGapMapGenerator();
+}
+
+export function parseGapMapGeneratorOutput(output: unknown, metadata?: AiModelMetadata): GapMapGeneratorOutput {
   if (!output || typeof output !== "object" || Array.isArray(output)) {
     throw new GapMapValidationError();
   }
@@ -116,8 +154,10 @@ export function parseGapMapGeneratorOutput(output: unknown): GapMapGeneratorOutp
   const record = output as Record<string, unknown>;
 
   return {
-    modelName: parseRequiredText(record.modelName, "modelName", 120),
-    modelVersion: parseRequiredText(record.modelVersion, "modelVersion", 120),
+    modelName: metadata?.modelName ?? parseRequiredText(record.modelName, "modelName", 120),
+    modelVersion: metadata?.modelVersion ?? parseRequiredText(record.modelVersion, "modelVersion", 120),
+    serviceRequestId: metadata?.serviceRequestId ?? parseRequiredText(record.serviceRequestId, "serviceRequestId", 200),
+    promptVersion: metadata?.promptVersion ?? parseRequiredText(record.promptVersion, "promptVersion", 120),
     alreadyAnswered: parseStringList(record.alreadyAnswered, "alreadyAnswered"),
     ambiguities: parseStringList(record.ambiguities, "ambiguities"),
     contradictions: parseContradictions(record.contradictions),
