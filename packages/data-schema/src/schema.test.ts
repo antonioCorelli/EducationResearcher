@@ -258,4 +258,35 @@ describe("data domain schema", () => {
       modelApiErrorCategory: "service_unavailable"
     });
   });
+
+  it("documents persisted interview transcript and audio artifact metadata", () => {
+    const interviewSession = getEntityDefinition("interview_session")?.definition;
+    const interviewTurn = getEntityDefinition("interview_turn")?.definition;
+    const audioAsset = getEntityDefinition("interview_audio_asset")?.definition;
+    const fixtureSession = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "interview_session");
+    const fixtureTurn = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "interview_turn");
+    const fixtureAudioAsset = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "interview_audio_asset");
+
+    expect(interviewSession?.description).toContain("audio duration and transcript token rollups");
+    expect(interviewTurn?.requiredAttributes).toEqual(
+      expect.arrayContaining(["runId", "interviewSessionId", "speaker", "text"])
+    );
+    expect(audioAsset?.requiredAttributes).toEqual(
+      expect.arrayContaining(["runId", "interviewSessionId", "storageUri", "durationSeconds"])
+    );
+    expect(fixtureSession?.attributes).toMatchObject({
+      audioDurationSeconds: 1200,
+      transcriptTokenCount: 450
+    });
+    expect(fixtureTurn?.attributes).toMatchObject({
+      speaker: "participant",
+      audioStartMs: 60000,
+      audioEndMs: 68000
+    });
+    expect(fixtureAudioAsset?.attributes).toMatchObject({
+      storageUri: "s3://education-researcher-local-fixtures/study_formative_001/run_fixture_001/audio.wav",
+      durationSeconds: 1200,
+      status: "available"
+    });
+  });
 });

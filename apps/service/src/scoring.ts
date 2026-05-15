@@ -7,7 +7,7 @@ import {
 } from "./ai-provider.js";
 import type { GapMap } from "./gap-map.js";
 import type { ObjectiveVersion } from "./objectives.js";
-import type { Run, SurveyResponse } from "./runs.js";
+import type { InterviewAudioAsset, InterviewTurn, Run, SurveyResponse } from "./runs.js";
 
 export const SCORING_PROMPT_VERSION = "scoring-v1";
 
@@ -51,6 +51,8 @@ export interface ScoringGeneratorOutput {
 export interface ScoringGenerationInput {
   readonly run: Run;
   readonly surveyResponses: readonly SurveyResponse[];
+  readonly interviewTurns?: readonly InterviewTurn[];
+  readonly interviewAudioAssets?: readonly InterviewAudioAsset[];
   readonly gapMap: GapMap;
   readonly objectiveVersions: readonly ObjectiveVersion[];
   readonly trigger: ScoringTrigger;
@@ -74,6 +76,26 @@ export class FakeScoringAiProvider implements StructuredAiProvider<ScoringGenera
   }) {
     const input = request.input;
     const firstSurveyResponse = input.surveyResponses[0];
+    const firstInterviewTurn = input.interviewTurns?.[0];
+    const defaultCitations: readonly ScoringEvidenceCitationOutput[] = firstInterviewTurn
+      ? [
+          {
+            sourceType: "interview_turn",
+            sourceId: firstInterviewTurn.id,
+            quote: firstInterviewTurn.text.slice(0, 500),
+            ...(firstInterviewTurn.audioStartMs !== undefined ? { audioStartMs: firstInterviewTurn.audioStartMs } : {}),
+            ...(firstInterviewTurn.audioEndMs !== undefined ? { audioEndMs: firstInterviewTurn.audioEndMs } : {})
+          }
+        ]
+      : firstSurveyResponse
+        ? [
+            {
+              sourceType: "survey_response",
+              sourceId: firstSurveyResponse.id,
+              quote: firstSurveyResponse.responseText.slice(0, 500)
+            }
+          ]
+        : [];
 
     return {
       output: {
@@ -83,15 +105,7 @@ export class FakeScoringAiProvider implements StructuredAiProvider<ScoringGenera
           confidence: input.run.status === "stale" || input.run.status === "partial" ? 0.45 : 0.78,
           rationale: `Initial fake score for ${objective.title} based on available survey and interview evidence.`,
           flags: createDefaultFlags(input.run.status),
-          citations: firstSurveyResponse
-            ? [
-                {
-                  sourceType: "survey_response",
-                  sourceId: firstSurveyResponse.id,
-                  quote: firstSurveyResponse.responseText.slice(0, 500)
-                }
-              ]
-            : []
+          citations: defaultCitations
         }))
       },
       metadata: {

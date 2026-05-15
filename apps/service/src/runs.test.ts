@@ -532,4 +532,104 @@ describe("interview session lifecycle", () => {
       })
     ]);
   });
+
+  it("persists transcript turns, audio asset metadata, and session rollups for scoring evidence", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    let turnSequence = 0;
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      createInterviewSessionId: () => "interview_session_artifacts_001"
+    });
+    const artifactService = new RunService(
+      runStore,
+      new InMemoryParticipantAccessTokenStore([
+        {
+          id: "participant_access_token_gap_map",
+          tokenId: "token_fixture_gap_map",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken),
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          runId: "run_fixture_001",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore,
+      objectiveVersionStore,
+      new InMemoryConsentVersionStore(),
+      new InMemorySurveyVersionStore([createSurveyVersion()]),
+      {
+        createInterviewAudioAssetId: () => "interview_audio_asset_artifacts_001",
+        createInterviewTurnId: () => `interview_turn_artifacts_00${++turnSequence}`,
+        now: () => new Date("2026-05-06T12:24:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      }
+    );
+
+    await service.startParticipantInterview(rawToken);
+    const saved = await artifactService.saveParticipantInterviewArtifacts(rawToken, {
+      turns: [
+        {
+          speaker: "ai",
+          text: "Could you share a concrete example?",
+          audioStartMs: 1000,
+          audioEndMs: 3200
+        },
+        {
+          speaker: "participant",
+          text: "The worked example helped me compare the two methods.",
+          audioStartMs: 3300,
+          audioEndMs: 8700
+        }
+      ],
+      audioAsset: {
+        storageUri: "s3://education-researcher-local/study_fixture_001/run_fixture_001/audio/session.wav",
+        durationSeconds: 8.7,
+        mimeType: "audio/wav",
+        byteSize: 2048
+      },
+      transcriptTokenCount: 19
+    });
+
+    expect(saved).toMatchObject({
+      interviewSession: {
+        id: "interview_session_artifacts_001",
+        audioDurationSeconds: 8.7,
+        transcriptTokenCount: 19,
+        updatedAt: "2026-05-06T12:24:00.000Z"
+      },
+      turns: [
+        {
+          id: "interview_turn_artifacts_001",
+          speaker: "ai",
+          text: "Could you share a concrete example?",
+          audioStartMs: 1000,
+          audioEndMs: 3200
+        },
+        {
+          id: "interview_turn_artifacts_002",
+          speaker: "participant",
+          text: "The worked example helped me compare the two methods.",
+          audioStartMs: 3300,
+          audioEndMs: 8700
+        }
+      ],
+      audioAsset: {
+        id: "interview_audio_asset_artifacts_001",
+        storageUri: "s3://education-researcher-local/study_fixture_001/run_fixture_001/audio/session.wav",
+        durationSeconds: 8.7,
+        status: "available"
+      }
+    });
+    expect(await runStore.listInterviewTurnsByRun("run_fixture_001")).toEqual(saved.turns);
+    expect(await runStore.listInterviewAudioAssetsByRun("run_fixture_001")).toEqual([saved.audioAsset]);
+    expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: "interview_session_artifacts_001",
+        audioDurationSeconds: 8.7,
+        transcriptTokenCount: 19
+      })
+    ]);
+  });
 });

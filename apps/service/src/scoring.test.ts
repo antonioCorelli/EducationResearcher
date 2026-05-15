@@ -172,6 +172,48 @@ describe("AI provider scoring generator", () => {
     });
   });
 
+  it("uses persisted interview turns as fake scoring citations when available", async () => {
+    const generator = new AiProviderScoringGenerator();
+
+    await expect(
+      generator.generate({
+        run,
+        surveyResponses: [surveyResponse],
+        interviewTurns: [
+          {
+            id: "interview_turn_001",
+            studyId: "study_fixture_001",
+            participantSlotId: "slot_fixture_001",
+            runId: "run_fixture_001",
+            interviewSessionId: "interview_session_001",
+            speaker: "participant",
+            text: "The worked example helped me explain the pattern.",
+            audioStartMs: 4200,
+            audioEndMs: 9200,
+            createdAt: "2026-05-06T12:30:00.000Z"
+          }
+        ],
+        gapMap,
+        objectiveVersions: [objective],
+        trigger: "automatic"
+      })
+    ).resolves.toMatchObject({
+      scores: [
+        {
+          citations: [
+            {
+              sourceType: "interview_turn",
+              sourceId: "interview_turn_001",
+              quote: "The worked example helped me explain the pattern.",
+              audioStartMs: 4200,
+              audioEndMs: 9200
+            }
+          ]
+        }
+      ]
+    });
+  });
+
   it("retries retryable scoring provider errors", async () => {
     let attempts = 0;
     const provider: StructuredAiProvider = {

@@ -60,6 +60,7 @@ import {
   type ParticipantAccessTokenStore,
   type RunServiceOptions,
   type RunStore,
+  type SaveInterviewArtifactsInput,
   type SubmitParticipantSurveyInput
 } from "./runs.js";
 import {
@@ -583,6 +584,48 @@ function coerceInterruptInterviewInput(body: unknown): InterruptInterviewInput {
   };
 }
 
+function coerceSaveInterviewArtifactsInput(body: unknown): SaveInterviewArtifactsInput {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Interview artifacts are required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "participantSlotId" in record ||
+    "runId" in record ||
+    "interviewSessionId" in record ||
+    "createdAt" in record ||
+    "updatedAt" in record ||
+    "audioDurationSeconds" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Interview artifact metadata is assigned by the service."
+      }
+    };
+  }
+
+  rejectInterviewTurnMetadata(record.turns);
+  rejectInterviewAudioAssetMetadata(record.audioAsset);
+
+  return {
+    turns: record.turns,
+    audioAsset: record.audioAsset,
+    transcriptTokenCount: record.transcriptTokenCount
+  };
+}
+
 function coerceAudioConnectionStateInput(body: unknown) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw {
@@ -633,6 +676,62 @@ function coerceAudioConnectionStateInput(body: unknown) {
     audioConnectionState: parseAudioConnectionState(record.audioConnectionState),
     retryCount: coerceOptionalNonNegativeInteger(record.retryCount, "retry count")
   };
+}
+
+function rejectInterviewTurnMetadata(value: unknown) {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+
+    if (
+      "id" in record ||
+      "studyId" in record ||
+      "participantSlotId" in record ||
+      "runId" in record ||
+      "interviewSessionId" in record ||
+      "createdAt" in record
+    ) {
+      throw {
+        statusCode: 400,
+        body: {
+          error: "Bad Request",
+          message: "Interview artifact metadata is assigned by the service."
+        }
+      };
+    }
+  }
+}
+
+function rejectInterviewAudioAssetMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  if (
+    "id" in record ||
+    "studyId" in record ||
+    "participantSlotId" in record ||
+    "runId" in record ||
+    "interviewSessionId" in record ||
+    "createdAt" in record
+  ) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Interview artifact metadata is assigned by the service."
+      }
+    };
+  }
 }
 
 function rejectSurveyResponseMetadata(value: unknown) {
@@ -1608,6 +1707,29 @@ export function buildServer(options: BuildServerOptions = {}) {
         });
 
         return reply.code(204).send();
+      } catch (error) {
+        const safeResponse =
+          toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.post<{ Params: { accessToken: string } }>(
+    "/participant/runs/:accessToken/interview/artifacts",
+    async (request, reply) => {
+      try {
+        const result = await runService.saveParticipantInterviewArtifacts(
+          request.params.accessToken,
+          coerceSaveInterviewArtifactsInput(request.body)
+        );
+
+        return reply.code(201).send(result);
       } catch (error) {
         const safeResponse =
           toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);

@@ -118,11 +118,19 @@ export interface SubmitParticipantSurveyInput {
   readonly responses?: unknown;
 }
 
+export interface SaveInterviewArtifactsInput {
+  readonly turns?: unknown;
+  readonly audioAsset?: unknown;
+  readonly transcriptTokenCount?: unknown;
+}
+
 export const INTERVIEW_SESSION_STATUSES = ["active", "paused", "completed", "interrupted"] as const;
 
 export type InterviewSessionStatus = (typeof INTERVIEW_SESSION_STATUSES)[number];
 
 export type InterviewInterruptionSafeStatus = "technical_interruption" | "unable_to_complete_interview";
+export type InterviewTurnSpeaker = "ai" | "participant";
+export type InterviewAudioAssetStatus = "available" | "pending" | "failed";
 
 export interface InterruptInterviewInput {
   readonly safeStatus?: unknown;
@@ -163,8 +171,39 @@ export interface InterviewSession {
   readonly safeStatus?: InterviewInterruptionSafeStatus;
   readonly startedAt: string;
   readonly endedAt?: string;
+  readonly audioDurationSeconds?: number;
+  readonly transcriptTokenCount?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface InterviewTurn {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly interviewSessionId: string;
+  readonly speaker: InterviewTurnSpeaker;
+  readonly text: string;
+  readonly audioStartMs?: number;
+  readonly audioEndMs?: number;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
+  readonly createdAt: string;
+}
+
+export interface InterviewAudioAsset {
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly interviewSessionId: string;
+  readonly storageUri: string;
+  readonly durationSeconds: number;
+  readonly mimeType?: string;
+  readonly byteSize?: number;
+  readonly status: InterviewAudioAssetStatus;
+  readonly createdAt: string;
 }
 
 export type { GapMap } from "./gap-map.js";
@@ -177,6 +216,8 @@ export interface RunStore {
   listSurveyResponsesByRun(runId: string): Promise<SurveyResponse[]>;
   listGapMapsByRun(runId: string): Promise<GapMap[]>;
   listInterviewSessionsByRun(runId: string): Promise<InterviewSession[]>;
+  listInterviewTurnsByRun(runId: string): Promise<InterviewTurn[]>;
+  listInterviewAudioAssetsByRun(runId: string): Promise<InterviewAudioAsset[]>;
   create(run: Run, previousCurrentRuns: readonly Run[]): Promise<Run>;
   updateStatus(run: Run, previousStatus: RunStatus): Promise<Run>;
   captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus): Promise<{
@@ -199,6 +240,15 @@ export interface RunStore {
   ): Promise<{
     interviewSession: InterviewSession;
     run: Run;
+  }>;
+  saveInterviewArtifacts(input: {
+    readonly interviewSession: InterviewSession;
+    readonly turns: readonly InterviewTurn[];
+    readonly audioAsset?: InterviewAudioAsset;
+  }): Promise<{
+    readonly interviewSession: InterviewSession;
+    readonly turns: readonly InterviewTurn[];
+    readonly audioAsset?: InterviewAudioAsset;
   }>;
   saveGapMap(gapMap: GapMap): Promise<GapMap>;
 }
@@ -330,8 +380,49 @@ interface InterviewSessionItem {
   readonly safeStatus?: InterviewInterruptionSafeStatus;
   readonly startedAt: string;
   readonly endedAt?: string;
+  readonly audioDurationSeconds?: number;
+  readonly transcriptTokenCount?: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+interface InterviewTurnItem {
+  readonly entity: "interview_turn";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly interviewSessionId: string;
+  readonly speaker: InterviewTurnSpeaker;
+  readonly text: string;
+  readonly audioStartMs?: number;
+  readonly audioEndMs?: number;
+  readonly startedAt?: string;
+  readonly endedAt?: string;
+  readonly createdAt: string;
+}
+
+interface InterviewAudioAssetItem {
+  readonly entity: "interview_audio_asset";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly interviewSessionId: string;
+  readonly storageUri: string;
+  readonly durationSeconds: number;
+  readonly mimeType?: string;
+  readonly byteSize?: number;
+  readonly status: InterviewAudioAssetStatus;
+  readonly createdAt: string;
 }
 
 export class RunValidationError extends Error {
@@ -357,7 +448,9 @@ export interface RunServiceOptions {
   readonly createRunId?: () => string;
   readonly createConsentRecordId?: () => string;
   readonly createGapMapId?: () => string;
+  readonly createInterviewAudioAssetId?: () => string;
   readonly createInterviewSessionId?: () => string;
+  readonly createInterviewTurnId?: () => string;
   readonly createSurveyResponseId?: () => string;
   readonly createParticipantAccessTokenId?: () => string;
   readonly participantAccessBaseUrl?: string;
@@ -369,7 +462,9 @@ export class RunService {
   private readonly createRunId: () => string;
   private readonly createConsentRecordId: () => string;
   private readonly createGapMapId: () => string;
+  private readonly createInterviewAudioAssetId: () => string;
   private readonly createInterviewSessionId: () => string;
+  private readonly createInterviewTurnId: () => string;
   private readonly createSurveyResponseId: () => string;
   private readonly createParticipantAccessTokenId: () => string;
   private readonly participantAccessBaseUrl: string;
@@ -389,7 +484,10 @@ export class RunService {
     this.createRunId = options.createRunId ?? (() => `run_${randomUUID()}`);
     this.createConsentRecordId = options.createConsentRecordId ?? (() => `consent_record_${randomUUID()}`);
     this.createGapMapId = options.createGapMapId ?? (() => `gap_map_${randomUUID()}`);
+    this.createInterviewAudioAssetId =
+      options.createInterviewAudioAssetId ?? (() => `interview_audio_asset_${randomUUID()}`);
     this.createInterviewSessionId = options.createInterviewSessionId ?? (() => `interview_session_${randomUUID()}`);
+    this.createInterviewTurnId = options.createInterviewTurnId ?? (() => `interview_turn_${randomUUID()}`);
     this.createSurveyResponseId = options.createSurveyResponseId ?? (() => `survey_response_${randomUUID()}`);
     this.createParticipantAccessTokenId =
       options.createParticipantAccessTokenId ?? (() => createSecureRandomTokenId());
@@ -755,6 +853,61 @@ export class RunService {
     };
   }
 
+  async saveParticipantInterviewArtifacts(rawToken: string, input: SaveInterviewArtifactsInput) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status !== "interview_in_progress") {
+      throw new ParticipantAccessError("Interview artifacts can only be saved during an active interview.");
+    }
+
+    const activeSession = await this.requireActiveInterviewSession(run.id);
+    const createdAt = this.now().toISOString();
+    const parsedArtifacts = parseInterviewArtifactsInput(input);
+    const turns = parsedArtifacts.turns.map((turn) => ({
+      id: this.createInterviewTurnId(),
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      interviewSessionId: activeSession.id,
+      speaker: turn.speaker,
+      text: turn.text,
+      ...("audioStartMs" in turn ? { audioStartMs: turn.audioStartMs } : {}),
+      ...("audioEndMs" in turn ? { audioEndMs: turn.audioEndMs } : {}),
+      ...("startedAt" in turn ? { startedAt: turn.startedAt } : {}),
+      ...("endedAt" in turn ? { endedAt: turn.endedAt } : {}),
+      createdAt
+    }));
+    const audioAsset = parsedArtifacts.audioAsset
+      ? {
+          id: this.createInterviewAudioAssetId(),
+          studyId: run.studyId,
+          participantSlotId: run.participantSlotId,
+          runId: run.id,
+          interviewSessionId: activeSession.id,
+          storageUri: parsedArtifacts.audioAsset.storageUri,
+          durationSeconds: parsedArtifacts.audioAsset.durationSeconds,
+          ...("mimeType" in parsedArtifacts.audioAsset ? { mimeType: parsedArtifacts.audioAsset.mimeType } : {}),
+          ...("byteSize" in parsedArtifacts.audioAsset ? { byteSize: parsedArtifacts.audioAsset.byteSize } : {}),
+          status: parsedArtifacts.audioAsset.status,
+          createdAt
+        }
+      : undefined;
+    const interviewSession: InterviewSession = {
+      ...activeSession,
+      ...(audioAsset ? { audioDurationSeconds: audioAsset.durationSeconds } : {}),
+      ...(parsedArtifacts.transcriptTokenCount !== undefined
+        ? { transcriptTokenCount: parsedArtifacts.transcriptTokenCount }
+        : {}),
+      updatedAt: createdAt
+    };
+
+    return this.runStore.saveInterviewArtifacts({
+      interviewSession,
+      turns,
+      ...(audioAsset ? { audioAsset } : {})
+    });
+  }
+
   async transitionRunStatus(runId: string, status: RunStatus) {
     const run = await this.runStore.getById(runId);
 
@@ -1035,6 +1188,18 @@ export class InMemoryRunStore implements RunStore {
       .sort((left, right) => right.sessionNumber - left.sessionNumber);
   }
 
+  async listInterviewTurnsByRun(runId: string) {
+    return [...this.interviewTurns.values()]
+      .filter((turn) => turn.runId === runId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async listInterviewAudioAssetsByRun(runId: string) {
+    return [...this.interviewAudioAssets.values()]
+      .filter((asset) => asset.runId === runId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
     for (const previousRun of previousCurrentRuns) {
       this.runs.set(previousRun.id, {
@@ -1067,6 +1232,8 @@ export class InMemoryRunStore implements RunStore {
   private readonly surveyResponses = new Map<string, SurveyResponse>();
   private readonly gapMaps = new Map<string, GapMap>();
   private readonly interviewSessions = new Map<string, InterviewSession>();
+  private readonly interviewTurns = new Map<string, InterviewTurn>();
+  private readonly interviewAudioAssets = new Map<string, InterviewAudioAsset>();
 
   async captureConsent(record: ConsentRecord, run: Run, previousStatus: RunStatus) {
     const currentRun = this.runs.get(run.id);
@@ -1176,6 +1343,48 @@ export class InMemoryRunStore implements RunStore {
   async saveGapMap(gapMap: GapMap) {
     this.gapMaps.set(gapMap.id, gapMap);
     return gapMap;
+  }
+
+  async saveInterviewArtifacts(input: {
+    readonly interviewSession: InterviewSession;
+    readonly turns: readonly InterviewTurn[];
+    readonly audioAsset?: InterviewAudioAsset;
+  }) {
+    const currentSession = this.interviewSessions.get(input.interviewSession.id);
+
+    if (!currentSession) {
+      throw new RunValidationError("Interview session was not found.");
+    }
+
+    if (currentSession.runId !== input.interviewSession.runId) {
+      throw new RunValidationError("Interview session does not belong to this run.");
+    }
+
+    for (const turn of input.turns) {
+      if (turn.runId !== input.interviewSession.runId || turn.interviewSessionId !== input.interviewSession.id) {
+        throw new RunValidationError("Interview turn does not belong to this session.");
+      }
+    }
+
+    if (
+      input.audioAsset &&
+      (input.audioAsset.runId !== input.interviewSession.runId ||
+        input.audioAsset.interviewSessionId !== input.interviewSession.id)
+    ) {
+      throw new RunValidationError("Interview audio asset does not belong to this session.");
+    }
+
+    this.interviewSessions.set(input.interviewSession.id, input.interviewSession);
+
+    for (const turn of input.turns) {
+      this.interviewTurns.set(turn.id, turn);
+    }
+
+    if (input.audioAsset) {
+      this.interviewAudioAssets.set(input.audioAsset.id, input.audioAsset);
+    }
+
+    return input;
   }
 }
 
@@ -1363,6 +1572,42 @@ export class DynamoDbRunStore implements RunStore {
       .filter((item) => item.entity === "interview_session")
       .map((item) => toInterviewSession(item as InterviewSessionItem))
       .sort((left, right) => right.sessionNumber - left.sessionNumber);
+  }
+
+  async listInterviewTurnsByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        IndexName: "byParticipantAccessToken",
+        KeyConditionExpression: "gsi3pk = :artifact",
+        ExpressionAttributeValues: {
+          ":artifact": `RUN#${runId}#ARTIFACT#interview_turn`
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "interview_turn")
+      .map((item) => toInterviewTurn(item as InterviewTurnItem))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async listInterviewAudioAssetsByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        IndexName: "byParticipantAccessToken",
+        KeyConditionExpression: "gsi3pk = :artifact",
+        ExpressionAttributeValues: {
+          ":artifact": `RUN#${runId}#ARTIFACT#interview_audio_asset`
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "interview_audio_asset")
+      .map((item) => toInterviewAudioAsset(item as InterviewAudioAssetItem))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   async create(run: Run, previousCurrentRuns: readonly Run[]) {
@@ -1625,6 +1870,66 @@ export class DynamoDbRunStore implements RunStore {
     );
 
     return gapMap;
+  }
+
+  async saveInterviewArtifacts(input: {
+    readonly interviewSession: InterviewSession;
+    readonly turns: readonly InterviewTurn[];
+    readonly audioAsset?: InterviewAudioAsset;
+  }) {
+    const sessionUpdateExpression = ["updatedAt = :updatedAt"];
+    const sessionExpressionAttributeValues: Record<string, unknown> = {
+      ":updatedAt": input.interviewSession.updatedAt
+    };
+
+    if (input.interviewSession.audioDurationSeconds !== undefined) {
+      sessionUpdateExpression.push("audioDurationSeconds = :audioDurationSeconds");
+      sessionExpressionAttributeValues[":audioDurationSeconds"] = input.interviewSession.audioDurationSeconds;
+    }
+
+    if (input.interviewSession.transcriptTokenCount !== undefined) {
+      sessionUpdateExpression.push("transcriptTokenCount = :transcriptTokenCount");
+      sessionExpressionAttributeValues[":transcriptTokenCount"] = input.interviewSession.transcriptTokenCount;
+    }
+
+    await this.documentClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: this.tableName,
+              Key: {
+                pk: `RUN#${input.interviewSession.runId}`,
+                sk: `INTERVIEW_SESSION#${input.interviewSession.sessionNumber.toString().padStart(6, "0")}#${input.interviewSession.id}`
+              },
+              UpdateExpression: `SET ${sessionUpdateExpression.join(", ")}`,
+              ConditionExpression: "attribute_exists(pk)",
+              ExpressionAttributeValues: sessionExpressionAttributeValues
+            }
+          },
+          ...input.turns.map((turn) => ({
+            Put: {
+              TableName: this.tableName,
+              Item: toInterviewTurnItem(turn),
+              ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+            }
+          })),
+          ...(input.audioAsset
+            ? [
+                {
+                  Put: {
+                    TableName: this.tableName,
+                    Item: toInterviewAudioAssetItem(input.audioAsset),
+                    ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+                  }
+                }
+              ]
+            : [])
+        ]
+      })
+    );
+
+    return input;
   }
 }
 
@@ -2040,6 +2345,175 @@ function parseInterviewInterruptionSafeStatus(value: unknown): InterviewInterrup
   throw new RunValidationError("Interview interruption status is invalid.");
 }
 
+function parseInterviewArtifactsInput(input: SaveInterviewArtifactsInput) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RunValidationError("Interview artifacts are required.");
+  }
+
+  const turns = parseInterviewTurns(input.turns);
+  const audioAsset = parseInterviewAudioAsset(input.audioAsset);
+  const transcriptTokenCount = parseOptionalNonNegativeInteger(input.transcriptTokenCount, "Transcript token count");
+
+  if (turns.length === 0 && !audioAsset && transcriptTokenCount === undefined) {
+    throw new RunValidationError("At least one interview artifact is required.");
+  }
+
+  return {
+    turns,
+    ...(audioAsset ? { audioAsset } : {}),
+    ...(transcriptTokenCount !== undefined ? { transcriptTokenCount } : {})
+  };
+}
+
+function parseInterviewTurns(value: unknown) {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new RunValidationError("Interview turns must be a list.");
+  }
+
+  if (value.length > 50) {
+    throw new RunValidationError("Save 50 or fewer interview turns at a time.");
+  }
+
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new RunValidationError(`Interview turn ${index + 1} is invalid.`);
+    }
+
+    const record = item as Record<string, unknown>;
+    const speaker = parseInterviewTurnSpeaker(record.speaker, index);
+    const text = parseBoundedText(record.text, `Interview turn ${index + 1} text`, 20000);
+    const audioStartMs = parseOptionalNonNegativeNumber(record.audioStartMs, `Interview turn ${index + 1} audio start`);
+    const audioEndMs = parseOptionalNonNegativeNumber(record.audioEndMs, `Interview turn ${index + 1} audio end`);
+
+    if (audioStartMs !== undefined && audioEndMs !== undefined && audioEndMs < audioStartMs) {
+      throw new RunValidationError("Interview turn audio end must be after audio start.");
+    }
+
+    return {
+      speaker,
+      text,
+      ...(audioStartMs !== undefined ? { audioStartMs } : {}),
+      ...(audioEndMs !== undefined ? { audioEndMs } : {}),
+      ...parseOptionalIsoTimestamp(record.startedAt, `Interview turn ${index + 1} start`),
+      ...parseOptionalIsoTimestamp(record.endedAt, `Interview turn ${index + 1} end`)
+    };
+  });
+}
+
+function parseInterviewTurnSpeaker(value: unknown, index: number): InterviewTurnSpeaker {
+  if (value === "ai" || value === "participant") {
+    return value;
+  }
+
+  throw new RunValidationError(`Interview turn ${index + 1} speaker is invalid.`);
+}
+
+function parseInterviewAudioAsset(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RunValidationError("Interview audio asset is invalid.");
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    storageUri: parseStorageUri(record.storageUri),
+    durationSeconds: parseNonNegativeNumber(record.durationSeconds, "Audio duration"),
+    ...(record.mimeType !== undefined ? { mimeType: parseBoundedText(record.mimeType, "Audio MIME type", 120) } : {}),
+    ...(record.byteSize !== undefined ? { byteSize: parseOptionalNonNegativeInteger(record.byteSize, "Audio byte size") } : {}),
+    status: parseInterviewAudioAssetStatus(record.status)
+  };
+}
+
+function parseStorageUri(value: unknown) {
+  const storageUri = parseBoundedText(value, "Audio storage URI", 2000);
+
+  if (!/^s3:\/\/[^/]+\/.+/.test(storageUri)) {
+    throw new RunValidationError("Audio storage URI must be an S3 URI.");
+  }
+
+  return storageUri;
+}
+
+function parseInterviewAudioAssetStatus(value: unknown): InterviewAudioAssetStatus {
+  if (value === undefined) {
+    return "available";
+  }
+
+  if (value === "available" || value === "pending" || value === "failed") {
+    return value;
+  }
+
+  throw new RunValidationError("Interview audio asset status is invalid.");
+}
+
+function parseBoundedText(value: unknown, label: string, maximumLength: number) {
+  if (typeof value !== "string") {
+    throw new RunValidationError(`${label} must be text.`);
+  }
+
+  const text = value.trim();
+
+  if (!text) {
+    throw new RunValidationError(`${label} is required.`);
+  }
+
+  if (text.length > maximumLength) {
+    throw new RunValidationError(`${label} must be ${maximumLength.toLocaleString("en-US")} characters or fewer.`);
+  }
+
+  return text;
+}
+
+function parseNonNegativeNumber(value: unknown, label: string) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new RunValidationError(`${label} must be a non-negative number.`);
+  }
+
+  return value;
+}
+
+function parseOptionalNonNegativeNumber(value: unknown, label: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return parseNonNegativeNumber(value, label);
+}
+
+function parseOptionalNonNegativeInteger(value: unknown, label: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new RunValidationError(`${label} must be a non-negative integer.`);
+  }
+
+  return value;
+}
+
+function parseOptionalIsoTimestamp(value: unknown, label: string) {
+  if (value === undefined) {
+    return {};
+  }
+
+  const timestamp = parseBoundedText(value, label, 80);
+
+  if (Number.isNaN(Date.parse(timestamp))) {
+    throw new RunValidationError(`${label} must be a valid timestamp.`);
+  }
+
+  return label.endsWith("start") ? { startedAt: timestamp } : { endedAt: timestamp };
+}
+
 function getSurveyQuestions(surveyVersion: SurveyVersion) {
   return surveyVersion.layoutItems.flatMap((item) => {
     if (item.type === "question") {
@@ -2307,6 +2781,8 @@ function toInterviewSessionItem(session: InterviewSession): InterviewSessionItem
     ...(session.safeStatus ? { safeStatus: session.safeStatus } : {}),
     startedAt: session.startedAt,
     ...(session.endedAt ? { endedAt: session.endedAt } : {}),
+    ...(session.audioDurationSeconds !== undefined ? { audioDurationSeconds: session.audioDurationSeconds } : {}),
+    ...(session.transcriptTokenCount !== undefined ? { transcriptTokenCount: session.transcriptTokenCount } : {}),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt
   };
@@ -2323,7 +2799,85 @@ function toInterviewSession(item: InterviewSessionItem): InterviewSession {
     ...(item.safeStatus ? { safeStatus: item.safeStatus } : {}),
     startedAt: item.startedAt,
     ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+    ...(item.audioDurationSeconds !== undefined ? { audioDurationSeconds: item.audioDurationSeconds } : {}),
+    ...(item.transcriptTokenCount !== undefined ? { transcriptTokenCount: item.transcriptTokenCount } : {}),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
+  };
+}
+
+function toInterviewTurnItem(turn: InterviewTurn): InterviewTurnItem {
+  return {
+    entity: "interview_turn",
+    pk: `INTERVIEW_SESSION#${turn.interviewSessionId}`,
+    sk: `TURN#${turn.createdAt}#${turn.id}`,
+    gsi3pk: `RUN#${turn.runId}#ARTIFACT#interview_turn`,
+    gsi3sk: `TURN#${turn.createdAt}#${turn.id}`,
+    id: turn.id,
+    studyId: turn.studyId,
+    participantSlotId: turn.participantSlotId,
+    runId: turn.runId,
+    interviewSessionId: turn.interviewSessionId,
+    speaker: turn.speaker,
+    text: turn.text,
+    ...(turn.audioStartMs !== undefined ? { audioStartMs: turn.audioStartMs } : {}),
+    ...(turn.audioEndMs !== undefined ? { audioEndMs: turn.audioEndMs } : {}),
+    ...(turn.startedAt ? { startedAt: turn.startedAt } : {}),
+    ...(turn.endedAt ? { endedAt: turn.endedAt } : {}),
+    createdAt: turn.createdAt
+  };
+}
+
+function toInterviewTurn(item: InterviewTurnItem): InterviewTurn {
+  return {
+    id: item.id,
+    studyId: item.studyId,
+    participantSlotId: item.participantSlotId,
+    runId: item.runId,
+    interviewSessionId: item.interviewSessionId,
+    speaker: item.speaker,
+    text: item.text,
+    ...(item.audioStartMs !== undefined ? { audioStartMs: item.audioStartMs } : {}),
+    ...(item.audioEndMs !== undefined ? { audioEndMs: item.audioEndMs } : {}),
+    ...(item.startedAt ? { startedAt: item.startedAt } : {}),
+    ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+    createdAt: item.createdAt
+  };
+}
+
+function toInterviewAudioAssetItem(asset: InterviewAudioAsset): InterviewAudioAssetItem {
+  return {
+    entity: "interview_audio_asset",
+    pk: `RUN#${asset.runId}`,
+    sk: `AUDIO_ASSET#${asset.id}`,
+    gsi3pk: `RUN#${asset.runId}#ARTIFACT#interview_audio_asset`,
+    gsi3sk: `AUDIO_ASSET#${asset.createdAt}#${asset.id}`,
+    id: asset.id,
+    studyId: asset.studyId,
+    participantSlotId: asset.participantSlotId,
+    runId: asset.runId,
+    interviewSessionId: asset.interviewSessionId,
+    storageUri: asset.storageUri,
+    durationSeconds: asset.durationSeconds,
+    ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+    ...(asset.byteSize !== undefined ? { byteSize: asset.byteSize } : {}),
+    status: asset.status,
+    createdAt: asset.createdAt
+  };
+}
+
+function toInterviewAudioAsset(item: InterviewAudioAssetItem): InterviewAudioAsset {
+  return {
+    id: item.id,
+    studyId: item.studyId,
+    participantSlotId: item.participantSlotId,
+    runId: item.runId,
+    interviewSessionId: item.interviewSessionId,
+    storageUri: item.storageUri,
+    durationSeconds: item.durationSeconds,
+    ...(item.mimeType ? { mimeType: item.mimeType } : {}),
+    ...(item.byteSize !== undefined ? { byteSize: item.byteSize } : {}),
+    status: item.status,
+    createdAt: item.createdAt
   };
 }

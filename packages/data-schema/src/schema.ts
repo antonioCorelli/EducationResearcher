@@ -1,4 +1,4 @@
-export const DATA_SCHEMA_VERSION = "2026-05-13-issue-19";
+export const DATA_SCHEMA_VERSION = "2026-05-15-issue-25";
 
 export const ENVIRONMENT_PLACEHOLDER = "{environment}";
 
@@ -571,7 +571,8 @@ export const DATA_DOMAIN_TABLES = [
       },
       {
         entity: "interview_session",
-        description: "One active, paused, completed, or interrupted interview segment.",
+        description:
+          "One active, paused, completed, or interrupted interview segment, including audio duration and transcript token rollups once artifacts are persisted.",
         partitionKeyPattern: "RUN#<run_id>",
         sortKeyPattern: "INTERVIEW_SESSION#<session_number>#<interview_session_id>",
         requiredAttributes: ["id", "runId", "sessionNumber"],

@@ -4052,6 +4052,126 @@ describe("participant interview routes", () => {
     await server.close();
   });
 
+  it("persists participant interview transcript turns and audio metadata through the service route", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_artifacts",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    let turnSequence = 0;
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_artifacts",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createInterviewAudioAssetId: () => "interview_audio_asset_route_001",
+        createInterviewSessionId: () => "interview_session_route_artifacts_001",
+        createInterviewTurnId: () => `interview_turn_route_00${++turnSequence}`,
+        now: () => new Date("2026-05-06T12:30:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore
+    });
+
+    const started = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/start`
+    });
+    const rejectedMetadata = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/artifacts`,
+      payload: {
+        turns: [
+          {
+            id: "client_supplied_id",
+            speaker: "participant",
+            text: "Client metadata should be rejected."
+          }
+        ]
+      }
+    });
+    const savedArtifacts = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/artifacts`,
+      payload: {
+        turns: [
+          {
+            speaker: "ai",
+            text: "What made that comparison stand out?",
+            audioStartMs: 0,
+            audioEndMs: 2100
+          },
+          {
+            speaker: "participant",
+            text: "It helped me explain why the second strategy worked.",
+            audioStartMs: 2200,
+            audioEndMs: 7400
+          }
+        ],
+        audioAsset: {
+          storageUri: "s3://education-researcher-local/study_fixture_001/run_fixture_001/audio/session.wav",
+          durationSeconds: 7.4
+        },
+        transcriptTokenCount: 18
+      }
+    });
+
+    expect(started.statusCode).toBe(201);
+    expect(rejectedMetadata.statusCode).toBe(400);
+    expect(rejectedMetadata.json()).toEqual({
+      error: "Bad Request",
+      message: "Interview artifact metadata is assigned by the service."
+    });
+    expect(savedArtifacts.statusCode).toBe(201);
+    expect(savedArtifacts.json()).toMatchObject({
+      interviewSession: {
+        id: "interview_session_route_artifacts_001",
+        audioDurationSeconds: 7.4,
+        transcriptTokenCount: 18
+      },
+      turns: [
+        {
+          id: "interview_turn_route_001",
+          speaker: "ai",
+          text: "What made that comparison stand out?"
+        },
+        {
+          id: "interview_turn_route_002",
+          speaker: "participant",
+          text: "It helped me explain why the second strategy worked."
+        }
+      ],
+      audioAsset: {
+        id: "interview_audio_asset_route_001",
+        storageUri: "s3://education-researcher-local/study_fixture_001/run_fixture_001/audio/session.wav",
+        durationSeconds: 7.4,
+        status: "available"
+      }
+    });
+    expect(await runStore.listInterviewTurnsByRun("run_fixture_001")).toHaveLength(2);
+    expect(await runStore.listInterviewAudioAssetsByRun("run_fixture_001")).toHaveLength(1);
+
+    await server.close();
+  });
+
   it("accepts only participant-safe interruption status values", async () => {
     const rawToken = createParticipantAccessTokenForTest({
       tokenId: "token_fixture_interruption",
