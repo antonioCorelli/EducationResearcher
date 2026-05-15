@@ -81,6 +81,13 @@ type ParticipantAccessState =
 
 type InterviewMode = "ready" | "active" | "paused";
 type RealtimeConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
+type TechnicalFailureCategory =
+  | "microphone_unavailable"
+  | "voice_provider_unavailable"
+  | "disconnect"
+  | "transcription_unavailable"
+  | "model_api_unavailable"
+  | "unknown";
 
 interface RealtimeVoiceSession {
   readonly provider: "fake" | "openai";
@@ -107,10 +114,12 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   const [simulatedAiQuestionIndex, setSimulatedAiQuestionIndex] = useState(0);
   const [realtimeConnectionState, setRealtimeConnectionState] = useState<RealtimeConnectionState>("idle");
   const [realtimeServiceRequestId, setRealtimeServiceRequestId] = useState<string>();
+  const [realtimeRetryCount, setRealtimeRetryCount] = useState(0);
   const peerConnectionRef = useRef<RTCPeerConnection | undefined>(undefined);
   const dataChannelRef = useRef<RTCDataChannel | undefined>(undefined);
   const mediaStreamRef = useRef<MediaStream | undefined>(undefined);
   const remoteAudioRef = useRef<HTMLAudioElement | undefined>(undefined);
+  const pendingInterviewTurnsRef = useRef<PendingInterviewTurn[]>([]);
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
     const accessToken = getParticipantAccessTokenFromPath();
 
@@ -191,6 +200,10 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
     setIsSubmittingInterviewAction(true);
 
     try {
+      if (action === "pause" || action === "complete") {
+        await flushPendingInterviewArtifacts(accessToken);
+      }
+
       const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/${action}`, {
         method: "POST"
       });
@@ -208,7 +221,8 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
 
       if (action === "start" || action === "resume") {
         setSimulatedAiQuestionIndex(0);
-        await connectRealtimeVoice(accessToken);
+        setRealtimeRetryCount(0);
+        await connectRealtimeVoice(accessToken, 0);
       } else {
         disconnectRealtimeVoice("closed");
       }
@@ -227,6 +241,10 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
       setMicrophoneEnabled(nextValue);
 
       if (currentValue) {
+        pendingInterviewTurnsRef.current.push({
+          speaker: "ai",
+          text: simulatedAiQuestions[simulatedAiQuestionIndex] ?? simulatedAiQuestions[0]
+        });
         setSimulatedAiQuestionIndex((currentIndex) =>
           Math.min(currentIndex + 1, simulatedAiQuestions.length - 1)
         );
@@ -236,40 +254,157 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
     });
   }
 
-  async function connectRealtimeVoice(accessToken: string) {
+  async function connectRealtimeVoice(accessToken: string, retryCount = realtimeRetryCount) {
     disconnectRealtimeVoice("closed");
     setRealtimeConnectionState("connecting");
     let activeServiceRequestId = realtimeServiceRequestId;
+    const startedAt = performance.now();
 
     try {
       const realtimeSession = await fetchRealtimeVoiceSession(accessToken);
       activeServiceRequestId = realtimeSession.serviceRequestId;
       setRealtimeServiceRequestId(realtimeSession.serviceRequestId);
-      await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connecting");
+      await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connecting", {
+        retryCount,
+        latencyMs: Math.round(performance.now() - startedAt)
+      });
 
       if (realtimeSession.provider === "fake") {
         setRealtimeConnectionState("connected");
-        await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected");
+        await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected", {
+          retryCount,
+          latencyMs: Math.round(performance.now() - startedAt)
+        });
         return;
       }
 
-      const connection = await connectOpenAiRealtimeVoice(realtimeSession);
+      const connection = await connectOpenAiRealtimeVoice(realtimeSession, (turn) => {
+        pendingInterviewTurnsRef.current.push(turn);
+      });
       peerConnectionRef.current = connection.peerConnection;
       dataChannelRef.current = connection.dataChannel;
       mediaStreamRef.current = connection.mediaStream;
       remoteAudioRef.current = connection.remoteAudio;
       setMicrophoneEnabled(false);
       setRealtimeConnectionState("connected");
-      await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected");
+      await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected", {
+        retryCount,
+        latencyMs: Math.round(performance.now() - startedAt)
+      });
     } catch (error) {
       setRealtimeConnectionState("failed");
+      const technicalFailureCategory = categorizeTechnicalFailure(error);
+      const latencyMs = Math.round(performance.now() - startedAt);
 
       if (activeServiceRequestId) {
-        await reportAudioConnectionState(accessToken, activeServiceRequestId, "failed");
+        await reportAudioConnectionState(accessToken, activeServiceRequestId, "failed", {
+          retryCount,
+          latencyMs,
+          technicalFailureCategory
+        });
       }
 
-      setInterviewError(error instanceof Error ? error.message : "Unable to connect voice interview.");
+      setInterviewError("We had trouble keeping the voice interview connected. Your responses so far are saved.");
+
+      if (retryCount >= maximumRecoverableRetryCount) {
+        await markTechnicalInterruption(accessToken, technicalFailureCategory, latencyMs, retryCount);
+      }
     }
+  }
+
+  async function retryRealtimeVoice() {
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    if (!accessToken) {
+      setInterviewError("This participant link is not available.");
+      return;
+    }
+
+    const nextRetryCount = realtimeRetryCount + 1;
+
+    setRealtimeRetryCount(nextRetryCount);
+    setInterviewError("");
+
+    try {
+      await connectRealtimeVoice(accessToken, nextRetryCount);
+    } catch (error) {
+      setInterviewError(error instanceof Error ? error.message : "Unable to reconnect the voice interview.");
+    }
+  }
+
+  async function markTechnicalInterruption(
+    accessToken: string,
+    technicalFailureCategory: TechnicalFailureCategory,
+    latencyMs?: number,
+    retryCount = realtimeRetryCount
+  ) {
+    await flushPendingInterviewArtifacts(accessToken);
+
+    const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/interrupt`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        safeStatus: "unable_to_complete_interview",
+        serviceRequestId: realtimeServiceRequestId ?? "participant_recovery_unknown",
+        technicalFailureCategory,
+        audioConnectionState: "failed",
+        retryCount,
+        ...(latencyMs !== undefined ? { latencyMs } : {})
+      })
+    });
+    const payload = (await response.json()) as {
+      run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+      message?: string;
+    };
+
+    if (!response.ok || !payload.run) {
+      throw new Error(payload.message ?? "Unable to finish this interview safely.");
+    }
+
+    setAccessState({ status: "ready", run: payload.run });
+    setIsRecording(false);
+    disconnectRealtimeVoice("closed");
+  }
+
+  async function stopAfterTechnicalFailure() {
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    if (!accessToken) {
+      setInterviewError("This participant link is not available.");
+      return;
+    }
+
+    setIsSubmittingInterviewAction(true);
+    setInterviewError("");
+
+    try {
+      await markTechnicalInterruption(accessToken, "unknown");
+    } catch (error) {
+      setInterviewError(error instanceof Error ? error.message : "Unable to finish this interview safely.");
+    } finally {
+      setIsSubmittingInterviewAction(false);
+    }
+  }
+
+  async function flushPendingInterviewArtifacts(accessToken: string) {
+    const turns = pendingInterviewTurnsRef.current;
+
+    if (turns.length === 0) {
+      return;
+    }
+
+    await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/artifacts`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        turns
+      })
+    });
+    pendingInterviewTurnsRef.current = [];
   }
 
   function disconnectRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
@@ -538,7 +673,10 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
           onPause={() => void submitInterviewAction("pause")}
           onRecordToggle={toggleRecording}
           onResume={() => void submitInterviewAction("resume")}
+          onRetry={() => void retryRealtimeVoice()}
           onStart={() => void submitInterviewAction("start")}
+          onStopAfterFailure={() => void stopAfterTechnicalFailure()}
+          retryCount={realtimeRetryCount}
         />
       );
     }
@@ -584,7 +722,10 @@ export function ParticipantInterviewScreen({
   onPause,
   onRecordToggle,
   onResume,
-  onStart
+  onRetry,
+  onStart,
+  onStopAfterFailure,
+  retryCount
 }: {
   readonly aiQuestion: string;
   readonly error: string;
@@ -597,9 +738,13 @@ export function ParticipantInterviewScreen({
   readonly onPause: () => void;
   readonly onRecordToggle: () => void;
   readonly onResume: () => void;
+  readonly onRetry: () => void;
   readonly onStart: () => void;
+  readonly onStopAfterFailure: () => void;
+  readonly retryCount: number;
 }) {
   const isActive = mode === "active";
+  const hasRecoverableFailure = isActive && realtimeConnectionState === "failed";
   const participantVoiceState = isRecording ? "Recording" : isActive ? "Ready" : "Paused";
   const connectionLabel = getConnectionLabel(realtimeConnectionState);
 
@@ -626,7 +771,14 @@ export function ParticipantInterviewScreen({
           <span className="connection-state-label">{connectionLabel}</span>
         </div>
 
-        {error ? <p className="form-error">{error}</p> : null}
+        {hasRecoverableFailure ? (
+          <div className="participant-recovery-panel" role="status">
+            <p>{error || "We had trouble keeping the voice interview connected. Your responses so far are saved."}</p>
+            <span>Retry {retryCount} of {maximumRecoverableRetryCount}</span>
+          </div>
+        ) : error ? (
+          <p className="form-error">{error}</p>
+        ) : null}
 
         <div className="participant-interview-controls">
           {mode === "ready" ? (
@@ -649,6 +801,16 @@ export function ParticipantInterviewScreen({
               >
                 {isRecording ? "Stop recording" : "Record"}
               </button>
+              {hasRecoverableFailure ? (
+                <>
+                  <button className="primary-button" disabled={isActionPending} onClick={onRetry} type="button">
+                    Retry connection
+                  </button>
+                  <button className="secondary-button" disabled={isActionPending} onClick={onStopAfterFailure} type="button">
+                    End session
+                  </button>
+                </>
+              ) : null}
               <button className="secondary-button" disabled={isActionPending || isRecording} onClick={onPause} type="button">
                 Pause
               </button>
@@ -661,6 +823,15 @@ export function ParticipantInterviewScreen({
       </section>
     </main>
   );
+}
+
+const maximumRecoverableRetryCount = 2;
+
+interface PendingInterviewTurn {
+  readonly speaker: "ai" | "participant";
+  readonly text: string;
+  readonly audioStartMs?: number;
+  readonly audioEndMs?: number;
 }
 
 function VoiceWave({ isActive, label }: { readonly isActive: boolean; readonly label: string }) {
@@ -833,7 +1004,12 @@ async function fetchRealtimeVoiceSession(accessToken: string) {
 async function reportAudioConnectionState(
   accessToken: string,
   serviceRequestId: string,
-  audioConnectionState: Exclude<RealtimeConnectionState, "idle">
+  audioConnectionState: Exclude<RealtimeConnectionState, "idle">,
+  metadata: {
+    readonly retryCount?: number;
+    readonly latencyMs?: number;
+    readonly technicalFailureCategory?: TechnicalFailureCategory;
+  } = {}
 ) {
   await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/connection-state`, {
     method: "POST",
@@ -842,12 +1018,16 @@ async function reportAudioConnectionState(
     },
     body: JSON.stringify({
       serviceRequestId,
-      audioConnectionState
+      audioConnectionState,
+      ...metadata
     })
   }).catch(() => undefined);
 }
 
-async function connectOpenAiRealtimeVoice(realtimeSession: RealtimeVoiceSession) {
+async function connectOpenAiRealtimeVoice(
+  realtimeSession: RealtimeVoiceSession,
+  onTranscriptTurn: (turn: PendingInterviewTurn) => void
+) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Microphone access is not available in this browser.");
   }
@@ -868,6 +1048,13 @@ async function connectOpenAiRealtimeVoice(realtimeSession: RealtimeVoiceSession)
   }
 
   const dataChannel = peerConnection.createDataChannel("oai-events");
+  dataChannel.addEventListener("message", (event) => {
+    const turn = parseRealtimeTranscriptTurn(event.data);
+
+    if (turn) {
+      onTranscriptTurn(turn);
+    }
+  });
   const offer = await peerConnection.createOffer();
   await peerConnection.setLocalDescription(offer);
 
@@ -899,6 +1086,64 @@ async function connectOpenAiRealtimeVoice(realtimeSession: RealtimeVoiceSession)
     mediaStream,
     remoteAudio
   };
+}
+
+function parseRealtimeTranscriptTurn(value: unknown): PendingInterviewTurn | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  let event: Record<string, unknown>;
+
+  try {
+    event = JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+
+  const transcript = typeof event.transcript === "string" ? event.transcript.trim() : "";
+
+  if (!transcript) {
+    return undefined;
+  }
+
+  if (event.type === "conversation.item.input_audio_transcription.completed") {
+    return {
+      speaker: "participant",
+      text: transcript
+    };
+  }
+
+  if (event.type === "response.audio_transcript.done") {
+    return {
+      speaker: "ai",
+      text: transcript
+    };
+  }
+
+  return undefined;
+}
+
+function categorizeTechnicalFailure(error: unknown): TechnicalFailureCategory {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (message.includes("microphone") || message.includes("permission") || message.includes("getusermedia")) {
+    return "microphone_unavailable";
+  }
+
+  if (message.includes("transcription") || message.includes("transcript")) {
+    return "transcription_unavailable";
+  }
+
+  if (message.includes("disconnect") || message.includes("connection")) {
+    return "disconnect";
+  }
+
+  if (message.includes("model") || message.includes("api")) {
+    return "model_api_unavailable";
+  }
+
+  return "voice_provider_unavailable";
 }
 
 function getSurveyLayoutItems(surveyVersion: SurveyVersion): readonly SurveyLayoutItem[] {

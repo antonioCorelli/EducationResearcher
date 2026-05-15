@@ -251,6 +251,28 @@ textarea {
   font-size: 0.78rem;
 }
 
+.participant-recovery-panel {
+  display: grid;
+  gap: 0.35rem;
+  max-width: 42rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #7c2d12;
+  line-height: 1.45;
+}
+
+.participant-recovery-panel p {
+  margin: 0;
+}
+
+.participant-recovery-panel span {
+  color: #9a3412;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
 .voice-state-dot {
   width: 10px;
   height: 10px;

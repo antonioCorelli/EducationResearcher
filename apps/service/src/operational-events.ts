@@ -13,16 +13,29 @@ export const AUDIO_CONNECTION_STATES = [
 
 export type AudioConnectionState = (typeof AUDIO_CONNECTION_STATES)[number];
 
+export const TECHNICAL_FAILURE_CATEGORIES = [
+  "microphone_unavailable",
+  "voice_provider_unavailable",
+  "disconnect",
+  "transcription_unavailable",
+  "model_api_unavailable",
+  "unknown"
+] as const;
+
+export type TechnicalFailureCategory = (typeof TECHNICAL_FAILURE_CATEGORIES)[number];
+
 export interface OperationalEvent {
   readonly id: string;
   readonly studyId: string;
   readonly runId: string;
   readonly participantSlotId: string;
-  readonly eventType: "realtime_session_created" | "audio_connection_state_changed";
+  readonly eventType: "realtime_session_created" | "audio_connection_state_changed" | "technical_failure";
   readonly serviceRequestId: string;
   readonly audioConnectionState?: AudioConnectionState;
+  readonly technicalFailureCategory?: TechnicalFailureCategory;
   readonly provider?: "fake" | "openai";
   readonly modelName?: string;
+  readonly latencyMs?: number;
   readonly retryCount?: number;
   readonly createdAt: string;
 }
@@ -77,6 +90,7 @@ export class OperationalEventService {
     readonly serviceRequestId: string;
     readonly audioConnectionState: AudioConnectionState;
     readonly retryCount?: number;
+    readonly latencyMs?: number;
   }) {
     return this.store.record({
       id: this.createOperationalEventId(),
@@ -86,7 +100,33 @@ export class OperationalEventService {
       eventType: "audio_connection_state_changed",
       serviceRequestId: input.serviceRequestId,
       audioConnectionState: input.audioConnectionState,
+      ...(input.latencyMs !== undefined ? { latencyMs: input.latencyMs } : {}),
       ...(input.retryCount !== undefined ? { retryCount: input.retryCount } : {}),
+      createdAt: this.now().toISOString()
+    });
+  }
+
+  async recordTechnicalFailure(input: {
+    readonly studyId: string;
+    readonly runId: string;
+    readonly participantSlotId: string;
+    readonly serviceRequestId: string;
+    readonly technicalFailureCategory: TechnicalFailureCategory;
+    readonly audioConnectionState: AudioConnectionState;
+    readonly retryCount: number;
+    readonly latencyMs?: number;
+  }) {
+    return this.store.record({
+      id: this.createOperationalEventId(),
+      studyId: input.studyId,
+      runId: input.runId,
+      participantSlotId: input.participantSlotId,
+      eventType: "technical_failure",
+      serviceRequestId: input.serviceRequestId,
+      technicalFailureCategory: input.technicalFailureCategory,
+      audioConnectionState: input.audioConnectionState,
+      ...(input.retryCount !== undefined ? { retryCount: input.retryCount } : {}),
+      ...(input.latencyMs !== undefined ? { latencyMs: input.latencyMs } : {}),
       createdAt: this.now().toISOString()
     });
   }
@@ -179,6 +219,20 @@ export function parseAudioConnectionState(value: unknown): AudioConnectionState 
     body: {
       error: "Bad Request",
       message: "Audio connection state is invalid."
+    }
+  };
+}
+
+export function parseTechnicalFailureCategory(value: unknown): TechnicalFailureCategory {
+  if (TECHNICAL_FAILURE_CATEGORIES.some((category) => category === value)) {
+    return value as TechnicalFailureCategory;
+  }
+
+  throw {
+    statusCode: 400,
+    body: {
+      error: "Bad Request",
+      message: "Technical failure category is invalid."
     }
   };
 }

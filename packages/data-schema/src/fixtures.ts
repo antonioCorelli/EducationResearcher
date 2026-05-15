@@ -447,6 +447,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       },
       audioConnectionState: "connected",
       modelApiErrorCategory: "service_unavailable",
+      technicalFailureCategory: "model_api_unavailable",
       latencyMs: 120,
       retryCount: 0,
       serviceRequestId: "req_fixture_001",

@@ -241,7 +241,9 @@ describe("data domain schema", () => {
     expect(scoringRunDefinition?.requiredAttributes).toEqual(
       expect.arrayContaining(["modelName", "modelVersion", "serviceRequestId", "promptVersion"])
     );
-    expect(operationalEventDefinition?.statusAttributes).toEqual(expect.arrayContaining(["modelApiErrorCategory"]));
+    expect(operationalEventDefinition?.statusAttributes).toEqual(
+      expect.arrayContaining(["modelApiErrorCategory", "technicalFailureCategory"])
+    );
     expect(gapMap?.attributes).toMatchObject({
       modelName: "fake-gap-map",
       modelVersion: "local-1",
@@ -255,7 +257,8 @@ describe("data domain schema", () => {
       promptVersion: "scoring-v1"
     });
     expect(operationalEvent?.attributes).toMatchObject({
-      modelApiErrorCategory: "service_unavailable"
+      modelApiErrorCategory: "service_unavailable",
+      technicalFailureCategory: "model_api_unavailable"
     });
   });
 

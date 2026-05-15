@@ -4012,7 +4012,10 @@ describe("participant interview routes", () => {
       url: `/participant/runs/${rawToken}/interview/connection-state`,
       payload: {
         serviceRequestId: "req_realtime_fixture_001",
-        audioConnectionState: "connected"
+        audioConnectionState: "failed",
+        technicalFailureCategory: "disconnect",
+        latencyMs: 425,
+        retryCount: 1
       }
     });
 
@@ -4045,7 +4048,17 @@ describe("participant interview routes", () => {
       }),
       expect.objectContaining({
         eventType: "audio_connection_state_changed",
-        audioConnectionState: "connected"
+        audioConnectionState: "failed",
+        latencyMs: 425,
+        retryCount: 1
+      }),
+      expect.objectContaining({
+        eventType: "technical_failure",
+        technicalFailureCategory: "disconnect",
+        audioConnectionState: "failed",
+        retryCount: 1,
+        latencyMs: 425,
+        serviceRequestId: "req_realtime_fixture_001"
       })
     ]);
 

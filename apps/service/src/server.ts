@@ -28,6 +28,7 @@ import {
   OperationalEventService,
   createConfiguredOperationalEventStore,
   parseAudioConnectionState,
+  parseTechnicalFailureCategory,
   type OperationalEventServiceOptions,
   type OperationalEventStore
 } from "./operational-events.js";
@@ -584,6 +585,42 @@ function coerceInterruptInterviewInput(body: unknown): InterruptInterviewInput {
   };
 }
 
+function coerceTechnicalFailureInput(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Technical failure details are required."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+  const serviceRequestId =
+    typeof record.serviceRequestId === "string" && record.serviceRequestId.trim()
+      ? record.serviceRequestId.trim()
+      : undefined;
+
+  if (!serviceRequestId) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Service request ID is required."
+      }
+    };
+  }
+
+  return {
+    serviceRequestId,
+    technicalFailureCategory: parseTechnicalFailureCategory(record.technicalFailureCategory),
+    audioConnectionState: parseAudioConnectionState(record.audioConnectionState ?? "failed"),
+    retryCount: coerceOptionalNonNegativeInteger(record.retryCount, "retry count") ?? 0,
+    latencyMs: coerceOptionalNonNegativeInteger(record.latencyMs, "latency")
+  };
+}
+
 function coerceSaveInterviewArtifactsInput(body: unknown): SaveInterviewArtifactsInput {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw {
@@ -674,7 +711,10 @@ function coerceAudioConnectionStateInput(body: unknown) {
   return {
     serviceRequestId,
     audioConnectionState: parseAudioConnectionState(record.audioConnectionState),
-    retryCount: coerceOptionalNonNegativeInteger(record.retryCount, "retry count")
+    retryCount: coerceOptionalNonNegativeInteger(record.retryCount, "retry count"),
+    latencyMs: coerceOptionalNonNegativeInteger(record.latencyMs, "latency"),
+    technicalFailureCategory:
+      record.technicalFailureCategory !== undefined ? parseTechnicalFailureCategory(record.technicalFailureCategory) : undefined
   };
 }
 
@@ -1703,8 +1743,22 @@ export function buildServer(options: BuildServerOptions = {}) {
           participantSlotId: result.run.participantSlotId,
           serviceRequestId: input.serviceRequestId,
           audioConnectionState: input.audioConnectionState,
-          retryCount: input.retryCount
+          retryCount: input.retryCount,
+          latencyMs: input.latencyMs
         });
+
+        if (input.technicalFailureCategory) {
+          await operationalEventService.recordTechnicalFailure({
+            studyId: result.run.studyId,
+            runId: result.run.id,
+            participantSlotId: result.run.participantSlotId,
+            serviceRequestId: input.serviceRequestId,
+            technicalFailureCategory: input.technicalFailureCategory,
+            audioConnectionState: input.audioConnectionState,
+            retryCount: input.retryCount ?? 0,
+            latencyMs: input.latencyMs
+          });
+        }
 
         return reply.code(204).send();
       } catch (error) {
@@ -1792,10 +1846,31 @@ export function buildServer(options: BuildServerOptions = {}) {
 
   server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/interrupt", async (request, reply) => {
     try {
-      return await runService.interruptParticipantInterview(
+      const result = await runService.interruptParticipantInterview(
         request.params.accessToken,
         coerceInterruptInterviewInput(request.body)
       );
+
+      if (request.body && typeof request.body === "object" && !Array.isArray(request.body)) {
+        const record = request.body as Record<string, unknown>;
+
+        if (record.technicalFailureCategory !== undefined) {
+          const failureInput = coerceTechnicalFailureInput(request.body);
+
+          await operationalEventService.recordTechnicalFailure({
+            studyId: result.run.studyId,
+            runId: result.run.id,
+            participantSlotId: result.run.participantSlotId,
+            serviceRequestId: failureInput.serviceRequestId,
+            technicalFailureCategory: failureInput.technicalFailureCategory,
+            audioConnectionState: failureInput.audioConnectionState,
+            retryCount: failureInput.retryCount,
+            latencyMs: failureInput.latencyMs
+          });
+        }
+      }
+
+      return result;
     } catch (error) {
       const safeResponse =
         toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);

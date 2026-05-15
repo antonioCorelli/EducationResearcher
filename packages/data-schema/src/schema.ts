@@ -763,7 +763,7 @@ export const DATA_DOMAIN_TABLES = [
         partitionKeyPattern: "RUN#<run_id>",
         sortKeyPattern: "OPERATIONAL_EVENT#<created_at>#<operational_event_id>",
         requiredAttributes: ["id", "runId", "participantSlotId", "eventType", "serviceRequestId"],
-        statusAttributes: ["eventType", "audioConnectionState", "modelApiErrorCategory"],
+        statusAttributes: ["eventType", "audioConnectionState", "modelApiErrorCategory", "technicalFailureCategory"],
         timestampAttributes: ["createdAt"],
         references: [
           {
