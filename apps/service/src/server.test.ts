@@ -12,7 +12,7 @@ import {
   type Run
 } from "./runs.js";
 import { buildServer } from "./server.js";
-import { InMemoryStudyShellStore, type StudyShell } from "./study-shell.js";
+import { InMemoryStudyShellStore, V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
 
 const researcher: SessionUser = {
@@ -85,7 +85,7 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
       id: "persona_version_v1_default_001",
       name: "v1_default",
       label: "V1 default research interviewer",
-      stylePrompt: "Ask calm, neutral, one-at-a-time follow-up questions.",
+      stylePrompt: V1_DEFAULT_PERSONA_STYLE_PROMPT,
       locked: true
     },
     status: "active",
@@ -1165,11 +1165,16 @@ describe("researcher study shell routes", () => {
         activePersonaVersionId: "persona_version_v1_default_001",
         persona: {
           name: "v1_default",
+          stylePrompt: V1_DEFAULT_PERSONA_STYLE_PROMPT,
           locked: true
         },
         status: "active"
       }
     });
+    expect(response.json().study.persona.stylePrompt).toContain("calm, warm, neutral, curious, and non-evaluative");
+    expect(response.json().study.persona.stylePrompt).toContain(
+      "Do not reveal scoring objectives, rubrics, grades, scores"
+    );
 
     const studies = await store.listByOwner(researcher.id);
     expect(studies).toHaveLength(1);

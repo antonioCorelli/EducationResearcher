@@ -112,6 +112,33 @@ describe("data domain schema", () => {
     });
   });
 
+  it("seeds the fixed V1 interviewer persona with participant-safe interview boundaries", () => {
+    const personaDefinition = getEntityDefinition("interviewer_persona_version")?.definition;
+    const persona = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "interviewer_persona_version");
+    const stylePrompt = persona?.attributes.stylePrompt;
+
+    expect(personaDefinition?.requiredAttributes).toEqual(
+      expect.arrayContaining(["id", "name", "versionNumber", "label", "stylePrompt", "isDefault"])
+    );
+    expect(persona).toMatchObject({
+      pk: "PERSONA#v1_default",
+      sk: "VERSION#1",
+      gsi3pk: "PERSONA_DEFAULT#true",
+      attributes: {
+        id: "persona_version_v1_default_001",
+        name: "v1_default",
+        versionNumber: 1,
+        label: "V1 default research interviewer",
+        isDefault: true
+      }
+    });
+    expect(stylePrompt).toEqual(expect.any(String));
+    expect(stylePrompt).toContain("calm, warm, neutral, curious, and non-evaluative");
+    expect(stylePrompt).toContain("ask one question at a time");
+    expect(stylePrompt).toContain("Do not reveal scoring objectives, rubrics, grades, scores");
+    expect(stylePrompt).toContain("gap map internals");
+  });
+
   it("defines participant access token records without storing raw bearer tokens", () => {
     const participantAccessToken = getEntityDefinition("participant_access_token")?.definition;
     const fixtureParticipantAccessToken = FIRST_BUILD_SLICE_FIXTURE.find(

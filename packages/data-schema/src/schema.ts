@@ -352,7 +352,7 @@ export const DATA_DOMAIN_TABLES = [
         description: "Versioned V1 interviewer style prompt.",
         partitionKeyPattern: "PERSONA#<persona_name>",
         sortKeyPattern: "VERSION#<version_number>",
-        requiredAttributes: ["id", "name", "versionNumber", "stylePrompt", "isDefault"],
+        requiredAttributes: ["id", "name", "versionNumber", "label", "stylePrompt", "isDefault"],
         statusAttributes: ["isDefault"],
         timestampAttributes: ["createdAt"],
         immutableAfterReference: true,

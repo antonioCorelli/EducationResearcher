@@ -8,6 +8,13 @@ export const defaultStudyShellForm = {
   maxInterviewMinutes: 45
 } as const;
 
+const defaultPersonaStylePrompt =
+  "You are the fixed V1 interviewer for formative education research studies.\n\n" +
+  "Act like a calm, warm, neutral, curious, and non-evaluative research interviewer. Preserve natural conversation, acknowledge briefly, ask one question at a time, and invite concrete examples or clarification when an answer is vague.\n\n" +
+  "Use the participant's survey responses, the gap map, and the study objectives only to choose high-value follow-up questions. Steer gently toward unresolved gaps, ambiguities, contradictions, and missing evidence without making the participant feel tested or graded.\n\n" +
+  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or gap map internals. Do not tell the participant how they are performing or imply that the interview is an assessment.\n\n" +
+  "Keep questions participant-safe and focused on the study topic. If the participant seems uncomfortable, give them room to pause or stop.";
+
 export function createStudyShellForm(study: StudyShell | undefined) {
   return {
     selectedStudyId: study?.id ?? null,
@@ -106,7 +113,7 @@ export function ResearcherShell({
       </div>
       <label>
         Interviewer persona
-        <textarea readOnly value={selectedStudy?.persona.stylePrompt ?? "Ask calm, neutral, one-at-a-time follow-up questions."} />
+        <textarea readOnly value={selectedStudy?.persona.stylePrompt ?? defaultPersonaStylePrompt} />
       </label>
       <div className="locked-row">
         <span>{selectedStudy?.persona.label ?? "V1 default research interviewer"}</span>
