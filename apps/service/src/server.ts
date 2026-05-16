@@ -65,6 +65,15 @@ import {
   type SubmitParticipantSurveyInput
 } from "./runs.js";
 import {
+  ScoringService,
+  createConfiguredScoringGenerator,
+  createConfiguredScoringStore,
+  toSafeScoringValidationResponse,
+  type ScoringGenerator,
+  type ScoringServiceOptions,
+  type ScoringStore
+} from "./scoring.js";
+import {
   createConfiguredRealtimeVoiceProvider,
   type RealtimeVoiceProvider
 } from "./voice-provider.js";
@@ -95,6 +104,9 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly participantAccessTokenStore?: ParticipantAccessTokenStore;
   readonly runServiceOptions?: RunServiceOptions;
   readonly runStore?: RunStore;
+  readonly scoringGenerator?: ScoringGenerator;
+  readonly scoringServiceOptions?: ScoringServiceOptions;
+  readonly scoringStore?: ScoringStore;
   readonly studyShellStore?: StudyShellStore;
   readonly surveyVersionStore?: SurveyVersionStore;
   readonly realtimeVoiceProvider?: RealtimeVoiceProvider;
@@ -964,6 +976,9 @@ export function buildServer(options: BuildServerOptions = {}) {
     participantSlotStore = createConfiguredParticipantSlotStore(),
     runServiceOptions,
     runStore = createConfiguredRunStore(),
+    scoringGenerator = createConfiguredScoringGenerator(),
+    scoringServiceOptions,
+    scoringStore = createConfiguredScoringStore(),
     studyShellStore = createConfiguredStudyShellStore(),
     surveyVersionStore = createConfiguredSurveyVersionStore(),
     realtimeVoiceProvider = createConfiguredRealtimeVoiceProvider(),
@@ -975,6 +990,13 @@ export function buildServer(options: BuildServerOptions = {}) {
   const objectiveService = new ObjectiveService(objectiveVersionStore);
   const operationalEventService = new OperationalEventService(operationalEventStore, operationalEventServiceOptions);
   const participantSlotService = new ParticipantSlotService(participantSlotStore, participantSlotServiceOptions);
+  const scoringService = new ScoringService(
+    runStore,
+    objectiveVersionStore,
+    scoringStore,
+    scoringServiceOptions,
+    scoringGenerator
+  );
   const runService = new RunService(
     runStore,
     participantAccessTokenStore,
@@ -982,7 +1004,10 @@ export function buildServer(options: BuildServerOptions = {}) {
     objectiveVersionStore,
     consentVersionStore,
     surveyVersionStore,
-    runServiceOptions,
+    {
+      ...runServiceOptions,
+      automaticScoringTrigger: runServiceOptions?.automaticScoringTrigger ?? scoringService
+    },
     gapMapGenerator
   );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
@@ -1834,7 +1859,10 @@ export function buildServer(options: BuildServerOptions = {}) {
       return await runService.completeParticipantInterview(request.params.accessToken);
     } catch (error) {
       const safeResponse =
-        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+        toSafeParticipantAccessResponse(error) ??
+        toSafeRunValidationResponse(error) ??
+        toSafeScoringValidationResponse(error) ??
+        toSafeInlineErrorResponse(error);
 
       if (safeResponse) {
         return reply.code(safeResponse.statusCode).send(safeResponse.body);
@@ -1873,7 +1901,10 @@ export function buildServer(options: BuildServerOptions = {}) {
       return result;
     } catch (error) {
       const safeResponse =
-        toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+        toSafeParticipantAccessResponse(error) ??
+        toSafeRunValidationResponse(error) ??
+        toSafeScoringValidationResponse(error) ??
+        toSafeInlineErrorResponse(error);
 
       if (safeResponse) {
         return reply.code(safeResponse.statusCode).send(safeResponse.body);

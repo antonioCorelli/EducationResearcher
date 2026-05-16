@@ -281,6 +281,21 @@ export interface StaleRunScoringTrigger {
   triggerStaleRunScoring(input: StaleRunScoringTriggerInput): Promise<void>;
 }
 
+export interface AutomaticRunScoringTriggerInput {
+  readonly run: Run;
+  readonly previousStatus: RunStatus;
+  readonly triggeredAt: string;
+  readonly context?: {
+    readonly staleRun?: boolean;
+    readonly partialRun?: boolean;
+    readonly technicalInterruption?: boolean;
+  };
+}
+
+export interface AutomaticRunScoringTrigger {
+  triggerAutomaticScoring(input: AutomaticRunScoringTriggerInput): Promise<unknown>;
+}
+
 interface RunItem {
   readonly entity: "run";
   readonly pk: string;
@@ -478,6 +493,7 @@ export interface RunServiceOptions {
   readonly participantAccessBaseUrl?: string;
   readonly participantAccessTokenSecret?: string;
   readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
+  readonly automaticScoringTrigger?: AutomaticRunScoringTrigger;
 }
 
 export class RunService {
@@ -493,6 +509,7 @@ export class RunService {
   private readonly participantAccessBaseUrl: string;
   private readonly participantAccessTokenSecret: string;
   private readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
+  private readonly automaticScoringTrigger?: AutomaticRunScoringTrigger;
 
   constructor(
     private readonly runStore: RunStore,
@@ -520,6 +537,7 @@ export class RunService {
     this.participantAccessTokenSecret =
       options.participantAccessTokenSecret ?? getConfiguredParticipantAccessTokenSecret();
     this.staleRunScoringTrigger = options.staleRunScoringTrigger;
+    this.automaticScoringTrigger = options.automaticScoringTrigger;
   }
 
   async listForStudy(studyId: string) {
@@ -800,7 +818,15 @@ export class RunService {
     };
     const completedRun = applyRunStatusTransition(run, "interview_completed", this.now());
 
-    return this.runStore.updateInterviewSession(completedSession, completedRun, run.status, activeSession.status);
+    const result = await this.runStore.updateInterviewSession(completedSession, completedRun, run.status, activeSession.status);
+
+    await this.triggerAutomaticScoring({
+      run: result.run,
+      previousStatus: run.status,
+      context: {}
+    });
+
+    return result;
   }
 
   async interruptParticipantInterview(rawToken: string, input: InterruptInterviewInput = {}) {
@@ -832,7 +858,18 @@ export class RunService {
     };
     const interruptedRun = applyRunStatusTransition(run, "technical_interruption", this.now());
 
-    return this.runStore.updateInterviewSession(interruptedSession, interruptedRun, run.status, activeSession.status);
+    const result = await this.runStore.updateInterviewSession(interruptedSession, interruptedRun, run.status, activeSession.status);
+
+    await this.triggerAutomaticScoring({
+      run: result.run,
+      previousStatus: run.status,
+      context: {
+        technicalInterruption: true,
+        partialRun: true
+      }
+    });
+
+    return result;
   }
 
   async createParticipantRealtimeVoiceSession(rawToken: string, voiceProvider: RealtimeVoiceProvider) {
@@ -969,6 +1006,15 @@ export class RunService {
       const persistedRun = await this.runStore.updateStatus(staleRun, candidate.status);
       staleRuns.push(persistedRun);
 
+      await this.triggerAutomaticScoring({
+        run: persistedRun,
+        previousStatus: candidate.status,
+        context: {
+          staleRun: true,
+          partialRun: true
+        }
+      });
+
       await this.staleRunScoringTrigger?.triggerStaleRunScoring({
         run: persistedRun,
         previousStatus: candidate.status,
@@ -983,6 +1029,21 @@ export class RunService {
     return {
       staleRuns
     };
+  }
+
+  private async triggerAutomaticScoring(input: {
+    readonly run: Run;
+    readonly previousStatus: RunStatus;
+    readonly context?: AutomaticRunScoringTriggerInput["context"];
+  }) {
+    if (!this.automaticScoringTrigger) {
+      return;
+    }
+
+    await this.automaticScoringTrigger.triggerAutomaticScoring({
+      ...input,
+      triggeredAt: this.now().toISOString()
+    });
   }
 
   private async createInterviewSessionForRun(run: Run) {

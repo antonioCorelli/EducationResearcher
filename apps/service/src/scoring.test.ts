@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AiProviderError, type StructuredAiProvider } from "./ai-provider.js";
 import type { GapMap } from "./gap-map.js";
-import type { ObjectiveVersion } from "./objectives.js";
-import type { Run, SurveyResponse } from "./runs.js";
+import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
+import { InMemoryRunStore, type Run, type SurveyResponse } from "./runs.js";
 import {
   AiProviderScoringGenerator,
+  InMemoryScoringStore,
   SCORING_PROMPT_VERSION,
+  ScoringService,
   ScoringOutputValidationError,
   createObjectiveVersionSetHash,
   parseScoringGeneratorOutput
@@ -281,6 +283,199 @@ describe("AI provider scoring generator", () => {
       safeCategory: "invalid_request",
       retryable: false,
       serviceRequestId: "req_bad_001"
+    });
+  });
+});
+
+describe("automatic scoring job", () => {
+  it("scores a completed interview run, persists scores and citations, and marks the run scored", async () => {
+    const runStore = new InMemoryRunStore([{ ...run, status: "created" }]);
+    await runStore.submitSurvey([surveyResponse], { ...run, status: "survey_completed" }, "created");
+    await runStore.saveGapMap(gapMap);
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        sessionNumber: 1,
+        status: "completed",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:30:00.000Z",
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:30:00.000Z"
+      },
+      { ...run, status: "interview_completed" },
+      "survey_completed"
+    );
+    await runStore.saveInterviewArtifacts({
+      interviewSession: {
+        id: "interview_session_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        sessionNumber: 1,
+        status: "completed",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:30:00.000Z",
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:30:00.000Z"
+      },
+      turns: [
+        {
+          id: "interview_turn_001",
+          studyId: run.studyId,
+          participantSlotId: run.participantSlotId,
+          runId: run.id,
+          interviewSessionId: "interview_session_001",
+          speaker: "participant",
+          text: "The worked example helped me explain the pattern.",
+          audioStartMs: 4200,
+          audioEndMs: 9200,
+          createdAt: "2026-05-06T12:24:00.000Z"
+        }
+      ]
+    });
+    const scoringStore = new InMemoryScoringStore();
+    const service = new ScoringService(
+      runStore,
+      new InMemoryObjectiveVersionStore([objective]),
+      scoringStore,
+      {
+        createScoringRunId: () => "scoring_run_001",
+        createObjectiveScoreId: () => "objective_score_001",
+        createEvidenceCitationId: () => "evidence_citation_001",
+        now: () => new Date("2026-05-06T12:40:00.000Z")
+      }
+    );
+
+    const result = await service.triggerAutomaticScoring({
+      run: { ...run, status: "interview_completed" },
+      previousStatus: "interview_in_progress",
+      triggeredAt: "2026-05-06T12:30:00.000Z"
+    });
+
+    expect(result).toMatchObject({
+      scoringRun: {
+        id: "scoring_run_001",
+        runId: run.id,
+        trigger: "automatic",
+        status: "completed",
+        modelName: "fake-scoring",
+        promptVersion: SCORING_PROMPT_VERSION
+      },
+      objectiveScores: [
+        {
+          id: "objective_score_001",
+          objectiveVersionId: "objective_version_001",
+          gradeLabel: "1",
+          confidence: 0.78
+        }
+      ],
+      evidenceCitations: [
+        {
+          id: "evidence_citation_001",
+          sourceType: "interview_turn",
+          sourceId: "interview_turn_001",
+          audioStartMs: 4200,
+          audioEndMs: 9200
+        }
+      ],
+      run: {
+        status: "scored"
+      }
+    });
+    expect(await runStore.getById(run.id)).toMatchObject({ status: "scored" });
+    await expect(scoringStore.listScoringRunsByRun(run.id)).resolves.toHaveLength(1);
+  });
+
+  it("scores stale runs from survey evidence and emits stale and missing-interview flags", async () => {
+    const staleRun: Run = { ...run, status: "stale" };
+    const runStore = new InMemoryRunStore([staleRun]);
+    await runStore.submitSurvey([surveyResponse], staleRun, "stale");
+    const service = new ScoringService(
+      runStore,
+      new InMemoryObjectiveVersionStore([objective]),
+      new InMemoryScoringStore(),
+      {
+        createScoringRunId: () => "scoring_run_stale_001",
+        createObjectiveScoreId: () => "objective_score_stale_001",
+        createEvidenceCitationId: () => "evidence_citation_stale_001",
+        now: () => new Date("2026-05-20T12:00:00.000Z")
+      }
+    );
+
+    const result = await service.scoreRun(staleRun.id, "automatic");
+
+    expect(result.objectiveScores).toEqual([
+      expect.objectContaining({
+        flags: ["stale_run", "missing_interview_evidence"],
+        confidence: 0.45
+      })
+    ]);
+    expect(result.evidenceCitations).toEqual([
+      expect.objectContaining({
+        sourceType: "survey_response",
+        sourceId: "survey_response_001"
+      })
+    ]);
+    expect(result.run.status).toBe("scored");
+  });
+
+  it("persists mocked low-confidence, partial, technical, and contradiction flags", async () => {
+    const interruptedRun: Run = { ...run, status: "technical_interruption" };
+    const runStore = new InMemoryRunStore([interruptedRun]);
+    const generator = {
+      async generate() {
+        return {
+          modelName: "fake-scoring",
+          modelVersion: "local-1",
+          serviceRequestId: "req_scoring_contradiction",
+          promptVersion: SCORING_PROMPT_VERSION,
+          objectiveVersionSetHash: createObjectiveVersionSetHash([objective]),
+          scores: [
+            {
+              objectiveVersionId: objective.id,
+              gradeLabel: "2",
+              confidence: 0.3,
+              rationale: "Survey and interview evidence conflict, and the interview was interrupted.",
+              flags: [
+                "low_confidence",
+                "survey_interview_contradiction",
+      "partial_run",
+      "technical_interruption",
+      "missing_interview_evidence"
+              ] as const,
+              citations: []
+            }
+          ]
+        };
+      }
+    };
+    const service = new ScoringService(
+      runStore,
+      new InMemoryObjectiveVersionStore([objective]),
+      new InMemoryScoringStore(),
+      {
+        createScoringRunId: () => "scoring_run_flags_001",
+        createObjectiveScoreId: () => "objective_score_flags_001",
+        now: () => new Date("2026-05-06T12:40:00.000Z")
+      },
+      generator
+    );
+
+    const result = await service.scoreRun(interruptedRun.id, "automatic");
+
+    expect(result.objectiveScores[0]).toMatchObject({
+      gradeLabel: "2",
+      confidence: 0.3,
+      flags: [
+        "low_confidence",
+        "survey_interview_contradiction",
+        "partial_run",
+        "technical_interruption",
+        "missing_interview_evidence"
+      ]
     });
   });
 });

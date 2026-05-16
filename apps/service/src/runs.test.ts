@@ -19,6 +19,7 @@ import {
   type Run,
   type RunStatus,
   type SurveyResponse,
+  type AutomaticRunScoringTriggerInput,
   type StaleRunScoringTriggerInput
 } from "./runs.js";
 import type { GapMapGenerator } from "./gap-map.js";
@@ -380,6 +381,7 @@ describe("run freshness enforcement", () => {
       createdAt: "2026-05-19T12:00:00.000Z"
     };
     const scoringTriggers: StaleRunScoringTriggerInput[] = [];
+    const automaticScoringTriggers: AutomaticRunScoringTriggerInput[] = [];
     const service = new RunService(
       runStore,
       new InMemoryParticipantAccessTokenStore(),
@@ -393,6 +395,11 @@ describe("run freshness enforcement", () => {
         staleRunScoringTrigger: {
           async triggerStaleRunScoring(input) {
             scoringTriggers.push(input);
+          }
+        },
+        automaticScoringTrigger: {
+          async triggerAutomaticScoring(input) {
+            automaticScoringTriggers.push(input);
           }
         }
       }
@@ -447,6 +454,20 @@ describe("run freshness enforcement", () => {
       })
     ]);
     expect(scoringTriggers).toEqual([
+      expect.objectContaining({
+        previousStatus: "survey_completed",
+        triggeredAt: "2026-05-20T12:00:00.000Z",
+        run: expect.objectContaining({
+          id: "run_fixture_001",
+          status: "stale"
+        }),
+        context: {
+          staleRun: true,
+          partialRun: true
+        }
+      })
+    ]);
+    expect(automaticScoringTriggers).toEqual([
       expect.objectContaining({
         previousStatus: "survey_completed",
         triggeredAt: "2026-05-20T12:00:00.000Z",
@@ -625,6 +646,59 @@ describe("interview session lifecycle", () => {
     ]);
   });
 
+  it("triggers automatic scoring after interview completion", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    const automaticScoringTriggers: AutomaticRunScoringTriggerInput[] = [];
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      createInterviewSessionId: () => "interview_session_scoring_001"
+    });
+    const scoringService = new RunService(
+      runStore,
+      new InMemoryParticipantAccessTokenStore([
+        {
+          id: "participant_access_token_gap_map",
+          tokenId: "token_fixture_gap_map",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken),
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          runId: "run_fixture_001",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore,
+      objectiveVersionStore,
+      new InMemoryConsentVersionStore(),
+      new InMemorySurveyVersionStore([createSurveyVersion()]),
+      {
+        now: () => new Date("2026-05-06T12:21:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret",
+        automaticScoringTrigger: {
+          async triggerAutomaticScoring(input) {
+            automaticScoringTriggers.push(input);
+          }
+        }
+      }
+    );
+
+    await service.startParticipantInterview(rawToken);
+    await scoringService.completeParticipantInterview(rawToken);
+
+    expect(automaticScoringTriggers).toEqual([
+      expect.objectContaining({
+        previousStatus: "interview_in_progress",
+        triggeredAt: "2026-05-06T12:21:00.000Z",
+        run: expect.objectContaining({
+          id: "run_fixture_001",
+          status: "interview_completed"
+        }),
+        context: {}
+      })
+    ]);
+  });
+
   it("blocks interview lifecycle changes when the participant run is stale", async () => {
     const runStore = new InMemoryRunStore([
       createFixtureRun({
@@ -676,6 +750,63 @@ describe("interview session lifecycle", () => {
         id: "interview_session_interrupted_001",
         status: "interrupted",
         safeStatus: "unable_to_complete_interview"
+      })
+    ]);
+  });
+
+  it("triggers automatic scoring after technical interruption", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    const automaticScoringTriggers: AutomaticRunScoringTriggerInput[] = [];
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      createInterviewSessionId: () => "interview_session_interrupted_scoring_001"
+    });
+    const scoringService = new RunService(
+      runStore,
+      new InMemoryParticipantAccessTokenStore([
+        {
+          id: "participant_access_token_gap_map",
+          tokenId: "token_fixture_gap_map",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken),
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          runId: "run_fixture_001",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      participantSlotStore,
+      objectiveVersionStore,
+      new InMemoryConsentVersionStore(),
+      new InMemorySurveyVersionStore([createSurveyVersion()]),
+      {
+        now: () => new Date("2026-05-06T12:21:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret",
+        automaticScoringTrigger: {
+          async triggerAutomaticScoring(input) {
+            automaticScoringTriggers.push(input);
+          }
+        }
+      }
+    );
+
+    await service.startParticipantInterview(rawToken);
+    await scoringService.interruptParticipantInterview(rawToken, {
+      safeStatus: "technical_interruption"
+    });
+
+    expect(automaticScoringTriggers).toEqual([
+      expect.objectContaining({
+        previousStatus: "interview_in_progress",
+        run: expect.objectContaining({
+          id: "run_fixture_001",
+          status: "technical_interruption"
+        }),
+        context: {
+          technicalInterruption: true,
+          partialRun: true
+        }
       })
     ]);
   });

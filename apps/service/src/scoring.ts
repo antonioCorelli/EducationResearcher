@@ -1,4 +1,12 @@
 import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  QueryCommand,
+  TransactWriteCommand
+} from "@aws-sdk/lib-dynamodb";
 import {
   StructuredOutputValidationError,
   executeStructuredAiCall,
@@ -6,8 +14,16 @@ import {
   type StructuredAiProvider
 } from "./ai-provider.js";
 import type { GapMap } from "./gap-map.js";
-import type { ObjectiveVersion } from "./objectives.js";
-import type { InterviewAudioAsset, InterviewTurn, Run, SurveyResponse } from "./runs.js";
+import type { ObjectiveVersion, ObjectiveVersionStore } from "./objectives.js";
+import {
+  applyRunStatusTransition,
+  type InterviewAudioAsset,
+  type InterviewTurn,
+  type Run,
+  type RunStatus,
+  type RunStore,
+  type SurveyResponse
+} from "./runs.js";
 
 export const SCORING_PROMPT_VERSION = "scoring-v1";
 
@@ -53,13 +69,89 @@ export interface ScoringGenerationInput {
   readonly surveyResponses: readonly SurveyResponse[];
   readonly interviewTurns?: readonly InterviewTurn[];
   readonly interviewAudioAssets?: readonly InterviewAudioAsset[];
-  readonly gapMap: GapMap;
+  readonly gapMap?: GapMap;
   readonly objectiveVersions: readonly ObjectiveVersion[];
   readonly trigger: ScoringTrigger;
 }
 
 export interface ScoringGenerator {
   generate(input: ScoringGenerationInput): Promise<ScoringGeneratorOutput>;
+}
+
+export interface ScoringRun {
+  readonly id: string;
+  readonly runId: string;
+  readonly status: ScoringRunStatus;
+  readonly trigger: ScoringTrigger;
+  readonly modelName: string;
+  readonly modelVersion: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
+  readonly objectiveVersionSetHash: string;
+  readonly scoredAt: string;
+  readonly createdAt: string;
+}
+
+export interface ObjectiveScore {
+  readonly id: string;
+  readonly scoringRunId: string;
+  readonly runId: string;
+  readonly objectiveVersionId: string;
+  readonly gradeLabel: string;
+  readonly confidence: number;
+  readonly rationale: string;
+  readonly flags: readonly ScoreFlag[];
+  readonly createdAt: string;
+}
+
+export interface EvidenceCitation {
+  readonly id: string;
+  readonly objectiveScoreId: string;
+  readonly runId: string;
+  readonly sourceType: EvidenceCitationSourceType;
+  readonly sourceId: string;
+  readonly quote: string;
+  readonly audioStartMs?: number;
+  readonly audioEndMs?: number;
+  readonly createdAt: string;
+}
+
+export interface PersistedScoringRun {
+  readonly scoringRun: ScoringRun;
+  readonly objectiveScores: readonly ObjectiveScore[];
+  readonly evidenceCitations: readonly EvidenceCitation[];
+  readonly run: Run;
+}
+
+export interface ScoringStore {
+  saveScoringRun(input: {
+    readonly scoringRun: ScoringRun;
+    readonly objectiveScores: readonly ObjectiveScore[];
+    readonly evidenceCitations: readonly EvidenceCitation[];
+  }): Promise<{
+    readonly scoringRun: ScoringRun;
+    readonly objectiveScores: readonly ObjectiveScore[];
+    readonly evidenceCitations: readonly EvidenceCitation[];
+  }>;
+  listScoringRunsByRun(runId: string): Promise<ScoringRun[]>;
+}
+
+export interface ScoringServiceOptions {
+  readonly now?: () => Date;
+  readonly createScoringRunId?: () => string;
+  readonly createObjectiveScoreId?: () => string;
+  readonly createEvidenceCitationId?: () => string;
+}
+
+export interface AutomaticScoringTriggerInput {
+  readonly run: Run;
+  readonly previousStatus: RunStatus;
+  readonly triggeredAt: string;
+  readonly context?: {
+    readonly staleRun?: boolean;
+    readonly partialRun?: boolean;
+    readonly technicalInterruption?: boolean;
+  };
 }
 
 export class ScoringOutputValidationError extends StructuredOutputValidationError {
@@ -136,6 +228,166 @@ export class AiProviderScoringGenerator implements ScoringGenerator {
 
 export function createConfiguredScoringGenerator() {
   return new AiProviderScoringGenerator();
+}
+
+export class ScoringValidationError extends Error {
+  readonly statusCode = 400;
+
+  constructor(readonly safeMessage: string) {
+    super(safeMessage);
+    this.name = "ScoringValidationError";
+  }
+}
+
+export class ScoringService {
+  private readonly now: () => Date;
+  private readonly createScoringRunId: () => string;
+  private readonly createObjectiveScoreId: () => string;
+  private readonly createEvidenceCitationId: () => string;
+
+  constructor(
+    private readonly runStore: Pick<
+      RunStore,
+      | "getById"
+      | "listSurveyResponsesByRun"
+      | "listGapMapsByRun"
+      | "listInterviewTurnsByRun"
+      | "listInterviewAudioAssetsByRun"
+      | "updateStatus"
+    >,
+    private readonly objectiveVersionStore: Pick<ObjectiveVersionStore, "listByStudy">,
+    private readonly scoringStore: ScoringStore,
+    options: ScoringServiceOptions = {},
+    private readonly scoringGenerator: ScoringGenerator = createConfiguredScoringGenerator()
+  ) {
+    this.now = options.now ?? (() => new Date());
+    this.createScoringRunId = options.createScoringRunId ?? (() => `scoring_run_${randomUUID()}`);
+    this.createObjectiveScoreId = options.createObjectiveScoreId ?? (() => `objective_score_${randomUUID()}`);
+    this.createEvidenceCitationId = options.createEvidenceCitationId ?? (() => `evidence_citation_${randomUUID()}`);
+  }
+
+  async triggerAutomaticScoring(input: AutomaticScoringTriggerInput) {
+    return this.scoreRun(input.run.id, "automatic");
+  }
+
+  async scoreRun(runId: string, trigger: ScoringTrigger): Promise<PersistedScoringRun> {
+    const run = await this.runStore.getById(runId);
+
+    if (!run) {
+      throw new ScoringValidationError("Run was not found.");
+    }
+
+    if (!SCOREABLE_RUN_STATUSES.includes(run.status as ScoreableRunStatus)) {
+      throw new ScoringValidationError("Run is not ready for scoring.");
+    }
+
+    const existingScoringRuns = await this.scoringStore.listScoringRunsByRun(run.id);
+
+    if (trigger === "automatic" && existingScoringRuns.some((scoringRun) => scoringRun.trigger === "automatic")) {
+      const scoredRun = run.status === "scored" ? run : applyRunStatusTransition(run, "scored", this.now());
+      return {
+        scoringRun: existingScoringRuns[0],
+        objectiveScores: [],
+        evidenceCitations: [],
+        run: scoredRun
+      };
+    }
+
+    const objectiveVersions = await this.getObjectiveVersionsForRun(run);
+    const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
+    const gapMap = (await this.runStore.listGapMapsByRun(run.id)).find((candidate) => candidate.status === "generated");
+    const interviewTurns = await this.runStore.listInterviewTurnsByRun(run.id);
+    const interviewAudioAssets = await this.runStore.listInterviewAudioAssetsByRun(run.id);
+    const generated = await this.scoringGenerator.generate({
+      run,
+      surveyResponses,
+      interviewTurns,
+      interviewAudioAssets,
+      ...(gapMap ? { gapMap } : {}),
+      objectiveVersions,
+      trigger
+    });
+    const scoredAt = this.now().toISOString();
+    const scoringRun: ScoringRun = {
+      id: this.createScoringRunId(),
+      runId: run.id,
+      status: "completed",
+      trigger,
+      modelName: generated.modelName,
+      modelVersion: generated.modelVersion,
+      serviceRequestId: generated.serviceRequestId,
+      promptVersion: generated.promptVersion,
+      objectiveVersionSetHash: generated.objectiveVersionSetHash,
+      scoredAt,
+      createdAt: scoredAt
+    };
+    const objectiveScores: ObjectiveScore[] = [];
+    const evidenceCitations: EvidenceCitation[] = [];
+
+    for (const score of generated.scores) {
+      const objectiveScore: ObjectiveScore = {
+        id: this.createObjectiveScoreId(),
+        scoringRunId: scoringRun.id,
+        runId: run.id,
+        objectiveVersionId: score.objectiveVersionId,
+        gradeLabel: score.gradeLabel,
+        confidence: score.confidence,
+        rationale: score.rationale,
+        flags: score.flags,
+        createdAt: scoredAt
+      };
+
+      objectiveScores.push(objectiveScore);
+
+      for (const citation of score.citations) {
+        evidenceCitations.push({
+          id: this.createEvidenceCitationId(),
+          objectiveScoreId: objectiveScore.id,
+          runId: run.id,
+          sourceType: citation.sourceType,
+          sourceId: citation.sourceId,
+          quote: citation.quote,
+          ...(citation.audioStartMs !== undefined ? { audioStartMs: citation.audioStartMs } : {}),
+          ...(citation.audioEndMs !== undefined ? { audioEndMs: citation.audioEndMs } : {}),
+          createdAt: scoredAt
+        });
+      }
+    }
+
+    const persistedScoring = await this.scoringStore.saveScoringRun({
+      scoringRun,
+      objectiveScores,
+      evidenceCitations
+    });
+    const scoredRun = applyRunStatusTransition(run, "scored", this.now());
+    const persistedRun = scoredRun === run ? run : await this.runStore.updateStatus(scoredRun, run.status);
+
+    return {
+      ...persistedScoring,
+      run: persistedRun
+    };
+  }
+
+  private async getObjectiveVersionsForRun(run: Run) {
+    const allVersions = await this.objectiveVersionStore.listByStudy(run.studyId);
+    const versions =
+      run.objectiveVersionIds.length > 0
+        ? allVersions
+        : allVersions.filter((version) => version.isActive && version.isEnabled !== false);
+    const versionsById = new Map(versions.map((version) => [version.id, version]));
+    const runObjectiveIds = run.objectiveVersionIds.length > 0 ? run.objectiveVersionIds : versions.map((version) => version.id);
+    const objectiveVersions = runObjectiveIds.map((objectiveVersionId) => versionsById.get(objectiveVersionId));
+
+    if (objectiveVersions.some((version) => !version)) {
+      throw new ScoringValidationError("Run references an objective version that is not available for scoring.");
+    }
+
+    if (objectiveVersions.length === 0) {
+      throw new ScoringValidationError("At least one objective version is required for scoring.");
+    }
+
+    return (objectiveVersions as ObjectiveVersion[]).sort((left, right) => left.sortOrder - right.sortOrder);
+  }
 }
 
 export function parseScoringGeneratorOutput(
@@ -252,6 +504,10 @@ function parseCitations(value: unknown): readonly ScoringEvidenceCitationOutput[
     throw new ScoringOutputValidationError("Scoring citations must be a list.");
   }
 
+  if (value.length > 20) {
+    throw new ScoringOutputValidationError("Use 20 or fewer scoring citations per objective.");
+  }
+
   return value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new ScoringOutputValidationError(`Citation ${index + 1} must be structured.`);
@@ -331,3 +587,352 @@ const EVIDENCE_CITATION_SOURCE_TYPES = [
   "interview_turn",
   "audio_span"
 ] as const satisfies readonly EvidenceCitationSourceType[];
+
+type ScoreableRunStatus = "interview_completed" | "stale" | "partial" | "technical_interruption" | "scored";
+
+const SCOREABLE_RUN_STATUSES = [
+  "interview_completed",
+  "stale",
+  "partial",
+  "technical_interruption",
+  "scored"
+] as const satisfies readonly ScoreableRunStatus[];
+
+interface ScoringRunItem {
+  readonly entity: "scoring_run";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi1pk: string;
+  readonly gsi1sk: string;
+  readonly id: string;
+  readonly runId: string;
+  readonly status: ScoringRunStatus;
+  readonly trigger: ScoringTrigger;
+  readonly modelName: string;
+  readonly modelVersion: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
+  readonly objectiveVersionSetHash: string;
+  readonly scoredAt: string;
+  readonly createdAt: string;
+}
+
+interface ObjectiveScoreItem {
+  readonly entity: "objective_score";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi1pk: string;
+  readonly gsi1sk: string;
+  readonly gsi2pk: string;
+  readonly gsi2sk: string;
+  readonly id: string;
+  readonly scoringRunId: string;
+  readonly runId: string;
+  readonly objectiveVersionId: string;
+  readonly gradeLabel: string;
+  readonly confidence: number;
+  readonly rationale: string;
+  readonly flags: readonly ScoreFlag[];
+  readonly createdAt: string;
+}
+
+interface EvidenceCitationItem {
+  readonly entity: "evidence_citation";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi1pk: string;
+  readonly gsi1sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+  readonly id: string;
+  readonly objectiveScoreId: string;
+  readonly runId: string;
+  readonly sourceType: EvidenceCitationSourceType;
+  readonly sourceId: string;
+  readonly quote: string;
+  readonly audioStartMs?: number;
+  readonly audioEndMs?: number;
+  readonly createdAt: string;
+}
+
+export class InMemoryScoringStore implements ScoringStore {
+  private readonly scoringRuns = new Map<string, ScoringRun>();
+  private readonly objectiveScores = new Map<string, ObjectiveScore>();
+  private readonly evidenceCitations = new Map<string, EvidenceCitation>();
+
+  constructor(
+    initialScoringRuns: readonly ScoringRun[] = [],
+    initialObjectiveScores: readonly ObjectiveScore[] = [],
+    initialEvidenceCitations: readonly EvidenceCitation[] = []
+  ) {
+    for (const scoringRun of initialScoringRuns) {
+      this.scoringRuns.set(scoringRun.id, scoringRun);
+    }
+
+    for (const objectiveScore of initialObjectiveScores) {
+      this.objectiveScores.set(objectiveScore.id, objectiveScore);
+    }
+
+    for (const evidenceCitation of initialEvidenceCitations) {
+      this.evidenceCitations.set(evidenceCitation.id, evidenceCitation);
+    }
+  }
+
+  async saveScoringRun(input: {
+    readonly scoringRun: ScoringRun;
+    readonly objectiveScores: readonly ObjectiveScore[];
+    readonly evidenceCitations: readonly EvidenceCitation[];
+  }) {
+    if (this.scoringRuns.has(input.scoringRun.id)) {
+      throw new ScoringValidationError("Scoring run already exists.");
+    }
+
+    this.scoringRuns.set(input.scoringRun.id, input.scoringRun);
+
+    for (const objectiveScore of input.objectiveScores) {
+      this.objectiveScores.set(objectiveScore.id, objectiveScore);
+    }
+
+    for (const evidenceCitation of input.evidenceCitations) {
+      this.evidenceCitations.set(evidenceCitation.id, evidenceCitation);
+    }
+
+    return input;
+  }
+
+  async listScoringRunsByRun(runId: string) {
+    return [...this.scoringRuns.values()]
+      .filter((scoringRun) => scoringRun.runId === runId)
+      .sort((left, right) => right.scoredAt.localeCompare(left.scoredAt));
+  }
+
+  async listObjectiveScoresByScoringRun(scoringRunId: string) {
+    return [...this.objectiveScores.values()]
+      .filter((objectiveScore) => objectiveScore.scoringRunId === scoringRunId)
+      .sort((left, right) => left.objectiveVersionId.localeCompare(right.objectiveVersionId));
+  }
+
+  async listEvidenceCitationsByObjectiveScore(objectiveScoreId: string) {
+    return [...this.evidenceCitations.values()]
+      .filter((citation) => citation.objectiveScoreId === objectiveScoreId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+}
+
+export interface DynamoDbScoringStoreOptions {
+  readonly tableName?: string;
+  readonly environment?: string;
+  readonly region?: string;
+  readonly endpoint?: string;
+}
+
+export class DynamoDbScoringStore implements ScoringStore {
+  private readonly documentClient: DynamoDBDocumentClient;
+  private readonly tableName: string;
+
+  constructor(options: DynamoDbScoringStoreOptions = {}) {
+    const region = options.region ?? process.env.AWS_REGION ?? "us-east-1";
+    const client = new DynamoDBClient({
+      region,
+      ...(options.endpoint || process.env.DYNAMODB_ENDPOINT
+        ? {
+            endpoint: options.endpoint ?? process.env.DYNAMODB_ENDPOINT,
+            credentials: {
+              accessKeyId: "local",
+              secretAccessKey: "local"
+            }
+          }
+        : {})
+    });
+
+    this.documentClient = DynamoDBDocumentClient.from(client);
+    this.tableName = options.tableName ?? getEvidenceScoringTableName(options.environment);
+  }
+
+  async saveScoringRun(input: {
+    readonly scoringRun: ScoringRun;
+    readonly objectiveScores: readonly ObjectiveScore[];
+    readonly evidenceCitations: readonly EvidenceCitation[];
+  }) {
+    const transactItems = [
+      {
+        Put: {
+          TableName: this.tableName,
+          Item: toScoringRunItem(input.scoringRun),
+          ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+        }
+      },
+      ...input.objectiveScores.map((score) => ({
+        Put: {
+          TableName: this.tableName,
+          Item: toObjectiveScoreItem(score),
+          ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+        }
+      })),
+      ...input.evidenceCitations.map((citation) => ({
+        Put: {
+          TableName: this.tableName,
+          Item: toEvidenceCitationItem(citation),
+          ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+        }
+      }))
+    ];
+
+    if (transactItems.length <= 100) {
+      await this.documentClient.send(
+        new TransactWriteCommand({
+          TransactItems: transactItems
+        })
+      );
+    } else {
+      await this.documentClient.send(
+        new PutCommand({
+          TableName: this.tableName,
+          Item: toScoringRunItem(input.scoringRun),
+          ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+        })
+      );
+
+      for (const objectiveScore of input.objectiveScores) {
+        await this.documentClient.send(
+          new PutCommand({
+            TableName: this.tableName,
+            Item: toObjectiveScoreItem(objectiveScore),
+            ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+          })
+        );
+      }
+
+      for (const citation of input.evidenceCitations) {
+        await this.documentClient.send(
+          new PutCommand({
+            TableName: this.tableName,
+            Item: toEvidenceCitationItem(citation),
+            ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+          })
+        );
+      }
+    }
+
+    return input;
+  }
+
+  async listScoringRunsByRun(runId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        IndexName: "byRunScoring",
+        KeyConditionExpression: "gsi1pk = :run",
+        ExpressionAttributeValues: {
+          ":run": `RUN#${runId}`
+        }
+      })
+    );
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "scoring_run")
+      .map((item) => toScoringRun(item as ScoringRunItem))
+      .sort((left, right) => right.scoredAt.localeCompare(left.scoredAt));
+  }
+}
+
+export function createConfiguredScoringStore() {
+  return new DynamoDbScoringStore();
+}
+
+function getEvidenceScoringTableName(environment = process.env.EDUCATION_RESEARCHER_ENV ?? "local") {
+  return `education-researcher-${environment}-evidence-scoring`;
+}
+
+function toScoringRunItem(scoringRun: ScoringRun): ScoringRunItem {
+  return {
+    entity: "scoring_run",
+    pk: `RUN#${scoringRun.runId}`,
+    sk: `SCORING_RUN#${scoringRun.scoredAt}#${scoringRun.id}`,
+    gsi1pk: `RUN#${scoringRun.runId}`,
+    gsi1sk: `SCORING_RUN#${scoringRun.scoredAt}#${scoringRun.id}`,
+    id: scoringRun.id,
+    runId: scoringRun.runId,
+    status: scoringRun.status,
+    trigger: scoringRun.trigger,
+    modelName: scoringRun.modelName,
+    modelVersion: scoringRun.modelVersion,
+    serviceRequestId: scoringRun.serviceRequestId,
+    promptVersion: scoringRun.promptVersion,
+    objectiveVersionSetHash: scoringRun.objectiveVersionSetHash,
+    scoredAt: scoringRun.scoredAt,
+    createdAt: scoringRun.createdAt
+  };
+}
+
+function toScoringRun(item: ScoringRunItem): ScoringRun {
+  return {
+    id: item.id,
+    runId: item.runId,
+    status: item.status,
+    trigger: item.trigger,
+    modelName: item.modelName,
+    modelVersion: item.modelVersion,
+    serviceRequestId: item.serviceRequestId,
+    promptVersion: item.promptVersion,
+    objectiveVersionSetHash: item.objectiveVersionSetHash,
+    scoredAt: item.scoredAt,
+    createdAt: item.createdAt
+  };
+}
+
+function toObjectiveScoreItem(score: ObjectiveScore): ObjectiveScoreItem {
+  return {
+    entity: "objective_score",
+    pk: `SCORING_RUN#${score.scoringRunId}`,
+    sk: `OBJECTIVE_SCORE#${score.objectiveVersionId}`,
+    gsi1pk: `RUN#${score.runId}`,
+    gsi1sk: `OBJECTIVE_SCORE#${score.createdAt}#${score.id}`,
+    gsi2pk: `OBJECTIVE_VERSION#${score.objectiveVersionId}`,
+    gsi2sk: `SCORE#${score.createdAt}#${score.id}`,
+    id: score.id,
+    scoringRunId: score.scoringRunId,
+    runId: score.runId,
+    objectiveVersionId: score.objectiveVersionId,
+    gradeLabel: score.gradeLabel,
+    confidence: score.confidence,
+    rationale: score.rationale,
+    flags: score.flags,
+    createdAt: score.createdAt
+  };
+}
+
+function toEvidenceCitationItem(citation: EvidenceCitation): EvidenceCitationItem {
+  return {
+    entity: "evidence_citation",
+    pk: `OBJECTIVE_SCORE#${citation.objectiveScoreId}`,
+    sk: `CITATION#${citation.sourceType}#${citation.id}`,
+    gsi1pk: `RUN#${citation.runId}`,
+    gsi1sk: `CITATION#${citation.createdAt}#${citation.id}`,
+    gsi3pk: `CITATION_TARGET#${citation.sourceType}#${citation.sourceId}`,
+    gsi3sk: `OBJECTIVE_SCORE#${citation.objectiveScoreId}#CITATION#${citation.id}`,
+    id: citation.id,
+    objectiveScoreId: citation.objectiveScoreId,
+    runId: citation.runId,
+    sourceType: citation.sourceType,
+    sourceId: citation.sourceId,
+    quote: citation.quote,
+    ...(citation.audioStartMs !== undefined ? { audioStartMs: citation.audioStartMs } : {}),
+    ...(citation.audioEndMs !== undefined ? { audioEndMs: citation.audioEndMs } : {}),
+    createdAt: citation.createdAt
+  };
+}
+
+export function toSafeScoringValidationResponse(error: unknown) {
+  if (error instanceof ScoringValidationError) {
+    return {
+      statusCode: error.statusCode,
+      body: {
+        error: "Bad Request",
+        message: error.safeMessage
+      }
+    };
+  }
+
+  return undefined;
+}

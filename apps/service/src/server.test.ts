@@ -12,6 +12,7 @@ import {
   type ParticipantAccessToken,
   type Run
 } from "./runs.js";
+import { InMemoryScoringStore } from "./scoring.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -3826,7 +3827,12 @@ describe("participant interview routes", () => {
         now: () => new Date("2026-05-06T12:30:00.000Z"),
         participantAccessTokenSecret: "test-participant-secret"
       },
-      runStore
+      runStore,
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([createFixtureObjectiveVersion()]),
+      scoringStore: new InMemoryScoringStore(),
+      scoringServiceOptions: {
+        now: () => new Date("2026-05-06T12:30:00.000Z")
+      }
     });
 
     const started = await server.inject({
