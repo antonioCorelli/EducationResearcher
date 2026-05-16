@@ -1246,7 +1246,13 @@ describe("participant routes", () => {
 describe("researcher study shell routes", () => {
   it("creates a study shell with required defaults and locked V1 persona", async () => {
     const store = new InMemoryStudyShellStore();
-    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false, studyShellStore: store });
+    const operationsStore = new InMemoryOperationalEventStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      operationalEventStore: operationsStore,
+      studyShellStore: store
+    });
     const response = await server.inject({
       method: "POST",
       url: "/researcher/studies",
@@ -1281,13 +1287,32 @@ describe("researcher study shell routes", () => {
 
     const studies = await store.listByOwner(researcher.id);
     expect(studies).toHaveLength(1);
+    await expect(operationsStore.listAuditLogsByStudy(response.json().study.id)).resolves.toEqual([
+      expect.objectContaining({
+        actorUserId: researcher.id,
+        actorRole: "researcher",
+        entityType: "study",
+        entityId: response.json().study.id,
+        action: "create",
+        metadata: {
+          defaultFreshnessDays: 14,
+          defaultMaxInterviewMinutes: 45
+        }
+      })
+    ]);
 
     await server.close();
   });
 
   it("edits title, freshness days, and max interview minutes", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
-    const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false, studyShellStore: store });
+    const operationsStore = new InMemoryOperationalEventStore();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      operationalEventStore: operationsStore,
+      studyShellStore: store
+    });
     const response = await server.inject({
       method: "PATCH",
       url: "/researcher/studies/study_fixture_001",
@@ -1314,6 +1339,20 @@ describe("researcher study shell routes", () => {
         }
       }
     });
+    await expect(operationsStore.listAuditLogsByStudy("study_fixture_001")).resolves.toEqual([
+      expect.objectContaining({
+        actorUserId: researcher.id,
+        actorRole: "researcher",
+        entityType: "study",
+        entityId: "study_fixture_001",
+        action: "update",
+        metadata: {
+          accessPath: "owner",
+          defaultFreshnessDays: 21,
+          defaultMaxInterviewMinutes: 30
+        }
+      })
+    ]);
 
     await server.close();
   });
@@ -4350,8 +4389,9 @@ describe("researcher evidence citation routes", () => {
         actorUserId: researcher.id,
         entityType: "study",
         entityId: "study_fixture_001",
-        action: "read_raw_artifact",
+        action: "export",
         metadata: expect.objectContaining({
+          accessPath: "owner",
           rawArtifactView: "score_csv_export",
           rowCount: 1
         })
@@ -4410,10 +4450,12 @@ describe("researcher evidence citation routes", () => {
         createdAt: "2026-05-06T12:40:00.000Z"
       })
     ]);
+    const operationsStore = new InMemoryOperationalEventStore();
     const server = buildServer({
       authProvider: createFakeAuthProvider(),
       logger: false,
       objectiveVersionStore: new InMemoryObjectiveVersionStore([originalObjective, revisedObjective]),
+      operationalEventStore: operationsStore,
       runStore: new InMemoryRunStore([scoredRun]),
       scoringStore,
       scoringServiceOptions: {
@@ -4449,6 +4491,21 @@ describe("researcher evidence citation routes", () => {
       }
     });
     await expect(scoringStore.listScoringRunsByRun(scoredRun.id)).resolves.toHaveLength(2);
+    await expect(operationsStore.listAuditLogsByStudy("study_fixture_001")).resolves.toEqual([
+      expect.objectContaining({
+        actorUserId: researcher.id,
+        entityType: "scoring_run",
+        entityId: "scoring_run_rescore_001",
+        action: "manual_rescore",
+        metadata: expect.objectContaining({
+          accessPath: "owner",
+          runId: "run_fixture_001",
+          objectiveScoreCount: 1,
+          evidenceCitationCount: 0,
+          serviceRequestId: "fake-scoring-request"
+        })
+      })
+    ]);
 
     const reviews = await server.inject({
       method: "GET",

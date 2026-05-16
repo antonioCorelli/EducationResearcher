@@ -6,6 +6,9 @@ export type StudyAuthorizationEntity =
   | "study"
   | "participant_slot"
   | "run"
+  | "consent_version"
+  | "survey_version"
+  | "objective_version"
   | "consent_record"
   | "survey_response"
   | "gap_map"
@@ -61,6 +64,16 @@ export interface AuditLogWrite {
   readonly createdAt: string;
 }
 
+export type AuditLogAction =
+  | "create"
+  | "update"
+  | "restore"
+  | "archive"
+  | "export"
+  | "manual_rescore"
+  | StudyAuthorizationAction
+  | `admin_override_${StudyAuthorizationAction}`;
+
 export interface StudyAuthorizationStore {
   getStudyAccess(studyId: string): Promise<StudyAccessRecord | undefined>;
   getStudyIdForParticipantSlot(participantSlotId: string): Promise<string | undefined>;
@@ -89,6 +102,16 @@ export class AdminOverrideError extends Error {
   constructor() {
     super("Admin override access denied.");
     this.name = "AdminOverrideError";
+  }
+}
+
+export class AuditLogUnavailableError extends Error {
+  readonly statusCode = 500;
+  readonly safeMessage = "Audit logging is unavailable.";
+
+  constructor() {
+    super("Audit logging is unavailable.");
+    this.name = "AuditLogUnavailableError";
   }
 }
 
@@ -250,6 +273,16 @@ export class StudyAuthorizationService {
     entityId: string,
     metadata: Record<string, unknown> = {}
   ) {
+    await this.recordSensitiveAction(access, entityType, entityId, access.action, metadata);
+  }
+
+  async recordSensitiveAction(
+    access: AuthorizedStudyAccess,
+    entityType: StudyAuthorizationEntity,
+    entityId: string,
+    action: AuditLogAction,
+    metadata: Record<string, unknown> = {}
+  ) {
     await this.store.writeAuditLog({
       id: this.createAuditLogId(),
       actorUserId: access.actorUserId,
@@ -257,11 +290,32 @@ export class StudyAuthorizationService {
       studyId: access.studyId,
       entityType,
       entityId,
-      action: access.action,
+      action,
       metadata: {
         accessPath: access.accessPath,
         ...metadata
       },
+      createdAt: this.now().toISOString()
+    });
+  }
+
+  async recordStudyAction(
+    actor: SessionUser,
+    studyId: string,
+    entityType: StudyAuthorizationEntity,
+    entityId: string,
+    action: AuditLogAction,
+    metadata: Record<string, unknown> = {}
+  ) {
+    await this.store.writeAuditLog({
+      id: this.createAuditLogId(),
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      studyId,
+      entityType,
+      entityId,
+      action,
+      metadata,
       createdAt: this.now().toISOString()
     });
   }
@@ -355,11 +409,11 @@ export class StudyAuthorizationService {
 }
 
 export function toSafeAuthorizationResponse(error: unknown) {
-  if (error instanceof AuthorizationError || error instanceof AdminOverrideError) {
+  if (error instanceof AuthorizationError || error instanceof AdminOverrideError || error instanceof AuditLogUnavailableError) {
     return {
       statusCode: error.statusCode,
       body: {
-        error: "Forbidden",
+        error: error.statusCode === 500 ? "Internal Server Error" : "Forbidden",
         message: error.safeMessage
       }
     };

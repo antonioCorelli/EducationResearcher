@@ -1099,6 +1099,10 @@ export function buildServer(options: BuildServerOptions = {}) {
   server.post("/researcher/studies", { preHandler: requireResearcher }, async (request, reply) => {
     try {
       const study = await studyShellService.createStudyShell(request.user!, coerceCreateStudyShellInput(request.body));
+      await studyAuthorization.recordStudyAction(request.user!, study.id, "study", study.id, "create", {
+        defaultFreshnessDays: study.defaultFreshnessDays,
+        defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes
+      });
 
       return reply.code(201).send({
         study
@@ -1142,7 +1146,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1156,6 +1160,10 @@ export function buildServer(options: BuildServerOptions = {}) {
         }
 
         const updatedStudy = await studyShellService.updateStudyShell(study, coerceUpdateStudyShellInput(request.body));
+        await studyAuthorization.recordSensitiveAction(access, "study", updatedStudy.id, "update", {
+          defaultFreshnessDays: updatedStudy.defaultFreshnessDays,
+          defaultMaxInterviewMinutes: updatedStudy.defaultMaxInterviewMinutes
+        });
 
         return {
           study: updatedStudy
@@ -1198,7 +1206,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1212,6 +1220,10 @@ export function buildServer(options: BuildServerOptions = {}) {
         }
 
         const consentVersion = await consentService.saveConsent(study, coerceSaveConsentInput(request.body));
+        await studyAuthorization.recordSensitiveAction(access, "consent_version", consentVersion.id, "create", {
+          versionNumber: consentVersion.versionNumber,
+          consentMethod: consentVersion.consentMethod
+        });
 
         return reply.code(201).send({
           consentVersion
@@ -1234,7 +1246,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1251,6 +1263,10 @@ export function buildServer(options: BuildServerOptions = {}) {
           study,
           coerceRestoreVersionNumberInput(request.body, "Consent")
         );
+        await studyAuthorization.recordSensitiveAction(access, "consent_version", consentVersion.id, "restore", {
+          versionNumber: consentVersion.versionNumber,
+          consentMethod: consentVersion.consentMethod
+        });
 
         return {
           consentVersion
@@ -1293,11 +1309,14 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const participantSlot = await participantSlotService.createParticipantSlot(
           request.params.studyId,
           coerceCreateParticipantSlotInput(request.body)
         );
+        await studyAuthorization.recordSensitiveAction(access, "participant_slot", participantSlot.id, "create", {
+          codeSource: participantSlot.codeSource
+        });
 
         return reply.code(201).send({
           participantSlot
@@ -1322,11 +1341,17 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const result = await participantSlotService.importParticipantSlots(
           request.params.studyId,
           coerceImportParticipantSlotsInput(request.body)
         );
+        await studyAuthorization.recordSensitiveAction(access, "study", request.params.studyId, "create", {
+          entityBatchType: "participant_slot",
+          createdCount: result.createdParticipantSlots.length,
+          rejectedCount: result.rejectedRows.length,
+          codeSource: "researcher_supplied"
+        });
 
         return reply.code(201).send(result);
       } catch (error) {
@@ -1349,11 +1374,16 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const result = await participantSlotService.generateParticipantSlots(
           request.params.studyId,
           coerceGenerateParticipantSlotsInput(request.body)
         );
+        await studyAuthorization.recordSensitiveAction(access, "study", request.params.studyId, "create", {
+          entityBatchType: "participant_slot",
+          createdCount: result.createdParticipantSlots.length,
+          codeSource: "platform_generated"
+        });
 
         return reply.code(201).send(result);
       } catch (error) {
@@ -1376,11 +1406,14 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const participantSlot = await participantSlotService.archiveParticipantSlot(
           request.params.studyId,
           request.params.participantSlotId
         );
+        await studyAuthorization.recordSensitiveAction(access, "participant_slot", participantSlot.id, "archive", {
+          status: participantSlot.status
+        });
 
         return {
           participantSlot
@@ -1472,7 +1505,7 @@ export function buildServer(options: BuildServerOptions = {}) {
         const participantSlots = await participantSlotStore.listByStudy(request.params.studyId);
         const exportResult = await scoringService.generateScoreCsvExport(request.params.studyId, participantSlots);
 
-        await studyAuthorization.recordSensitiveRead(access, "study", request.params.studyId, {
+        await studyAuthorization.recordSensitiveAction(access, "study", request.params.studyId, "export", {
           rawArtifactView: "score_csv_export",
           rowCount: exportResult.rowCount
         });
@@ -1528,10 +1561,17 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const result = await scoringService.triggerManualRescore({
           studyId: request.params.studyId,
           runId: request.params.runId
+        });
+        await studyAuthorization.recordSensitiveAction(access, "scoring_run", result.scoringRun.id, "manual_rescore", {
+          runId: request.params.runId,
+          objectiveScoreCount: result.objectiveScores.length,
+          evidenceCitationCount: result.evidenceCitations.length,
+          serviceRequestId: result.scoringRun.serviceRequestId,
+          objectiveVersionSetHash: result.scoringRun.objectiveVersionSetHash
         });
 
         return reply.code(201).send(result);
@@ -1552,7 +1592,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1566,6 +1606,11 @@ export function buildServer(options: BuildServerOptions = {}) {
         }
 
         const result = await runService.createRuns(study, coerceCreateRunsInput(request.body));
+        await studyAuthorization.recordSensitiveAction(access, "study", request.params.studyId, "create", {
+          entityBatchType: "run",
+          runCount: result.createdRuns.length,
+          participantSlotIds: result.createdRuns.map((run) => run.participantSlotId)
+        });
 
         return reply.code(201).send(result);
       } catch (error) {
@@ -1637,7 +1682,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1651,6 +1696,11 @@ export function buildServer(options: BuildServerOptions = {}) {
         }
 
         const surveyVersion = await surveyService.saveSurvey(study, coerceSaveSurveyInput(request.body));
+        await studyAuthorization.recordSensitiveAction(access, "survey_version", surveyVersion.id, "create", {
+          versionNumber: surveyVersion.versionNumber,
+          questionCount: surveyVersion.layoutItems.filter((item) => item.type === "question").length,
+          groupCount: surveyVersion.groups.length
+        });
 
         return reply.code(201).send({
           surveyVersion
@@ -1673,7 +1723,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1690,6 +1740,11 @@ export function buildServer(options: BuildServerOptions = {}) {
           study,
           coerceRestoreVersionNumberInput(request.body, "Survey")
         );
+        await studyAuthorization.recordSensitiveAction(access, "survey_version", surveyVersion.id, "restore", {
+          versionNumber: surveyVersion.versionNumber,
+          questionCount: surveyVersion.layoutItems.filter((item) => item.type === "question").length,
+          groupCount: surveyVersion.groups.length
+        });
 
         return {
           surveyVersion
@@ -1732,7 +1787,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1749,6 +1804,11 @@ export function buildServer(options: BuildServerOptions = {}) {
           request.params.studyId,
           coerceSaveObjectivesInput(request.body)
         );
+        await studyAuthorization.recordSensitiveAction(access, "study", request.params.studyId, "create", {
+          entityBatchType: "objective_version",
+          objectiveVersionCount: objectiveVersions.length,
+          objectiveKeys: objectiveVersions.map((objectiveVersion) => objectiveVersion.objectiveKey)
+        });
 
         return reply.code(201).send({
           objectiveVersions
@@ -1771,7 +1831,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "write");
         const study = await studyShellStore.getById(request.params.studyId);
 
         if (!study) {
@@ -1790,6 +1850,10 @@ export function buildServer(options: BuildServerOptions = {}) {
           restoreInput.objectiveKey,
           restoreInput.versionNumber
         );
+        await studyAuthorization.recordSensitiveAction(access, "objective_version", objectiveVersion.id, "restore", {
+          objectiveKey: objectiveVersion.objectiveKey,
+          versionNumber: objectiveVersion.versionNumber
+        });
 
         return {
           objectiveVersion

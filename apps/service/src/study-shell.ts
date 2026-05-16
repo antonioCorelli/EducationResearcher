@@ -1,7 +1,12 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { SessionUser } from "./auth.js";
-import type { AuditLogWrite, StudyAccessRecord, StudyAuthorizationStore } from "./authorization.js";
+import {
+  AuditLogUnavailableError,
+  type AuditLogWrite,
+  type StudyAccessRecord,
+  type StudyAuthorizationStore
+} from "./authorization.js";
 import type { AuditLogStore } from "./operational-events.js";
 
 export const DEFAULT_FRESHNESS_DAYS = 14;
@@ -331,7 +336,11 @@ export class StudyShellAuthorizationStore implements StudyAuthorizationStore {
   }
 
   async writeAuditLog(entry: AuditLogWrite) {
-    await this.auditLogStore?.writeAuditLog(entry);
+    if (!this.auditLogStore) {
+      throw new AuditLogUnavailableError();
+    }
+
+    await this.auditLogStore.writeAuditLog(entry);
   }
 }
 

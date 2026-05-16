@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionUser } from "./auth.js";
 import {
   AdminOverrideError,
+  AuditLogUnavailableError,
   AuthorizationError,
   type AuditLogWrite,
   type RawArtifactEntity,
@@ -264,6 +265,34 @@ describe("study authorization helpers", () => {
     ]);
   });
 
+  it("records sensitive actions without raw metadata content", async () => {
+    const { authorization, store } = createAuthorizationService();
+    const access = await authorization.requireStudyAccess(researcherOne, "study_alpha", "write");
+
+    await authorization.recordSensitiveAction(access, "survey_version", "survey_version_alpha", "create", {
+      versionNumber: 2,
+      questionCount: 3
+    });
+
+    expect(store.auditLogs).toEqual([
+      {
+        id: "audit_log_test_001",
+        actorUserId: researcherOne.id,
+        actorRole: "researcher",
+        studyId: "study_alpha",
+        entityType: "survey_version",
+        entityId: "survey_version_alpha",
+        action: "create",
+        metadata: {
+          accessPath: "owner",
+          versionNumber: 2,
+          questionCount: 3
+        },
+        createdAt: "2026-05-06T15:00:00.000Z"
+      }
+    ]);
+  });
+
   it("rejects missing admin override reasons and researcher override attempts", async () => {
     const { authorization } = createAuthorizationService();
 
@@ -277,5 +306,13 @@ describe("study authorization helpers", () => {
         reason: "Trying to bypass tenant isolation"
       })
     ).rejects.toBeInstanceOf(AdminOverrideError);
+
+    expect(toSafeAuthorizationResponse(new AuditLogUnavailableError())).toEqual({
+      statusCode: 500,
+      body: {
+        error: "Internal Server Error",
+        message: "Audit logging is unavailable."
+      }
+    });
   });
 });
