@@ -10,6 +10,7 @@ import type {
   RunState,
   ScoreFlag,
   ScoreReviewState,
+  ScoringRun,
   StudySetupTab,
   StudyShell
 } from "../App";
@@ -19,8 +20,10 @@ interface ResearcherRunsProps {
   readonly isLoadingEvidenceCitationId: string | null;
   readonly isLoadingRawEvidenceRunId: string | null;
   readonly isCreatingRuns: boolean;
+  readonly isRescoringRunId: string | null;
   readonly participantSlots: readonly ParticipantSlot[];
   readonly rawEvidenceState: RawEvidenceState;
+  readonly rescoreError: string;
   readonly runError: string;
   readonly runState: RunState;
   readonly scoreReviewState: ScoreReviewState;
@@ -33,6 +36,7 @@ interface ResearcherRunsProps {
   readonly onDismissRawEvidence: () => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
   readonly onOpenRawEvidence: (runId: string) => void;
+  readonly onManualRescore: (runId: string) => void;
   readonly onSelectedRunParticipantSlotIdsChange: (participantSlotIds: readonly string[]) => void;
 }
 
@@ -41,8 +45,10 @@ export function ResearcherRuns({
   isLoadingEvidenceCitationId,
   isLoadingRawEvidenceRunId,
   isCreatingRuns,
+  isRescoringRunId,
   participantSlots,
   rawEvidenceState,
+  rescoreError,
   runError,
   runState,
   scoreReviewState,
@@ -55,6 +61,7 @@ export function ResearcherRuns({
   onDismissRawEvidence,
   onOpenEvidenceCitation,
   onOpenRawEvidence,
+  onManualRescore,
   onSelectedRunParticipantSlotIdsChange
 }: ResearcherRunsProps) {
   const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
@@ -173,9 +180,12 @@ export function ResearcherRuns({
         selectedEvidenceCitation={selectedEvidenceCitation}
         selectedEvidenceCitationError={selectedEvidenceCitationError}
         rawEvidenceState={rawEvidenceState}
+        rescoreError={rescoreError}
         onDismissEvidenceCitation={onDismissEvidenceCitation}
         onDismissRawEvidence={onDismissRawEvidence}
+        onManualRescore={onManualRescore}
         onOpenEvidenceCitation={onOpenEvidenceCitation}
+        isRescoringRunId={isRescoringRunId}
       />
     </section>
   );
@@ -189,9 +199,12 @@ interface ScoreReviewListProps {
   readonly selectedEvidenceCitation: ResolvedEvidenceCitation | null;
   readonly selectedEvidenceCitationError: string;
   readonly rawEvidenceState: RawEvidenceState;
+  readonly rescoreError: string;
   readonly onDismissEvidenceCitation: () => void;
   readonly onDismissRawEvidence: () => void;
+  readonly onManualRescore: (runId: string) => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+  readonly isRescoringRunId: string | null;
 }
 
 export function ScoreReviewList({
@@ -202,8 +215,11 @@ export function ScoreReviewList({
   selectedEvidenceCitation,
   selectedEvidenceCitationError,
   rawEvidenceState,
+  rescoreError,
   onDismissEvidenceCitation,
   onDismissRawEvidence,
+  onManualRescore,
+  isRescoringRunId,
   onOpenEvidenceCitation
 }: ScoreReviewListProps) {
   const scoredReviews = scoreReviews.filter((review) => review.scoringRun);
@@ -231,26 +247,37 @@ export function ScoreReviewList({
                   </p>
                 </div>
                 {review.scoringRun ? (
-                  <dl className="score-metadata">
-                    <div>
-                      <dt>Scored</dt>
-                      <dd>{formatDateTime(review.scoringRun.scoredAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Trigger</dt>
-                      <dd>{formatScoringTrigger(review.scoringRun.trigger)}</dd>
-                    </div>
-                    <div>
-                      <dt>Model</dt>
-                      <dd>{review.scoringRun.modelName}</dd>
-                    </div>
-                    <div>
-                      <dt>Prompt</dt>
-                      <dd>{review.scoringRun.promptVersion}</dd>
-                    </div>
-                  </dl>
+                  <div className="score-review-actions">
+                    <dl className="score-metadata">
+                      <div>
+                        <dt>Latest scored</dt>
+                        <dd>{formatDateTime(review.scoringRun.scoredAt)}</dd>
+                      </div>
+                      <div>
+                        <dt>Trigger</dt>
+                        <dd>{formatScoringTrigger(review.scoringRun.trigger)}</dd>
+                      </div>
+                      <div>
+                        <dt>Model</dt>
+                        <dd>{review.scoringRun.modelName}</dd>
+                      </div>
+                      <div>
+                        <dt>Prompt</dt>
+                        <dd>{review.scoringRun.promptVersion}</dd>
+                      </div>
+                    </dl>
+                    <button
+                      className="secondary-button compact-button"
+                      disabled={isRescoringRunId === review.run.id}
+                      onClick={() => onManualRescore(review.run.id)}
+                      type="button"
+                    >
+                      {isRescoringRunId === review.run.id ? "Rescoring" : "Rescore"}
+                    </button>
+                  </div>
                 ) : null}
               </div>
+              <ScoringHistory scoringRuns={review.scoringRuns} />
               <div className="objective-score-list">
                 {review.objectiveScores.map(({ objectiveVersion, score, citations }) => {
                   const lowConfidence = score.confidence < 0.5 || score.flags.includes("low_confidence");
@@ -289,11 +316,28 @@ export function ScoreReviewList({
           ))}
         </div>
       ) : null}
+      {rescoreError ? <p className="form-error">{rescoreError}</p> : null}
       {selectedEvidenceCitationError ? <p className="form-error">{selectedEvidenceCitationError}</p> : null}
       {selectedEvidenceCitation ? (
         <EvidenceCitationPanel citation={selectedEvidenceCitation} onDismiss={onDismissEvidenceCitation} />
       ) : null}
       <RawEvidencePanel rawEvidenceState={rawEvidenceState} onDismiss={onDismissRawEvidence} />
+    </div>
+  );
+}
+
+function ScoringHistory({ scoringRuns }: { readonly scoringRuns: readonly ScoringRun[] }) {
+  if (scoringRuns.length <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="scoring-history" aria-label="Scoring history">
+      {scoringRuns.map((scoringRun, index) => (
+        <span className={index === 0 ? "score-history-chip latest-score-history-chip" : "score-history-chip"} key={scoringRun.id}>
+          {index === 0 ? "Latest" : "Previous"} - {formatScoringTrigger(scoringRun.trigger)} - {formatDateTime(scoringRun.scoredAt)}
+        </span>
+      ))}
     </div>
   );
 }

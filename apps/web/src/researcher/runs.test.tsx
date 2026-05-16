@@ -36,6 +36,21 @@ function createScoreReview(runId: string, flags: RunScoreReview["objectiveScores
       scoredAt: "2026-05-06T12:40:00.000Z",
       createdAt: "2026-05-06T12:40:00.000Z"
     },
+    scoringRuns: [
+      {
+        id: `scoring_${runId}`,
+        runId,
+        status: "completed",
+        trigger: "automatic",
+        modelName: "fake-scoring",
+        modelVersion: "local-1",
+        serviceRequestId: "req_scoring_001",
+        promptVersion: "scoring-v1",
+        objectiveVersionSetHash: "sha256:fixture",
+        scoredAt: "2026-05-06T12:40:00.000Z",
+        createdAt: "2026-05-06T12:40:00.000Z"
+      }
+    ],
     objectiveScores: [
       {
         objectiveVersion: {
@@ -96,9 +111,12 @@ describe("ScoreReviewList", () => {
         selectedEvidenceCitation={null}
         selectedEvidenceCitationError=""
         rawEvidenceState={{ status: "idle" }}
+        rescoreError=""
         onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
+        onManualRescore={noop}
         onOpenEvidenceCitation={noop}
+        isRescoringRunId={null}
       />
     );
 
@@ -121,6 +139,7 @@ describe("ScoreReviewList", () => {
         scoreReviews={[]}
         selectedEvidenceCitation={null}
         selectedEvidenceCitationError=""
+        rescoreError=""
         rawEvidenceState={{
           status: "ready",
           focusSourceId: "interview_turn_001",
@@ -159,7 +178,9 @@ describe("ScoreReviewList", () => {
         }}
         onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
+        onManualRescore={noop}
         onOpenEvidenceCitation={noop}
+        isRescoringRunId={null}
       />
     );
 
@@ -168,5 +189,55 @@ describe("ScoreReviewList", () => {
     expect(markup).toContain("The second example made the pattern much clearer.");
     expect(markup).toContain("Open signed audio link");
     expect(markup).toContain("focused-raw-evidence");
+  });
+
+  it("distinguishes the latest score from older manual rescoring history", () => {
+    const review = createScoreReview("run_rescored_001", []);
+    const markup = renderToStaticMarkup(
+      <ScoreReviewList
+        isLoadingEvidenceCitationId={null}
+        participantCodeBySlotId={new Map([["slot_fixture_001", "P001"]])}
+        scoreReviewState={{ status: "ready", scoreReviews: [review] }}
+        scoreReviews={[
+          {
+            ...review,
+            scoringRun: {
+              ...review.scoringRun!,
+              id: "scoring_run_latest_001",
+              trigger: "manual_rescore",
+              scoredAt: "2026-05-07T12:40:00.000Z"
+            },
+            scoringRuns: [
+              {
+                ...review.scoringRun!,
+                id: "scoring_run_latest_001",
+                trigger: "manual_rescore",
+                scoredAt: "2026-05-07T12:40:00.000Z"
+              },
+              {
+                ...review.scoringRun!,
+                id: "scoring_run_original_001",
+                trigger: "automatic",
+                scoredAt: "2026-05-06T12:40:00.000Z"
+              }
+            ]
+          }
+        ]}
+        selectedEvidenceCitation={null}
+        selectedEvidenceCitationError=""
+        rescoreError=""
+        rawEvidenceState={{ status: "idle" }}
+        onDismissEvidenceCitation={noop}
+        onDismissRawEvidence={noop}
+        onManualRescore={noop}
+        onOpenEvidenceCitation={noop}
+        isRescoringRunId={null}
+      />
+    );
+
+    expect(markup).toContain("Latest scored");
+    expect(markup).toContain("Manual rescore");
+    expect(markup).toContain("Previous - Automatic");
+    expect(markup).toContain("Rescore");
   });
 });

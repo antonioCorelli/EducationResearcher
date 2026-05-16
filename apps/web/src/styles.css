@@ -1151,10 +1151,38 @@ button.version-chip:hover {
   font-size: 0.82rem;
 }
 
+.score-review-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
 .score-metadata div,
 .evidence-details div {
   display: grid;
   gap: 2px;
+}
+
+.scoring-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.score-history-chip {
+  border: 1px solid #d7e0da;
+  border-radius: 999px;
+  background: #f7faf8;
+  color: #485466;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.latest-score-history-chip {
+  border-color: #25694f;
+  background: #e9f5ef;
+  color: #163d2f;
 }
 
 .score-grade-stack {

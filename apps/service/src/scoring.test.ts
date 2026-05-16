@@ -671,6 +671,64 @@ describe("automatic scoring job", () => {
     expect(result.run.status).toBe("scored");
   });
 
+  it("manual rescoring uses latest active objective versions while preserving prior scoring runs", async () => {
+    const scoredRun: Run = { ...run, status: "scored", objectiveVersionIds: ["objective_version_001"] };
+    const revisedObjective: ObjectiveVersion = {
+      ...objective,
+      id: "objective_version_002",
+      versionNumber: 2,
+      title: "Revised Reasoning Quality",
+      gradeScale: ["A", "B"],
+      createdAt: "2026-05-07T12:00:00.000Z"
+    };
+    const scoringStore = new InMemoryScoringStore([
+      {
+        id: "scoring_run_original_001",
+        runId: scoredRun.id,
+        status: "completed",
+        trigger: "automatic",
+        modelName: "fake-scoring",
+        modelVersion: "local-1",
+        serviceRequestId: "req_original",
+        promptVersion: SCORING_PROMPT_VERSION,
+        objectiveVersionSetHash: createObjectiveVersionSetHash([objective]),
+        scoredAt: "2026-05-06T12:40:00.000Z",
+        createdAt: "2026-05-06T12:40:00.000Z"
+      }
+    ]);
+    const service = new ScoringService(
+      new InMemoryRunStore([scoredRun]),
+      new InMemoryObjectiveVersionStore([{ ...objective, isActive: false }, revisedObjective]),
+      scoringStore,
+      {
+        createScoringRunId: () => "scoring_run_rescore_001",
+        createObjectiveScoreId: () => "objective_score_rescore_001",
+        now: () => new Date("2026-05-07T12:45:00.000Z")
+      }
+    );
+
+    const result = await service.triggerManualRescore({
+      studyId: scoredRun.studyId,
+      runId: scoredRun.id
+    });
+
+    expect(result.scoringRun).toMatchObject({
+      id: "scoring_run_rescore_001",
+      trigger: "manual_rescore",
+      objectiveVersionSetHash: createObjectiveVersionSetHash([revisedObjective])
+    });
+    expect(result.objectiveScores).toEqual([
+      expect.objectContaining({
+        objectiveVersionId: "objective_version_002",
+        gradeLabel: "A"
+      })
+    ]);
+    await expect(scoringStore.listScoringRunsByRun(scoredRun.id)).resolves.toEqual([
+      expect.objectContaining({ id: "scoring_run_rescore_001", trigger: "manual_rescore" }),
+      expect.objectContaining({ id: "scoring_run_original_001", trigger: "automatic" })
+    ]);
+  });
+
   it("persists mocked low-confidence, partial, technical, and contradiction flags", async () => {
     const interruptedRun: Run = { ...run, status: "technical_interruption" };
     const runStore = new InMemoryRunStore([interruptedRun]);

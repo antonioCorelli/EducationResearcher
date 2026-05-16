@@ -237,6 +237,7 @@ export interface ObjectiveScoreReview {
 export interface RunScoreReview {
   readonly run: Run;
   readonly scoringRun?: ScoringRun;
+  readonly scoringRuns: readonly ScoringRun[];
   readonly objectiveScores: readonly ObjectiveScoreReview[];
 }
 
@@ -787,6 +788,20 @@ async function fetchRawEvidence(accessToken: string, studyId: string, runId: str
   return (await response.json()) as RawEvidence;
 }
 
+async function triggerManualRescore(accessToken: string, studyId: string, runId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/runs/${runId}/rescore`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message ?? "Unable to rescore run.");
+  }
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -827,6 +842,8 @@ export function App() {
   const [isLoadingEvidenceCitationId, setIsLoadingEvidenceCitationId] = useState<string | null>(null);
   const [rawEvidenceState, setRawEvidenceState] = useState<RawEvidenceState>({ status: "idle" });
   const [isLoadingRawEvidenceRunId, setIsLoadingRawEvidenceRunId] = useState<string | null>(null);
+  const [isRescoringRunId, setIsRescoringRunId] = useState<string | null>(null);
+  const [rescoreError, setRescoreError] = useState("");
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
   const [consentError, setConsentError] = useState("");
@@ -1219,6 +1236,27 @@ export function App() {
     setRunState({ status: "ready", ...runs });
     const scoreReviews = await fetchScoreReviews(token, studyId);
     setScoreReviewState({ status: "ready", ...scoreReviews });
+  }
+
+  async function handleManualRescore(runId: string) {
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setRescoreError("Select a study before rescoring a run.");
+      return;
+    }
+
+    setIsRescoringRunId(runId);
+    setRescoreError("");
+
+    try {
+      await triggerManualRescore(token, selectedStudyId, runId);
+      await reloadRuns(token, selectedStudyId);
+    } catch (error) {
+      setRescoreError(error instanceof Error ? error.message : "Unable to rescore run.");
+    } finally {
+      setIsRescoringRunId(null);
+    }
   }
 
   async function handleSaveParticipantSlot(event: FormEvent<HTMLFormElement>) {
@@ -2357,7 +2395,10 @@ export function App() {
             onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
             onOpenEvidenceCitation={handleOpenEvidenceCitation}
             onOpenRawEvidence={openRawEvidence}
+            onManualRescore={handleManualRescore}
             onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
+            isRescoringRunId={isRescoringRunId}
+            rescoreError={rescoreError}
           />
         }
         selectedStudyId={selectedStudyId}

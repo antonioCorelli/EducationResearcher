@@ -4131,6 +4131,97 @@ describe("researcher evidence citation routes", () => {
     await server.close();
   });
 
+  it("allows an authorized researcher to manually rescore a run with latest active objectives", async () => {
+    const scoredRun = createFixtureRun({ status: "scored" });
+    const originalObjective = { ...createFixtureObjectiveVersion(), isActive: false };
+    const revisedObjective = {
+      ...createFixtureObjectiveVersion(),
+      id: "objective_version_002",
+      versionNumber: 2,
+      title: "Revised Reasoning Quality",
+      gradeScale: ["A", "B"],
+      isActive: true,
+      createdAt: "2026-05-07T12:00:00.000Z"
+    };
+    const scoringStore = new InMemoryScoringStore([
+      createFixtureScoringRun({
+        id: "scoring_run_original_001",
+        runId: scoredRun.id,
+        scoredAt: "2026-05-06T12:40:00.000Z",
+        createdAt: "2026-05-06T12:40:00.000Z"
+      })
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([originalObjective, revisedObjective]),
+      runStore: new InMemoryRunStore([scoredRun]),
+      scoringStore,
+      scoringServiceOptions: {
+        createScoringRunId: () => "scoring_run_rescore_001",
+        createObjectiveScoreId: () => "objective_score_rescore_001",
+        now: () => new Date("2026-05-07T12:45:00.000Z")
+      },
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/researcher/studies/study_fixture_001/runs/run_fixture_001/rescore",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      scoringRun: {
+        id: "scoring_run_rescore_001",
+        trigger: "manual_rescore"
+      },
+      objectiveScores: [
+        {
+          id: "objective_score_rescore_001",
+          objectiveVersionId: "objective_version_002",
+          gradeLabel: "A"
+        }
+      ],
+      run: {
+        status: "scored"
+      }
+    });
+    await expect(scoringStore.listScoringRunsByRun(scoredRun.id)).resolves.toHaveLength(2);
+
+    const reviews = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/score-reviews",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(reviews.statusCode).toBe(200);
+    expect(reviews.json()).toMatchObject({
+      scoreReviews: [
+        {
+          scoringRun: {
+            id: "scoring_run_rescore_001",
+            trigger: "manual_rescore"
+          },
+          scoringRuns: [
+            {
+              id: "scoring_run_rescore_001"
+            },
+            {
+              id: "scoring_run_original_001"
+            }
+          ]
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
   it("resolves authorized citations to raw survey evidence", async () => {
     const run = createFixtureRun({ status: "interview_completed" });
     const runStore = new InMemoryRunStore([run]);

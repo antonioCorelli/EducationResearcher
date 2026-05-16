@@ -167,6 +167,7 @@ export interface ResearcherObjectiveScoreReview {
 export interface ResearcherRunScoreReview {
   readonly run: Run;
   readonly scoringRun?: ScoringRun;
+  readonly scoringRuns: readonly ScoringRun[];
   readonly objectiveScores: readonly ResearcherObjectiveScoreReview[];
 }
 
@@ -336,17 +337,29 @@ export class ScoringService {
     return this.scoreRun(input.run.id, "automatic");
   }
 
+  async triggerManualRescore(input: { readonly studyId: string; readonly runId: string }) {
+    const run = await this.runStore.getById(input.runId);
+
+    if (!run || run.studyId !== input.studyId) {
+      throw new ScoringNotFoundError("Run was not found.");
+    }
+
+    return this.scoreRun(run.id, "manual_rescore");
+  }
+
   async listScoreReviewsForStudy(studyId: string): Promise<{ readonly scoreReviews: readonly ResearcherRunScoreReview[] }> {
     const runs = (await this.runStore.listByStudy(studyId)).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
     const objectiveVersions = await this.objectiveVersionStore.listByStudy(studyId);
     const objectiveVersionsById = new Map(objectiveVersions.map((objectiveVersion) => [objectiveVersion.id, objectiveVersion]));
     const scoreReviews = await Promise.all(
       runs.map(async (run): Promise<ResearcherRunScoreReview> => {
-        const scoringRun = (await this.scoringStore.listScoringRunsByRun(run.id))[0];
+        const scoringRuns = await this.scoringStore.listScoringRunsByRun(run.id);
+        const scoringRun = scoringRuns[0];
 
         if (!scoringRun) {
           return {
             run,
+            scoringRuns,
             objectiveScores: []
           };
         }
@@ -382,6 +395,7 @@ export class ScoringService {
         return {
           run,
           scoringRun,
+          scoringRuns,
           objectiveScores: objectiveScoreReviews.sort(
             (left, right) => left.objectiveVersion.sortOrder - right.objectiveVersion.sortOrder
           )
@@ -507,17 +521,20 @@ export class ScoringService {
 
     const existingScoringRuns = await this.scoringStore.listScoringRunsByRun(run.id);
 
-    if (trigger === "automatic" && existingScoringRuns.some((scoringRun) => scoringRun.trigger === "automatic")) {
+    const existingAutomaticScoringRun = existingScoringRuns.find((scoringRun) => scoringRun.trigger === "automatic");
+
+    if (trigger === "automatic" && existingAutomaticScoringRun) {
       const scoredRun = run.status === "scored" ? run : applyRunStatusTransition(run, "scored", this.now());
       return {
-        scoringRun: existingScoringRuns[0],
+        scoringRun: existingAutomaticScoringRun,
         objectiveScores: [],
         evidenceCitations: [],
         run: scoredRun
       };
     }
 
-    const objectiveVersions = await this.getObjectiveVersionsForRun(run);
+    const objectiveVersions =
+      trigger === "manual_rescore" ? await this.getLatestObjectiveVersionsForRescore(run) : await this.getObjectiveVersionsForRun(run);
     const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
     const gapMap = (await this.runStore.listGapMapsByRun(run.id)).find((candidate) => candidate.status === "generated");
     const interviewTurns = await this.runStore.listInterviewTurnsByRun(run.id);
@@ -611,6 +628,18 @@ export class ScoringService {
     }
 
     return (objectiveVersions as ObjectiveVersion[]).sort((left, right) => left.sortOrder - right.sortOrder);
+  }
+
+  private async getLatestObjectiveVersionsForRescore(run: Run) {
+    const objectiveVersions = (await this.objectiveVersionStore.listByStudy(run.studyId))
+      .filter((version) => version.isActive && version.isEnabled !== false)
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+
+    if (objectiveVersions.length === 0) {
+      throw new ScoringValidationError("At least one active objective version is required for manual rescoring.");
+    }
+
+    return objectiveVersions;
   }
 }
 
