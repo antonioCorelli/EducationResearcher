@@ -4302,6 +4302,94 @@ describe("researcher evidence citation routes", () => {
     await server.close();
   });
 
+  it("returns an authorized score CSV export for the latest scored runs", async () => {
+    const operationsStore = new InMemoryOperationalEventStore();
+    const run = createFixtureRun({ status: "scored" });
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([createFixtureObjectiveVersion()]),
+      operationalEventStore: operationsStore,
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runStore: new InMemoryRunStore([run]),
+      scoringStore: new InMemoryScoringStore(
+        [createFixtureScoringRun()],
+        [createFixtureObjectiveScore()],
+        [createFixtureEvidenceCitation()]
+      ),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/score-export.csv",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/csv");
+    expect(response.headers["content-disposition"]).toBe('attachment; filename="study-study_fixture_001-score-export.csv"');
+    expect(response.body.split("\r\n")).toEqual([
+      "participant_id,participant_slot_id,run_id,run_date,survey_version_id,interview_status,stale_flag,partial_flag,technical_interruption_flag,objective_version_id,objective_key,objective_version_number,objective_title,grade,confidence,rationale,score_flags,evidence_citation_ids,scoring_run_id,scoring_trigger,scoring_model_name,scoring_model_version,scoring_service_request_id,scoring_prompt_version,objective_version_set_hash,scored_at",
+      "P001,slot_fixture_001,run_fixture_001,2026-05-06T12:00:00.000Z,survey_version_active,partial,false,true,false,objective_version_001,reasoning_quality,1,Reasoning Quality,2,0.36,\"Survey and interview evidence conflict, and the interview ended early.\",low_confidence;survey_interview_contradiction;partial_run,evidence_citation_001,scoring_run_001,automatic,fake-scoring,local-1,req_scoring_001,scoring-v1,sha256:fixture,2026-05-06T12:40:00.000Z",
+      ""
+    ]);
+    await expect(operationsStore.listAuditLogsByStudy("study_fixture_001")).resolves.toEqual([
+      expect.objectContaining({
+        actorUserId: researcher.id,
+        entityType: "study",
+        entityId: "study_fixture_001",
+        action: "read_raw_artifact",
+        metadata: expect.objectContaining({
+          rawArtifactView: "score_csv_export",
+          rowCount: 1
+        })
+      })
+    ]);
+
+    await server.close();
+  });
+
+  it("denies score CSV exports across studies", async () => {
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      runStore: new InMemoryRunStore([createFixtureRun({ status: "scored" })]),
+      scoringStore: new InMemoryScoringStore(
+        [createFixtureScoringRun()],
+        [createFixtureObjectiveScore()],
+        [createFixtureEvidenceCitation()]
+      ),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/score-export.csv",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "Forbidden",
+      message: "You are not authorized to access this study resource."
+    });
+
+    await server.close();
+  });
+
   it("allows an authorized researcher to manually rescore a run with latest active objectives", async () => {
     const scoredRun = createFixtureRun({ status: "scored" });
     const originalObjective = { ...createFixtureObjectiveVersion(), isActive: false };

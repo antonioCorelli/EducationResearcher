@@ -292,6 +292,11 @@ export type ScoreReviewState =
   | { readonly status: "ready"; readonly scoreReviews: RunScoreReview[] }
   | { readonly status: "error"; readonly message: string };
 
+interface ScoreCsvExport {
+  readonly filename: string;
+  readonly csv: string;
+}
+
 export type ResolvedEvidenceCitation =
   | {
       readonly citation: EvidenceCitation;
@@ -817,6 +822,27 @@ async function fetchScoreReviews(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchScoreCsvExport(accessToken: string, studyId: string): Promise<ScoreCsvExport> {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/score-export.csv`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message ?? "Unable to export score CSV.");
+  }
+
+  const contentDisposition = response.headers.get("content-disposition") ?? "";
+  const filename = contentDisposition.match(/filename="([^"]+)"/)?.[1] ?? `study-${studyId}-score-export.csv`;
+
+  return {
+    filename,
+    csv: await response.text()
+  };
+}
+
 async function fetchResolvedEvidenceCitation(
   accessToken: string,
   studyId: string,
@@ -882,6 +908,7 @@ export function App() {
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
   const [runDashboardState, setRunDashboardState] = useState<RunDashboardState>({ status: "idle" });
   const [scoreReviewState, setScoreReviewState] = useState<ScoreReviewState>({ status: "idle" });
+  const [isExportingScores, setIsExportingScores] = useState(false);
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
   const [objectiveState, setObjectiveState] = useState<ObjectiveState>({ status: "idle" });
@@ -912,6 +939,7 @@ export function App() {
   const [isLoadingRawEvidenceRunId, setIsLoadingRawEvidenceRunId] = useState<string | null>(null);
   const [isRescoringRunId, setIsRescoringRunId] = useState<string | null>(null);
   const [rescoreError, setRescoreError] = useState("");
+  const [scoreExportError, setScoreExportError] = useState("");
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
   const [consentError, setConsentError] = useState("");
@@ -1333,6 +1361,34 @@ export function App() {
       setRescoreError(error instanceof Error ? error.message : "Unable to rescore run.");
     } finally {
       setIsRescoringRunId(null);
+    }
+  }
+
+  async function handleExportScores() {
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setScoreExportError("Select a study before exporting scores.");
+      return;
+    }
+
+    setIsExportingScores(true);
+    setScoreExportError("");
+
+    try {
+      const exportResult = await fetchScoreCsvExport(token, selectedStudyId);
+      const blob = new Blob([exportResult.csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+
+      anchor.href = url;
+      anchor.download = exportResult.filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setScoreExportError(error instanceof Error ? error.message : "Unable to export score CSV.");
+    } finally {
+      setIsExportingScores(false);
     }
   }
 
@@ -2453,6 +2509,7 @@ export function App() {
           <ResearcherRuns
             activeStudySetupTab={activeStudySetupTab}
             isCreatingRuns={isCreatingRuns}
+            isExportingScores={isExportingScores}
             isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
             isLoadingRawEvidenceRunId={isLoadingRawEvidenceRunId}
             participantSlots={participantSlots}
@@ -2471,12 +2528,14 @@ export function App() {
               setSelectedEvidenceCitationError("");
             }}
             onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
+            onExportScores={handleExportScores}
             onOpenEvidenceCitation={handleOpenEvidenceCitation}
             onOpenRawEvidence={openRawEvidence}
             onManualRescore={handleManualRescore}
             onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
             isRescoringRunId={isRescoringRunId}
             rescoreError={rescoreError}
+            scoreExportError={scoreExportError}
           />
         }
         selectedStudyId={selectedStudyId}

@@ -172,12 +172,14 @@ describe("ScoreReviewList", () => {
       <ResearcherRuns
         activeStudySetupTab="runs"
         isCreatingRuns={false}
+        isExportingScores={false}
         isLoadingEvidenceCitationId={null}
         isLoadingRawEvidenceRunId={null}
         isRescoringRunId={null}
         participantSlots={dashboardSlots.map((slot) => slot.participantSlot)}
         rawEvidenceState={{ status: "idle" }}
         rescoreError=""
+        scoreExportError=""
         runDashboardState={{ status: "ready", slots: dashboardSlots }}
         runError=""
         runState={{ status: "ready", runs: [] }}
@@ -189,6 +191,7 @@ describe("ScoreReviewList", () => {
         onCreateRuns={noopSubmit}
         onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
+        onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
         onOpenRawEvidence={noop}
@@ -214,6 +217,7 @@ describe("ScoreReviewList", () => {
   it("renders confidence, rationale, safe flags, metadata, and citation links", () => {
     const markup = renderToStaticMarkup(
       <ScoreReviewList
+        isExportingScores={false}
         isLoadingEvidenceCitationId={null}
         participantCodeBySlotId={new Map([["slot_fixture_001", "P001"]])}
         scoreReviewState={{
@@ -235,8 +239,10 @@ describe("ScoreReviewList", () => {
         selectedEvidenceCitationError=""
         rawEvidenceState={{ status: "idle" }}
         rescoreError=""
+        scoreExportError=""
         onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
+        onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
         isRescoringRunId={null}
@@ -256,6 +262,7 @@ describe("ScoreReviewList", () => {
   it("renders raw survey, transcript, and signed audio evidence", () => {
     const markup = renderToStaticMarkup(
       <ScoreReviewList
+        isExportingScores={false}
         isLoadingEvidenceCitationId={null}
         participantCodeBySlotId={new Map([["slot_fixture_001", "P001"]])}
         scoreReviewState={{ status: "ready", scoreReviews: [] }}
@@ -263,6 +270,7 @@ describe("ScoreReviewList", () => {
         selectedEvidenceCitation={null}
         selectedEvidenceCitationError=""
         rescoreError=""
+        scoreExportError=""
         rawEvidenceState={{
           status: "ready",
           focusSourceId: "interview_turn_001",
@@ -301,6 +309,7 @@ describe("ScoreReviewList", () => {
         }}
         onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
+        onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
         isRescoringRunId={null}
@@ -318,6 +327,7 @@ describe("ScoreReviewList", () => {
     const review = createScoreReview("run_rescored_001", []);
     const markup = renderToStaticMarkup(
       <ScoreReviewList
+        isExportingScores={false}
         isLoadingEvidenceCitationId={null}
         participantCodeBySlotId={new Map([["slot_fixture_001", "P001"]])}
         scoreReviewState={{ status: "ready", scoreReviews: [review] }}
@@ -349,9 +359,11 @@ describe("ScoreReviewList", () => {
         selectedEvidenceCitation={null}
         selectedEvidenceCitationError=""
         rescoreError=""
+        scoreExportError=""
         rawEvidenceState={{ status: "idle" }}
         onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
+        onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
         isRescoringRunId={null}

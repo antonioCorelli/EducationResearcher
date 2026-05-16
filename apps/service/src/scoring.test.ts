@@ -536,6 +536,105 @@ describe("evidence citation resolution", () => {
   });
 });
 
+describe("score CSV export", () => {
+  it("exports one row per objective score with safe CSV escaping and scoring metadata", async () => {
+    const secondObjective: ObjectiveVersion = {
+      ...objective,
+      id: "objective_version_002",
+      objectiveKey: "reflection_depth",
+      versionNumber: 2,
+      title: "@Reflection, Depth",
+      sortOrder: 2
+    };
+    const scoredRun: Run = {
+      ...run,
+      status: "scored",
+      objectiveVersionIds: [objective.id, secondObjective.id],
+      participantSlotId: "slot_formula_001"
+    };
+    const scoringRun = {
+      id: "scoring_run_export_001",
+      runId: scoredRun.id,
+      status: "completed" as const,
+      trigger: "automatic" as const,
+      modelName: "fake-scoring",
+      modelVersion: "local-1",
+      serviceRequestId: "req_export_001",
+      promptVersion: SCORING_PROMPT_VERSION,
+      objectiveVersionSetHash: "sha256:export",
+      scoredAt: "2026-05-06T12:40:00.000Z",
+      createdAt: "2026-05-06T12:40:00.000Z"
+    };
+    const service = new ScoringService(
+      new InMemoryRunStore([scoredRun]),
+      new InMemoryObjectiveVersionStore([objective, secondObjective]),
+      new InMemoryScoringStore(
+        [scoringRun],
+        [
+          {
+            id: "objective_score_export_001",
+            scoringRunId: scoringRun.id,
+            runId: scoredRun.id,
+            objectiveVersionId: objective.id,
+            gradeLabel: "3",
+            confidence: 0.82,
+            rationale: '=SUM(1,1)\nThe participant said "clear", with detail.',
+            flags: ["missing_interview_evidence"],
+            createdAt: "2026-05-06T12:40:00.000Z"
+          },
+          {
+            id: "objective_score_export_002",
+            scoringRunId: scoringRun.id,
+            runId: scoredRun.id,
+            objectiveVersionId: secondObjective.id,
+            gradeLabel: "+advanced",
+            confidence: 0.41,
+            rationale: "Interview was missing, so confidence is lower.",
+            flags: ["low_confidence", "partial_run", "missing_interview_evidence"],
+            createdAt: "2026-05-06T12:41:00.000Z"
+          }
+        ],
+        [
+          createCitation({
+            id: "evidence_citation_export_001",
+            objectiveScoreId: "objective_score_export_001",
+            runId: scoredRun.id
+          }),
+          createCitation({
+            id: "evidence_citation_export_002",
+            objectiveScoreId: "objective_score_export_001",
+            runId: scoredRun.id,
+            quote: "Second citation"
+          })
+        ]
+      )
+    );
+
+    const result = await service.generateScoreCsvExport(scoredRun.studyId, [
+      {
+        id: "slot_formula_001",
+        participantCode: '=P001, "Alpha"\nLine'
+      }
+    ]);
+
+    expect(result).toMatchObject({
+      filename: "study-study_fixture_001-score-export.csv",
+      rowCount: 2
+    });
+    expect(result.csv.split("\r\n")).toMatchInlineSnapshot(`
+      [
+        "participant_id,participant_slot_id,run_id,run_date,survey_version_id,interview_status,stale_flag,partial_flag,technical_interruption_flag,objective_version_id,objective_key,objective_version_number,objective_title,grade,confidence,rationale,score_flags,evidence_citation_ids,scoring_run_id,scoring_trigger,scoring_model_name,scoring_model_version,scoring_service_request_id,scoring_prompt_version,objective_version_set_hash,scored_at",
+        ""'=P001, ""Alpha""
+      Line",slot_formula_001,run_fixture_001,2026-05-06T12:00:00.000Z,survey_version_001,interview_completed,false,false,false,objective_version_001,reasoning_quality,1,Reasoning Quality,3,0.82,"'=SUM(1,1)
+      The participant said ""clear"", with detail.",missing_interview_evidence,evidence_citation_export_001;evidence_citation_export_002,scoring_run_export_001,automatic,fake-scoring,local-1,req_export_001,scoring-v1,sha256:export,2026-05-06T12:40:00.000Z",
+        ""'=P001, ""Alpha""
+      Line",slot_formula_001,run_fixture_001,2026-05-06T12:00:00.000Z,survey_version_001,partial,false,true,false,objective_version_002,reflection_depth,2,"'@Reflection, Depth",'+advanced,0.41,"Interview was missing, so confidence is lower.",low_confidence;partial_run;missing_interview_evidence,,scoring_run_export_001,automatic,fake-scoring,local-1,req_export_001,scoring-v1,sha256:export,2026-05-06T12:40:00.000Z",
+        "",
+      ]
+    `);
+  });
+});
+
 describe("automatic scoring job", () => {
   it("scores a completed interview run, persists scores and citations, and marks the run scored", async () => {
     const runStore = new InMemoryRunStore([{ ...run, status: "created" }]);

@@ -171,6 +171,11 @@ export interface ResearcherRunScoreReview {
   readonly objectiveScores: readonly ResearcherObjectiveScoreReview[];
 }
 
+export interface ScoreCsvParticipant {
+  readonly id: string;
+  readonly participantCode: string;
+}
+
 export interface ScoringStore {
   saveScoringRun(input: {
     readonly scoringRun: ScoringRun;
@@ -408,6 +413,60 @@ export class ScoringService {
     };
   }
 
+  async generateScoreCsvExport(
+    studyId: string,
+    participants: readonly ScoreCsvParticipant[] = []
+  ): Promise<{ readonly filename: string; readonly csv: string; readonly rowCount: number }> {
+    const scoreReviews = (await this.listScoreReviewsForStudy(studyId)).scoreReviews;
+    const participantCodeBySlotId = new Map(participants.map((participant) => [participant.id, participant.participantCode]));
+    const rows = scoreReviews.flatMap((review) => {
+      if (!review.scoringRun) {
+        return [];
+      }
+
+      const scoringRun = review.scoringRun;
+
+      return review.objectiveScores.map(({ objectiveVersion, score, citations }) => ({
+        participant_id: participantCodeBySlotId.get(review.run.participantSlotId) ?? review.run.participantSlotId,
+        participant_slot_id: review.run.participantSlotId,
+        run_id: review.run.id,
+        run_date: review.run.createdAt,
+        survey_version_id: review.run.surveyVersionId,
+        interview_status: getExportInterviewStatus(review.run, score),
+        stale_flag: score.flags.includes("stale_run") ? "true" : "false",
+        partial_flag: score.flags.includes("partial_run") ? "true" : "false",
+        technical_interruption_flag: score.flags.includes("technical_interruption") ? "true" : "false",
+        objective_version_id: score.objectiveVersionId,
+        objective_key: objectiveVersion.objectiveKey,
+        objective_version_number: objectiveVersion.versionNumber.toString(),
+        objective_title: objectiveVersion.title,
+        grade: score.gradeLabel,
+        confidence: score.confidence.toString(),
+        rationale: score.rationale,
+        score_flags: score.flags.join(";"),
+        evidence_citation_ids: citations.map((citation) => citation.id).join(";"),
+        scoring_run_id: scoringRun.id,
+        scoring_trigger: scoringRun.trigger,
+        scoring_model_name: scoringRun.modelName,
+        scoring_model_version: scoringRun.modelVersion,
+        scoring_service_request_id: scoringRun.serviceRequestId,
+        scoring_prompt_version: scoringRun.promptVersion,
+        objective_version_set_hash: scoringRun.objectiveVersionSetHash,
+        scored_at: scoringRun.scoredAt
+      }));
+    });
+    const csv = [
+      SCORE_CSV_HEADERS.join(","),
+      ...rows.map((row) => SCORE_CSV_HEADERS.map((header) => formatCsvCell(row[header])).join(","))
+    ].join("\r\n");
+
+    return {
+      filename: `study-${sanitizeFilenameSegment(studyId)}-score-export.csv`,
+      csv: `${csv}\r\n`,
+      rowCount: rows.length
+    };
+  }
+
   async resolveEvidenceCitation(input: {
     readonly studyId: string;
     readonly runId: string;
@@ -641,6 +700,69 @@ export class ScoringService {
 
     return objectiveVersions;
   }
+}
+
+const SCORE_CSV_HEADERS = [
+  "participant_id",
+  "participant_slot_id",
+  "run_id",
+  "run_date",
+  "survey_version_id",
+  "interview_status",
+  "stale_flag",
+  "partial_flag",
+  "technical_interruption_flag",
+  "objective_version_id",
+  "objective_key",
+  "objective_version_number",
+  "objective_title",
+  "grade",
+  "confidence",
+  "rationale",
+  "score_flags",
+  "evidence_citation_ids",
+  "scoring_run_id",
+  "scoring_trigger",
+  "scoring_model_name",
+  "scoring_model_version",
+  "scoring_service_request_id",
+  "scoring_prompt_version",
+  "objective_version_set_hash",
+  "scored_at"
+] as const;
+
+function getExportInterviewStatus(run: Run, score: ObjectiveScore) {
+  if (score.flags.includes("technical_interruption") || run.status === "technical_interruption") {
+    return "technical_interruption";
+  }
+
+  if (score.flags.includes("stale_run") || run.status === "stale") {
+    return "stale";
+  }
+
+  if (score.flags.includes("partial_run") || run.status === "partial") {
+    return "partial";
+  }
+
+  return run.status === "scored" ? "interview_completed" : run.status;
+}
+
+function formatCsvCell(value: string) {
+  const safeValue = escapeSpreadsheetFormula(value);
+
+  if (/["\r\n,]/.test(safeValue) || /^\s|\s$/.test(safeValue)) {
+    return `"${safeValue.replaceAll("\"", "\"\"")}"`;
+  }
+
+  return safeValue;
+}
+
+function escapeSpreadsheetFormula(value: string) {
+  return /^\s*[=+\-@]/.test(value) || /^[\t\r]/.test(value) ? `'${value}` : value;
+}
+
+function sanitizeFilenameSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
 export function parseScoringGeneratorOutput(

@@ -1463,6 +1463,36 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
+  server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/score-export.csv",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+        const participantSlots = await participantSlotStore.listByStudy(request.params.studyId);
+        const exportResult = await scoringService.generateScoreCsvExport(request.params.studyId, participantSlots);
+
+        await studyAuthorization.recordSensitiveRead(access, "study", request.params.studyId, {
+          rawArtifactView: "score_csv_export",
+          rowCount: exportResult.rowCount
+        });
+
+        return reply
+          .header("content-type", "text/csv; charset=utf-8")
+          .header("content-disposition", `attachment; filename="${exportResult.filename}"`)
+          .send(exportResult.csv);
+      } catch (error) {
+        const safeResponse = toSafeAuthorizationResponse(error) ?? toSafeScoringValidationResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
   server.get<{ Params: StudyParams & { runId: string } }>(
     "/researcher/studies/:studyId/runs/:runId/raw-evidence",
     { preHandler: requireResearcher },

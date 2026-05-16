@@ -22,10 +22,12 @@ interface ResearcherRunsProps {
   readonly isLoadingEvidenceCitationId: string | null;
   readonly isLoadingRawEvidenceRunId: string | null;
   readonly isCreatingRuns: boolean;
+  readonly isExportingScores: boolean;
   readonly isRescoringRunId: string | null;
   readonly participantSlots: readonly ParticipantSlot[];
   readonly rawEvidenceState: RawEvidenceState;
   readonly rescoreError: string;
+  readonly scoreExportError: string;
   readonly runDashboardState: RunDashboardState;
   readonly runError: string;
   readonly runState: RunState;
@@ -37,6 +39,7 @@ interface ResearcherRunsProps {
   readonly onCreateRuns: (event: FormEvent<HTMLFormElement>) => void;
   readonly onDismissEvidenceCitation: () => void;
   readonly onDismissRawEvidence: () => void;
+  readonly onExportScores: () => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
   readonly onOpenRawEvidence: (runId: string) => void;
   readonly onManualRescore: (runId: string) => void;
@@ -48,10 +51,12 @@ export function ResearcherRuns({
   isLoadingEvidenceCitationId,
   isLoadingRawEvidenceRunId,
   isCreatingRuns,
+  isExportingScores,
   isRescoringRunId,
   participantSlots,
   rawEvidenceState,
   rescoreError,
+  scoreExportError,
   runDashboardState,
   runError,
   runState,
@@ -63,6 +68,7 @@ export function ResearcherRuns({
   onCreateRuns,
   onDismissEvidenceCitation,
   onDismissRawEvidence,
+  onExportScores,
   onOpenEvidenceCitation,
   onOpenRawEvidence,
   onManualRescore,
@@ -186,8 +192,11 @@ export function ResearcherRuns({
         selectedEvidenceCitationError={selectedEvidenceCitationError}
         rawEvidenceState={rawEvidenceState}
         rescoreError={rescoreError}
+        scoreExportError={scoreExportError}
+        isExportingScores={isExportingScores}
         onDismissEvidenceCitation={onDismissEvidenceCitation}
         onDismissRawEvidence={onDismissRawEvidence}
+        onExportScores={onExportScores}
         onManualRescore={onManualRescore}
         onOpenEvidenceCitation={onOpenEvidenceCitation}
         isRescoringRunId={isRescoringRunId}
@@ -264,6 +273,7 @@ function RunStatusDashboardRow({ slot }: { readonly slot: ResearcherRunDashboard
 }
 
 interface ScoreReviewListProps {
+  readonly isExportingScores: boolean;
   readonly isLoadingEvidenceCitationId: string | null;
   readonly participantCodeBySlotId: ReadonlyMap<string, string>;
   readonly scoreReviewState: ScoreReviewState;
@@ -272,14 +282,17 @@ interface ScoreReviewListProps {
   readonly selectedEvidenceCitationError: string;
   readonly rawEvidenceState: RawEvidenceState;
   readonly rescoreError: string;
+  readonly scoreExportError: string;
   readonly onDismissEvidenceCitation: () => void;
   readonly onDismissRawEvidence: () => void;
+  readonly onExportScores: () => void;
   readonly onManualRescore: (runId: string) => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
   readonly isRescoringRunId: string | null;
 }
 
 export function ScoreReviewList({
+  isExportingScores,
   isLoadingEvidenceCitationId,
   participantCodeBySlotId,
   scoreReviewState,
@@ -288,8 +301,10 @@ export function ScoreReviewList({
   selectedEvidenceCitationError,
   rawEvidenceState,
   rescoreError,
+  scoreExportError,
   onDismissEvidenceCitation,
   onDismissRawEvidence,
+  onExportScores,
   onManualRescore,
   isRescoringRunId,
   onOpenEvidenceCitation
@@ -300,7 +315,14 @@ export function ScoreReviewList({
     <div className="score-review-section" aria-labelledby="score-review-title">
       <div className="section-heading">
         <h2 id="score-review-title">Score review</h2>
-        {scoredReviews.length > 0 ? <span className="version-pill">{scoredReviews.length} scored</span> : null}
+        {scoredReviews.length > 0 ? (
+          <div className="score-review-toolbar">
+            <span className="version-pill">{scoredReviews.length} scored</span>
+            <button className="secondary-button compact-button" disabled={isExportingScores} onClick={onExportScores} type="button">
+              {isExportingScores ? "Exporting CSV" : "Export CSV"}
+            </button>
+          </div>
+        ) : null}
       </div>
       {scoreReviewState.status === "loading" ? <p className="muted-copy">Loading score reviews</p> : null}
       {scoreReviewState.status === "error" ? <p className="form-error">{scoreReviewState.message}</p> : null}
@@ -389,6 +411,7 @@ export function ScoreReviewList({
         </div>
       ) : null}
       {rescoreError ? <p className="form-error">{rescoreError}</p> : null}
+      {scoreExportError ? <p className="form-error">{scoreExportError}</p> : null}
       {selectedEvidenceCitationError ? <p className="form-error">{selectedEvidenceCitationError}</p> : null}
       {selectedEvidenceCitation ? (
         <EvidenceCitationPanel citation={selectedEvidenceCitation} onDismiss={onDismissEvidenceCitation} />
