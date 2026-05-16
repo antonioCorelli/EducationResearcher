@@ -2,15 +2,17 @@ import { describe, expect, it } from "vitest";
 import { AiProviderError, type StructuredAiProvider } from "./ai-provider.js";
 import type { GapMap } from "./gap-map.js";
 import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
-import { InMemoryRunStore, type Run, type SurveyResponse } from "./runs.js";
+import { InMemoryRunStore, type InterviewAudioAsset, type InterviewTurn, type Run, type SurveyResponse } from "./runs.js";
 import {
   AiProviderScoringGenerator,
   InMemoryScoringStore,
   SCORING_PROMPT_VERSION,
   ScoringService,
   ScoringOutputValidationError,
+  ScoringNotFoundError,
   createObjectiveVersionSetHash,
-  parseScoringGeneratorOutput
+  parseScoringGeneratorOutput,
+  type EvidenceCitation
 } from "./scoring.js";
 
 const run: Run = {
@@ -85,6 +87,19 @@ const metadata = {
   promptVersion: SCORING_PROMPT_VERSION
 };
 
+function createCitation(overrides: Partial<EvidenceCitation> = {}): EvidenceCitation {
+  return {
+    id: "evidence_citation_001",
+    objectiveScoreId: "objective_score_001",
+    runId: run.id,
+    sourceType: "survey_response",
+    sourceId: "survey_response_001",
+    quote: "I noticed that the example changed my reasoning.",
+    createdAt: "2026-05-06T12:40:00.000Z",
+    ...overrides
+  };
+}
+
 describe("scoring structured output validation", () => {
   it("accepts one validated score per objective with metadata ready for persistence", () => {
     const output = parseScoringGeneratorOutput(
@@ -138,6 +153,33 @@ describe("scoring structured output validation", () => {
               rationale: "Bad.",
               flags: [],
               citations: []
+            }
+          ]
+        },
+        metadata,
+        [objective]
+      )
+    ).toThrow(ScoringOutputValidationError);
+  });
+
+  it("requires audio span citations to include timing", () => {
+    expect(() =>
+      parseScoringGeneratorOutput(
+        {
+          scores: [
+            {
+              objectiveVersionId: "objective_version_001",
+              gradeLabel: "3",
+              confidence: 0.82,
+              rationale: "The participant connected a claim to evidence.",
+              flags: [],
+              citations: [
+                {
+                  sourceType: "audio_span",
+                  sourceId: "interview_audio_asset_001",
+                  quote: "Audio support without timing."
+                }
+              ]
             }
           ]
         },
@@ -283,6 +325,213 @@ describe("AI provider scoring generator", () => {
       safeCategory: "invalid_request",
       retryable: false,
       serviceRequestId: "req_bad_001"
+    });
+  });
+});
+
+describe("evidence citation resolution", () => {
+  it("resolves persisted survey response citations to stable raw evidence", async () => {
+    const runStore = new InMemoryRunStore([run]);
+    await runStore.submitSurvey([surveyResponse], run, "interview_completed");
+    const service = new ScoringService(
+      runStore,
+      new InMemoryObjectiveVersionStore([objective]),
+      new InMemoryScoringStore([], [], [createCitation({ sourceType: "survey_response", sourceId: surveyResponse.id })])
+    );
+
+    await expect(
+      service.resolveEvidenceCitation({
+        studyId: run.studyId,
+        runId: run.id,
+        evidenceCitationId: "evidence_citation_001"
+      })
+    ).resolves.toMatchObject({
+      citation: {
+        id: "evidence_citation_001",
+        sourceType: "survey_response",
+        sourceId: "survey_response_001"
+      },
+      source: {
+        type: "survey_response",
+        surveyResponse: {
+          id: "survey_response_001",
+          responseText: "I noticed that the example changed my reasoning."
+        }
+      }
+    });
+  });
+
+  it("resolves interview turn and audio span citations when timing is available", async () => {
+    const runStore = new InMemoryRunStore([run]);
+    const interviewTurn: InterviewTurn = {
+      id: "interview_turn_001",
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      interviewSessionId: "interview_session_001",
+      speaker: "participant",
+      text: "The worked example helped me explain the pattern.",
+      audioStartMs: 4200,
+      audioEndMs: 9200,
+      createdAt: "2026-05-06T12:24:00.000Z"
+    };
+    const audioAsset: InterviewAudioAsset = {
+      id: "interview_audio_asset_001",
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      interviewSessionId: "interview_session_001",
+      storageUri: "s3://education-researcher-local/study_fixture_001/run_fixture_001/audio.wav",
+      durationSeconds: 10,
+      status: "available",
+      createdAt: "2026-05-06T12:25:00.000Z"
+    };
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        sessionNumber: 1,
+        status: "completed",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:30:00.000Z",
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:30:00.000Z"
+      },
+      run,
+      "interview_completed"
+    );
+    await runStore.saveInterviewArtifacts({
+      interviewSession: {
+        id: "interview_session_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        sessionNumber: 1,
+        status: "completed",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:30:00.000Z",
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:30:00.000Z"
+      },
+      turns: [interviewTurn],
+      audioAsset
+    });
+    const service = new ScoringService(
+      runStore,
+      new InMemoryObjectiveVersionStore([objective]),
+      new InMemoryScoringStore([], [], [
+        createCitation({
+          id: "evidence_citation_turn_001",
+          sourceType: "interview_turn",
+          sourceId: interviewTurn.id,
+          quote: interviewTurn.text,
+          audioStartMs: 4200,
+          audioEndMs: 9200
+        }),
+        createCitation({
+          id: "evidence_citation_audio_001",
+          sourceType: "audio_span",
+          sourceId: audioAsset.id,
+          quote: "The worked example helped me explain the pattern.",
+          audioStartMs: 4200,
+          audioEndMs: 9200
+        })
+      ])
+    );
+
+    await expect(
+      service.resolveEvidenceCitation({
+        studyId: run.studyId,
+        runId: run.id,
+        evidenceCitationId: "evidence_citation_turn_001"
+      })
+    ).resolves.toMatchObject({
+      source: {
+        type: "interview_turn",
+        interviewTurn: {
+          id: "interview_turn_001",
+          audioStartMs: 4200,
+          audioEndMs: 9200
+        }
+      }
+    });
+    await expect(
+      service.resolveEvidenceCitation({
+        studyId: run.studyId,
+        runId: run.id,
+        evidenceCitationId: "evidence_citation_audio_001"
+      })
+    ).resolves.toMatchObject({
+      source: {
+        type: "audio_span",
+        audioAsset: {
+          id: "interview_audio_asset_001",
+          storageUri: "s3://education-researcher-local/study_fixture_001/run_fixture_001/audio.wav"
+        },
+        audioStartMs: 4200,
+        audioEndMs: 9200
+      }
+    });
+  });
+
+  it("reports missing citation sources without silently returning stale data", async () => {
+    const service = new ScoringService(
+      new InMemoryRunStore([run]),
+      new InMemoryObjectiveVersionStore([objective]),
+      new InMemoryScoringStore([], [], [createCitation({ sourceType: "survey_response", sourceId: "missing_response" })])
+    );
+
+    await expect(
+      service.resolveEvidenceCitation({
+        studyId: run.studyId,
+        runId: run.id,
+        evidenceCitationId: "evidence_citation_001"
+      })
+    ).rejects.toThrow(ScoringNotFoundError);
+  });
+
+  it("keeps older citation sources stable after later rescoring writes new citations", async () => {
+    const runStore = new InMemoryRunStore([run]);
+    await runStore.submitSurvey([surveyResponse], run, "interview_completed");
+    const service = new ScoringService(
+      runStore,
+      new InMemoryObjectiveVersionStore([objective]),
+      new InMemoryScoringStore([], [], [
+        createCitation({
+          id: "evidence_citation_original_001",
+          objectiveScoreId: "objective_score_original_001",
+          sourceType: "survey_response",
+          sourceId: surveyResponse.id
+        }),
+        createCitation({
+          id: "evidence_citation_rescore_001",
+          objectiveScoreId: "objective_score_rescore_001",
+          sourceType: "survey_response",
+          sourceId: "survey_response_future_001"
+        })
+      ])
+    );
+
+    await expect(
+      service.resolveEvidenceCitation({
+        studyId: run.studyId,
+        runId: run.id,
+        evidenceCitationId: "evidence_citation_original_001"
+      })
+    ).resolves.toMatchObject({
+      citation: {
+        id: "evidence_citation_original_001",
+        objectiveScoreId: "objective_score_original_001",
+        sourceId: surveyResponse.id
+      },
+      source: {
+        type: "survey_response",
+        surveyResponse: {
+          id: surveyResponse.id
+        }
+      }
     });
   });
 });

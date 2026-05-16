@@ -123,6 +123,27 @@ export interface PersistedScoringRun {
   readonly run: Run;
 }
 
+export type ResolvedEvidenceCitationSource =
+  | {
+      readonly type: "survey_response";
+      readonly surveyResponse: SurveyResponse;
+    }
+  | {
+      readonly type: "interview_turn";
+      readonly interviewTurn: InterviewTurn;
+    }
+  | {
+      readonly type: "audio_span";
+      readonly audioAsset: InterviewAudioAsset;
+      readonly audioStartMs: number;
+      readonly audioEndMs: number;
+    };
+
+export interface ResolvedEvidenceCitation {
+  readonly citation: EvidenceCitation;
+  readonly source: ResolvedEvidenceCitationSource;
+}
+
 export interface ScoringStore {
   saveScoringRun(input: {
     readonly scoringRun: ScoringRun;
@@ -134,6 +155,7 @@ export interface ScoringStore {
     readonly evidenceCitations: readonly EvidenceCitation[];
   }>;
   listScoringRunsByRun(runId: string): Promise<ScoringRun[]>;
+  getEvidenceCitationByRun(runId: string, evidenceCitationId: string): Promise<EvidenceCitation | undefined>;
 }
 
 export interface ScoringServiceOptions {
@@ -239,6 +261,15 @@ export class ScoringValidationError extends Error {
   }
 }
 
+export class ScoringNotFoundError extends Error {
+  readonly statusCode = 404;
+
+  constructor(readonly safeMessage: string) {
+    super(safeMessage);
+    this.name = "ScoringNotFoundError";
+  }
+}
+
 export class ScoringService {
   private readonly now: () => Date;
   private readonly createScoringRunId: () => string;
@@ -268,6 +299,78 @@ export class ScoringService {
 
   async triggerAutomaticScoring(input: AutomaticScoringTriggerInput) {
     return this.scoreRun(input.run.id, "automatic");
+  }
+
+  async resolveEvidenceCitation(input: {
+    readonly studyId: string;
+    readonly runId: string;
+    readonly evidenceCitationId: string;
+  }): Promise<ResolvedEvidenceCitation> {
+    const run = await this.runStore.getById(input.runId);
+
+    if (!run || run.studyId !== input.studyId) {
+      throw new ScoringNotFoundError("Evidence citation was not found.");
+    }
+
+    const citation = await this.scoringStore.getEvidenceCitationByRun(input.runId, input.evidenceCitationId);
+
+    if (!citation) {
+      throw new ScoringNotFoundError("Evidence citation was not found.");
+    }
+
+    if (citation.sourceType === "survey_response") {
+      const surveyResponse = (await this.runStore.listSurveyResponsesByRun(citation.runId)).find(
+        (response) => response.id === citation.sourceId
+      );
+
+      if (!surveyResponse) {
+        throw new ScoringNotFoundError("Citation source was not found.");
+      }
+
+      return {
+        citation,
+        source: {
+          type: "survey_response",
+          surveyResponse
+        }
+      };
+    }
+
+    if (citation.sourceType === "interview_turn") {
+      const interviewTurn = (await this.runStore.listInterviewTurnsByRun(citation.runId)).find(
+        (turn) => turn.id === citation.sourceId
+      );
+
+      if (!interviewTurn) {
+        throw new ScoringNotFoundError("Citation source was not found.");
+      }
+
+      return {
+        citation,
+        source: {
+          type: "interview_turn",
+          interviewTurn
+        }
+      };
+    }
+
+    const audioAsset = (await this.runStore.listInterviewAudioAssetsByRun(citation.runId)).find(
+      (asset) => asset.id === citation.sourceId
+    );
+
+    if (!audioAsset || citation.audioStartMs === undefined || citation.audioEndMs === undefined) {
+      throw new ScoringNotFoundError("Citation source was not found.");
+    }
+
+    return {
+      citation,
+      source: {
+        type: "audio_span",
+        audioAsset,
+        audioStartMs: citation.audioStartMs,
+        audioEndMs: citation.audioEndMs
+      }
+    };
   }
 
   async scoreRun(runId: string, trigger: ScoringTrigger): Promise<PersistedScoringRun> {
@@ -520,11 +623,17 @@ function parseCitations(value: unknown): readonly ScoringEvidenceCitationOutput[
       throw new ScoringOutputValidationError("Scoring citation source type is invalid.");
     }
 
+    const audioSpan = parseOptionalAudioSpan(citation);
+
+    if (sourceType === "audio_span" && (audioSpan.audioStartMs === undefined || audioSpan.audioEndMs === undefined)) {
+      throw new ScoringOutputValidationError("Audio span citations must include audio timing.");
+    }
+
     return {
       sourceType: sourceType as EvidenceCitationSourceType,
       sourceId: parseRequiredText(citation.sourceId, `Citation ${index + 1} source`, 200),
       quote: parseRequiredText(citation.quote, `Citation ${index + 1} quote`, 1000),
-      ...parseOptionalAudioSpan(citation)
+      ...audioSpan
     };
   });
 }
@@ -706,6 +815,12 @@ export class InMemoryScoringStore implements ScoringStore {
       .sort((left, right) => right.scoredAt.localeCompare(left.scoredAt));
   }
 
+  async getEvidenceCitationByRun(runId: string, evidenceCitationId: string) {
+    return [...this.evidenceCitations.values()].find(
+      (citation) => citation.runId === runId && citation.id === evidenceCitationId
+    );
+  }
+
   async listObjectiveScoresByScoringRun(scoringRunId: string) {
     return [...this.objectiveScores.values()]
       .filter((objectiveScore) => objectiveScore.scoringRunId === scoringRunId)
@@ -834,6 +949,28 @@ export class DynamoDbScoringStore implements ScoringStore {
       .map((item) => toScoringRun(item as ScoringRunItem))
       .sort((left, right) => right.scoredAt.localeCompare(left.scoredAt));
   }
+
+  async getEvidenceCitationByRun(runId: string, evidenceCitationId: string) {
+    const response = await this.documentClient.send(
+      new QueryCommand({
+        TableName: this.tableName,
+        IndexName: "byRunScoring",
+        KeyConditionExpression: "gsi1pk = :run",
+        FilterExpression: "#entity = :entity AND id = :id",
+        ExpressionAttributeNames: {
+          "#entity": "entity"
+        },
+        ExpressionAttributeValues: {
+          ":run": `RUN#${runId}`,
+          ":entity": "evidence_citation",
+          ":id": evidenceCitationId
+        }
+      })
+    );
+    const item = response.Items?.find((candidate) => candidate.entity === "evidence_citation");
+
+    return item ? toEvidenceCitation(item as EvidenceCitationItem) : undefined;
+  }
 }
 
 export function createConfiguredScoringStore() {
@@ -923,12 +1060,26 @@ function toEvidenceCitationItem(citation: EvidenceCitation): EvidenceCitationIte
   };
 }
 
+function toEvidenceCitation(item: EvidenceCitationItem): EvidenceCitation {
+  return {
+    id: item.id,
+    objectiveScoreId: item.objectiveScoreId,
+    runId: item.runId,
+    sourceType: item.sourceType,
+    sourceId: item.sourceId,
+    quote: item.quote,
+    ...(item.audioStartMs !== undefined ? { audioStartMs: item.audioStartMs } : {}),
+    ...(item.audioEndMs !== undefined ? { audioEndMs: item.audioEndMs } : {}),
+    createdAt: item.createdAt
+  };
+}
+
 export function toSafeScoringValidationResponse(error: unknown) {
-  if (error instanceof ScoringValidationError) {
+  if (error instanceof ScoringValidationError || error instanceof ScoringNotFoundError) {
     return {
       statusCode: error.statusCode,
       body: {
-        error: "Bad Request",
+        error: error.statusCode === 404 ? "Not Found" : "Bad Request",
         message: error.safeMessage
       }
     };

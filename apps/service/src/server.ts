@@ -1449,6 +1449,30 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
+  server.get<{ Params: StudyParams & { runId: string; evidenceCitationId: string } }>(
+    "/researcher/studies/:studyId/runs/:runId/evidence-citations/:evidenceCitationId",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+
+        return await scoringService.resolveEvidenceCitation({
+          studyId: request.params.studyId,
+          runId: request.params.runId,
+          evidenceCitationId: request.params.evidenceCitationId
+        });
+      } catch (error) {
+        const safeResponse = toSafeAuthorizationResponse(error) ?? toSafeScoringValidationResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
   server.get<{ Params: StudyParams }>(
     "/researcher/studies/:studyId/survey",
     { preHandler: requireResearcher },

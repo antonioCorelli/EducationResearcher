@@ -12,7 +12,7 @@ import {
   type ParticipantAccessToken,
   type Run
 } from "./runs.js";
-import { InMemoryScoringStore } from "./scoring.js";
+import { InMemoryScoringStore, type EvidenceCitation } from "./scoring.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -188,6 +188,19 @@ function createFixtureObjectiveVersion(): ObjectiveVersion {
     isEnabled: true,
     isActive: true,
     createdAt: "2026-05-06T12:00:00.000Z"
+  };
+}
+
+function createFixtureEvidenceCitation(overrides: Partial<EvidenceCitation> = {}): EvidenceCitation {
+  return {
+    id: "evidence_citation_001",
+    objectiveScoreId: "objective_score_001",
+    runId: "run_fixture_001",
+    sourceType: "survey_response",
+    sourceId: "survey_response_001",
+    quote: "I noticed that the example changed my reasoning.",
+    createdAt: "2026-05-06T12:40:00.000Z",
+    ...overrides
   };
 }
 
@@ -3787,6 +3800,116 @@ describe("researcher objective routes", () => {
       message: "Objective version metadata is assigned by the service."
     });
     expect(crossTenant.statusCode).toBe(403);
+
+    await server.close();
+  });
+});
+
+describe("researcher evidence citation routes", () => {
+  it("resolves authorized citations to raw survey evidence", async () => {
+    const run = createFixtureRun({ status: "interview_completed" });
+    const runStore = new InMemoryRunStore([run]);
+    await runStore.submitSurvey(
+      [
+        {
+          id: "survey_response_001",
+          studyId: run.studyId,
+          participantSlotId: run.participantSlotId,
+          runId: run.id,
+          surveyVersionId: run.surveyVersionId,
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed that the example changed my reasoning.",
+          submittedAt: "2026-05-06T12:10:00.000Z",
+          createdAt: "2026-05-06T12:10:00.000Z"
+        }
+      ],
+      run,
+      "interview_completed"
+    );
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      runStore,
+      scoringStore: new InMemoryScoringStore([], [], [createFixtureEvidenceCitation()]),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/runs/run_fixture_001/evidence-citations/evidence_citation_001",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      citation: {
+        id: "evidence_citation_001",
+        sourceType: "survey_response",
+        sourceId: "survey_response_001"
+      },
+      source: {
+        type: "survey_response",
+        surveyResponse: {
+          id: "survey_response_001",
+          responseText: "I noticed that the example changed my reasoning."
+        }
+      }
+    });
+
+    await server.close();
+  });
+
+  it("denies citation resolution across studies before reading raw evidence", async () => {
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      runStore: new InMemoryRunStore([createFixtureRun({ status: "interview_completed" })]),
+      scoringStore: new InMemoryScoringStore([], [], [createFixtureEvidenceCitation()]),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/runs/run_fixture_001/evidence-citations/evidence_citation_001",
+      headers: {
+        authorization: `Bearer ${otherTokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({
+      error: "Forbidden",
+      message: "You are not authorized to access this study resource."
+    });
+
+    await server.close();
+  });
+
+  it("returns a safe not found response when a cited source is missing", async () => {
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      runStore: new InMemoryRunStore([createFixtureRun({ status: "interview_completed" })]),
+      scoringStore: new InMemoryScoringStore(
+        [],
+        [],
+        [createFixtureEvidenceCitation({ sourceId: "missing_survey_response" })]
+      ),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/runs/run_fixture_001/evidence-citations/evidence_citation_001",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({
+      error: "Not Found",
+      message: "Citation source was not found."
+    });
 
     await server.close();
   });
