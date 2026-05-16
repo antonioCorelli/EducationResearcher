@@ -29,6 +29,7 @@ import {
   createConfiguredOperationalEventStore,
   parseAudioConnectionState,
   parseTechnicalFailureCategory,
+  type AuditLogStore,
   type OperationalEventServiceOptions,
   type OperationalEventStore
 } from "./operational-events.js";
@@ -98,7 +99,7 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly gapMapGenerator?: GapMapGenerator;
   readonly objectiveVersionStore?: ObjectiveVersionStore;
   readonly operationalEventServiceOptions?: OperationalEventServiceOptions;
-  readonly operationalEventStore?: OperationalEventStore;
+  readonly operationalEventStore?: OperationalEventStore & AuditLogStore;
   readonly participantSlotServiceOptions?: ParticipantSlotServiceOptions;
   readonly participantSlotStore?: ParticipantSlotStore;
   readonly participantAccessTokenStore?: ParticipantAccessTokenStore;
@@ -1011,7 +1012,9 @@ export function buildServer(options: BuildServerOptions = {}) {
     gapMapGenerator
   );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
-  const studyAuthorization = new StudyAuthorizationService(new StudyShellAuthorizationStore(studyShellStore));
+  const studyAuthorization = new StudyAuthorizationService(
+    new StudyShellAuthorizationStore(studyShellStore, operationalEventStore)
+  );
   const server = Fastify({
     logger: true,
     ...fastifyOptions
@@ -1420,9 +1423,42 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+        await studyAuthorization.recordSensitiveRead(access, "study", request.params.studyId, {
+          rawArtifactView: "score_reviews"
+        });
 
         return await scoringService.listScoreReviewsForStudy(request.params.studyId);
+      } catch (error) {
+        const safeResponse = toSafeAuthorizationResponse(error) ?? toSafeScoringValidationResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.get<{ Params: StudyParams & { runId: string } }>(
+    "/researcher/studies/:studyId/runs/:runId/raw-evidence",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+        const rawEvidence = await scoringService.getRawEvidenceForRun({
+          studyId: request.params.studyId,
+          runId: request.params.runId
+        });
+        await studyAuthorization.recordSensitiveRead(access, "run", request.params.runId, {
+          rawArtifactView: "run_raw_evidence",
+          surveyResponseCount: rawEvidence.surveyResponses.length,
+          interviewTurnCount: rawEvidence.interviewTurns.length,
+          audioAssetCount: rawEvidence.audioAssets.length
+        });
+
+        return rawEvidence;
       } catch (error) {
         const safeResponse = toSafeAuthorizationResponse(error) ?? toSafeScoringValidationResponse(error);
 
@@ -1474,13 +1510,20 @@ export function buildServer(options: BuildServerOptions = {}) {
     { preHandler: requireResearcher },
     async (request, reply) => {
       try {
-        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
-
-        return await scoringService.resolveEvidenceCitation({
+        const access = await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+        const resolvedCitation = await scoringService.resolveEvidenceCitation({
           studyId: request.params.studyId,
           runId: request.params.runId,
           evidenceCitationId: request.params.evidenceCitationId
         });
+        await studyAuthorization.recordSensitiveRead(access, "evidence_citation", request.params.evidenceCitationId, {
+          rawArtifactView: "citation_resolution",
+          runId: request.params.runId,
+          sourceType: resolvedCitation.citation.sourceType,
+          sourceId: resolvedCitation.citation.sourceId
+        });
+
+        return resolvedCitation;
       } catch (error) {
         const safeResponse = toSafeAuthorizationResponse(error) ?? toSafeScoringValidationResponse(error);
 

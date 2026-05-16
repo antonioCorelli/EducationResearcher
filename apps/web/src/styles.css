@@ -1070,10 +1070,10 @@ button.version-chip:hover {
   display: grid;
   grid-template-columns:
     minmax(120px, 1fr) minmax(120px, 0.8fr) minmax(156px, 1fr) minmax(104px, 0.6fr) minmax(76px, 0.4fr)
-    minmax(112px, 0.6fr);
+    minmax(112px, 0.6fr) minmax(124px, 0.6fr);
   gap: 12px;
   align-items: center;
-  min-width: 860px;
+  min-width: 980px;
   border-top: 1px solid #e3e9e5;
   padding: 10px 12px;
 }
@@ -1240,6 +1240,56 @@ button.version-chip:hover {
 
 .evidence-details {
   margin: 0;
+}
+
+.raw-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.raw-evidence-grid section,
+.raw-evidence-item {
+  display: grid;
+  gap: 8px;
+}
+
+.raw-evidence-grid h4,
+.raw-evidence-item p {
+  margin: 0;
+}
+
+.raw-evidence-item {
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.focused-raw-evidence {
+  border-color: #2f6f5a;
+  box-shadow: 0 0 0 3px rgba(47, 111, 90, 0.16);
+}
+
+.raw-evidence-item span {
+  color: #172033;
+  font-weight: 800;
+}
+
+.raw-evidence-item small,
+.raw-evidence-item a {
+  overflow-wrap: anywhere;
+  color: #566173;
+}
+
+.raw-evidence-item audio {
+  width: 100%;
+}
+
+@media (max-width: 920px) {
+  .raw-evidence-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {

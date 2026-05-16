@@ -244,6 +244,28 @@ export class StudyAuthorizationService {
     return this.requireResolvedStudyAccess(actor, studyId, "evidence_citation", evidenceCitationId, action, adminOverride);
   }
 
+  async recordSensitiveRead(
+    access: AuthorizedStudyAccess,
+    entityType: StudyAuthorizationEntity,
+    entityId: string,
+    metadata: Record<string, unknown> = {}
+  ) {
+    await this.store.writeAuditLog({
+      id: this.createAuditLogId(),
+      actorUserId: access.actorUserId,
+      actorRole: access.actorRole,
+      studyId: access.studyId,
+      entityType,
+      entityId,
+      action: access.action,
+      metadata: {
+        accessPath: access.accessPath,
+        ...metadata
+      },
+      createdAt: this.now().toISOString()
+    });
+  }
+
   private async requireResolvedStudyAccess(
     actor: SessionUser,
     studyId: string | undefined,

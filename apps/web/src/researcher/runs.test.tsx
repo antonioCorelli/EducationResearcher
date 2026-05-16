@@ -95,7 +95,9 @@ describe("ScoreReviewList", () => {
         ]}
         selectedEvidenceCitation={null}
         selectedEvidenceCitationError=""
+        rawEvidenceState={{ status: "idle" }}
         onDismissEvidenceCitation={noop}
+        onDismissRawEvidence={noop}
         onOpenEvidenceCitation={noop}
       />
     );
@@ -108,5 +110,63 @@ describe("ScoreReviewList", () => {
     expect(markup).toContain("Technical interruption");
     expect(markup).toContain("Survey evidence");
     expect(markup).not.toMatch(/openai|diagnostic|provider error|stack trace/i);
+  });
+
+  it("renders raw survey, transcript, and signed audio evidence", () => {
+    const markup = renderToStaticMarkup(
+      <ScoreReviewList
+        isLoadingEvidenceCitationId={null}
+        participantCodeBySlotId={new Map([["slot_fixture_001", "P001"]])}
+        scoreReviewState={{ status: "ready", scoreReviews: [] }}
+        scoreReviews={[]}
+        selectedEvidenceCitation={null}
+        selectedEvidenceCitationError=""
+        rawEvidenceState={{
+          status: "ready",
+          focusSourceId: "interview_turn_001",
+          evidence: {
+            run: createScoreReview("run_completed_001", []).run,
+            surveyResponses: [
+              {
+                id: "survey_response_001",
+                surveyQuestionId: "survey_question_001",
+                responseText: "I noticed that the example changed my reasoning.",
+                submittedAt: "2026-05-06T12:10:00.000Z"
+              }
+            ],
+            interviewTurns: [
+              {
+                id: "interview_turn_001",
+                speaker: "participant",
+                text: "The second example made the pattern much clearer.",
+                audioStartMs: 60000,
+                audioEndMs: 68000,
+                createdAt: "2026-05-06T12:25:00.000Z"
+              }
+            ],
+            audioAssets: [
+              {
+                id: "interview_audio_asset_001",
+                storageUri: "s3://fixture/audio.wav",
+                durationSeconds: 900,
+                status: "available",
+                signedUrl: "https://signed.example.test/audio",
+                signedUrlExpiresAt: "2026-05-06T13:00:00.000Z",
+                createdAt: "2026-05-06T12:35:00.000Z"
+              }
+            ]
+          }
+        }}
+        onDismissEvidenceCitation={noop}
+        onDismissRawEvidence={noop}
+        onOpenEvidenceCitation={noop}
+      />
+    );
+
+    expect(markup).toContain("Raw evidence");
+    expect(markup).toContain("I noticed that the example changed my reasoning.");
+    expect(markup).toContain("The second example made the pattern much clearer.");
+    expect(markup).toContain("Open signed audio link");
+    expect(markup).toContain("focused-raw-evidence");
   });
 });

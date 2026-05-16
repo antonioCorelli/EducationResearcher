@@ -288,6 +288,38 @@ export type ResolvedEvidenceCitation =
       };
     };
 
+export interface RawEvidence {
+  readonly run: Run;
+  readonly surveyResponses: readonly {
+    readonly id: string;
+    readonly surveyQuestionId: string;
+    readonly responseText: string;
+    readonly submittedAt: string;
+  }[];
+  readonly interviewTurns: readonly {
+    readonly id: string;
+    readonly speaker: "ai" | "participant";
+    readonly text: string;
+    readonly audioStartMs?: number;
+    readonly audioEndMs?: number;
+    readonly createdAt: string;
+  }[];
+  readonly audioAssets: readonly {
+    readonly id: string;
+    readonly storageUri: string;
+    readonly durationSeconds: number;
+    readonly status: string;
+    readonly signedUrl?: string;
+    readonly signedUrlExpiresAt?: string;
+    readonly createdAt: string;
+  }[];
+}
+
+export type RawEvidenceState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly evidence: RawEvidence; readonly focusSourceId?: string }
+  | { readonly status: "error"; readonly message: string };
+
 export type SurveyLayoutItem =
   | {
       readonly type: "question";
@@ -740,6 +772,21 @@ async function fetchResolvedEvidenceCitation(
   return (await response.json()) as ResolvedEvidenceCitation;
 }
 
+async function fetchRawEvidence(accessToken: string, studyId: string, runId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/runs/${runId}/raw-evidence`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message ?? "Unable to load raw evidence.");
+  }
+
+  return (await response.json()) as RawEvidence;
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -778,6 +825,8 @@ export function App() {
   const [selectedEvidenceCitation, setSelectedEvidenceCitation] = useState<ResolvedEvidenceCitation | null>(null);
   const [selectedEvidenceCitationError, setSelectedEvidenceCitationError] = useState("");
   const [isLoadingEvidenceCitationId, setIsLoadingEvidenceCitationId] = useState<string | null>(null);
+  const [rawEvidenceState, setRawEvidenceState] = useState<RawEvidenceState>({ status: "idle" });
+  const [isLoadingRawEvidenceRunId, setIsLoadingRawEvidenceRunId] = useState<string | null>(null);
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
   const [consentError, setConsentError] = useState("");
@@ -1401,10 +1450,37 @@ export function App() {
     try {
       const resolvedCitation = await fetchResolvedEvidenceCitation(token, selectedStudyId, runId, evidenceCitationId);
       setSelectedEvidenceCitation(resolvedCitation);
+      await openRawEvidence(runId, resolvedCitation.citation.sourceId);
     } catch (error) {
       setSelectedEvidenceCitationError(error instanceof Error ? error.message : "Unable to load citation evidence.");
     } finally {
       setIsLoadingEvidenceCitationId(null);
+    }
+  }
+
+  async function openRawEvidence(runId: string, focusSourceId?: string) {
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setRawEvidenceState({ status: "error", message: "Select a study before opening raw evidence." });
+      return;
+    }
+
+    setIsLoadingRawEvidenceRunId(runId);
+    setRawEvidenceState({ status: "loading" });
+
+    try {
+      const evidence = await fetchRawEvidence(token, selectedStudyId, runId);
+      setRawEvidenceState({ status: "ready", evidence, ...(focusSourceId ? { focusSourceId } : {}) });
+      window.setTimeout(() => {
+        document.getElementById(focusSourceId ? `raw-evidence-${focusSourceId}` : "raw-evidence-panel")?.scrollIntoView({
+          block: "nearest"
+        });
+      }, 0);
+    } catch (error) {
+      setRawEvidenceState({ status: "error", message: error instanceof Error ? error.message : "Unable to load raw evidence." });
+    } finally {
+      setIsLoadingRawEvidenceRunId(null);
     }
   }
 
@@ -2263,7 +2339,9 @@ export function App() {
             activeStudySetupTab={activeStudySetupTab}
             isCreatingRuns={isCreatingRuns}
             isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+            isLoadingRawEvidenceRunId={isLoadingRawEvidenceRunId}
             participantSlots={participantSlots}
+            rawEvidenceState={rawEvidenceState}
             runError={runError}
             runState={runState}
             scoreReviewState={scoreReviewState}
@@ -2276,7 +2354,9 @@ export function App() {
               setSelectedEvidenceCitation(null);
               setSelectedEvidenceCitationError("");
             }}
+            onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
             onOpenEvidenceCitation={handleOpenEvidenceCitation}
+            onOpenRawEvidence={openRawEvidence}
             onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
           />
         }

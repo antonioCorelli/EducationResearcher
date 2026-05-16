@@ -1,7 +1,8 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { SessionUser } from "./auth.js";
-import type { StudyAccessRecord, StudyAuthorizationStore } from "./authorization.js";
+import type { AuditLogWrite, StudyAccessRecord, StudyAuthorizationStore } from "./authorization.js";
+import type { AuditLogStore } from "./operational-events.js";
 
 export const DEFAULT_FRESHNESS_DAYS = 14;
 export const DEFAULT_MAX_INTERVIEW_MINUTES = 45;
@@ -295,7 +296,10 @@ export function toStudyShellAccessRecord(study: StudyShell) {
 }
 
 export class StudyShellAuthorizationStore implements StudyAuthorizationStore {
-  constructor(private readonly studyShellStore: Pick<StudyShellStore, "getById">) {}
+  constructor(
+    private readonly studyShellStore: Pick<StudyShellStore, "getById">,
+    private readonly auditLogStore?: AuditLogStore
+  ) {}
 
   async getStudyAccess(studyId: string): Promise<StudyAccessRecord | undefined> {
     const study = await this.studyShellStore.getById(studyId);
@@ -326,8 +330,8 @@ export class StudyShellAuthorizationStore implements StudyAuthorizationStore {
     return undefined;
   }
 
-  async writeAuditLog() {
-    return undefined;
+  async writeAuditLog(entry: AuditLogWrite) {
+    await this.auditLogStore?.writeAuditLog(entry);
   }
 }
 

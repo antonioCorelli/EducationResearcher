@@ -1,6 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "node:crypto";
+import type { AuditLogWrite } from "./authorization.js";
 
 export const AUDIO_CONNECTION_STATES = [
   "session_requested",
@@ -42,6 +43,10 @@ export interface OperationalEvent {
 
 export interface OperationalEventStore {
   record(event: OperationalEvent): Promise<OperationalEvent>;
+}
+
+export interface AuditLogStore {
+  writeAuditLog(entry: AuditLogWrite): Promise<void>;
 }
 
 export interface OperationalEventServiceOptions {
@@ -132,8 +137,9 @@ export class OperationalEventService {
   }
 }
 
-export class InMemoryOperationalEventStore implements OperationalEventStore {
+export class InMemoryOperationalEventStore implements OperationalEventStore, AuditLogStore {
   private readonly events: OperationalEvent[] = [];
+  private readonly auditLogs: AuditLogWrite[] = [];
 
   constructor(initialEvents: readonly OperationalEvent[] = []) {
     this.events = [...initialEvents];
@@ -149,6 +155,16 @@ export class InMemoryOperationalEventStore implements OperationalEventStore {
       .filter((event) => event.runId === runId)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
+
+  async writeAuditLog(entry: AuditLogWrite) {
+    this.auditLogs.push(entry);
+  }
+
+  async listAuditLogsByStudy(studyId: string) {
+    return this.auditLogs
+      .filter((entry) => entry.studyId === studyId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
 }
 
 interface OperationalEventItem extends OperationalEvent {
@@ -159,7 +175,17 @@ interface OperationalEventItem extends OperationalEvent {
   readonly gsi1sk: string;
 }
 
-export class DynamoDbOperationalEventStore implements OperationalEventStore {
+interface AuditLogItem extends AuditLogWrite {
+  readonly entity: "audit_log";
+  readonly pk: string;
+  readonly sk: string;
+  readonly gsi2pk: string;
+  readonly gsi2sk: string;
+  readonly gsi3pk: string;
+  readonly gsi3sk: string;
+}
+
+export class DynamoDbOperationalEventStore implements OperationalEventStore, AuditLogStore {
   private readonly documentClient: DynamoDBDocumentClient;
   private readonly tableName: string;
 
@@ -192,6 +218,16 @@ export class DynamoDbOperationalEventStore implements OperationalEventStore {
     );
 
     return event;
+  }
+
+  async writeAuditLog(entry: AuditLogWrite) {
+    await this.documentClient.send(
+      new PutCommand({
+        TableName: this.tableName,
+        Item: toAuditLogItem(entry),
+        ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
+      })
+    );
   }
 }
 
@@ -245,6 +281,19 @@ function toOperationalEventItem(event: OperationalEvent): OperationalEventItem {
     gsi1pk: `RUN#${event.runId}#OPERATIONAL_EVENT`,
     gsi1sk: `OPERATIONAL_EVENT#${event.createdAt}#${event.id}`,
     ...event
+  };
+}
+
+function toAuditLogItem(entry: AuditLogWrite): AuditLogItem {
+  return {
+    entity: "audit_log",
+    pk: `STUDY#${entry.studyId}`,
+    sk: `AUDIT#${entry.createdAt}#${entry.id}`,
+    gsi2pk: `STUDY#${entry.studyId}`,
+    gsi2sk: `AUDIT#${entry.createdAt}#${entry.id}`,
+    gsi3pk: `ACTOR#${entry.actorUserId}`,
+    gsi3sk: `AUDIT#${entry.createdAt}#${entry.id}`,
+    ...entry
   };
 }
 

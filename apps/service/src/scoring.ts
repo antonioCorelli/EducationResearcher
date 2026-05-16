@@ -144,6 +144,18 @@ export interface ResolvedEvidenceCitation {
   readonly source: ResolvedEvidenceCitationSource;
 }
 
+export interface ResearcherRawEvidenceAudioAsset extends InterviewAudioAsset {
+  readonly signedUrl?: string;
+  readonly signedUrlExpiresAt?: string;
+}
+
+export interface ResearcherRawEvidence {
+  readonly run: Run;
+  readonly surveyResponses: readonly SurveyResponse[];
+  readonly interviewTurns: readonly InterviewTurn[];
+  readonly audioAssets: readonly ResearcherRawEvidenceAudioAsset[];
+}
+
 export interface ResearcherObjectiveScoreReview {
   readonly objectiveVersion: Pick<ObjectiveVersion, "id" | "objectiveKey" | "versionNumber" | "title" | "sortOrder"> & {
     readonly status?: "missing";
@@ -179,6 +191,8 @@ export interface ScoringServiceOptions {
   readonly createScoringRunId?: () => string;
   readonly createObjectiveScoreId?: () => string;
   readonly createEvidenceCitationId?: () => string;
+  readonly createSignedAudioUrl?: (asset: InterviewAudioAsset, expiresAt: Date) => string | undefined;
+  readonly signedAudioUrlTtlSeconds?: number;
 }
 
 export interface AutomaticScoringTriggerInput {
@@ -291,6 +305,8 @@ export class ScoringService {
   private readonly createScoringRunId: () => string;
   private readonly createObjectiveScoreId: () => string;
   private readonly createEvidenceCitationId: () => string;
+  private readonly createSignedAudioUrl: (asset: InterviewAudioAsset, expiresAt: Date) => string | undefined;
+  private readonly signedAudioUrlTtlSeconds: number;
 
   constructor(
     private readonly runStore: Pick<
@@ -312,6 +328,8 @@ export class ScoringService {
     this.createScoringRunId = options.createScoringRunId ?? (() => `scoring_run_${randomUUID()}`);
     this.createObjectiveScoreId = options.createObjectiveScoreId ?? (() => `objective_score_${randomUUID()}`);
     this.createEvidenceCitationId = options.createEvidenceCitationId ?? (() => `evidence_citation_${randomUUID()}`);
+    this.createSignedAudioUrl = options.createSignedAudioUrl ?? createLocalSignedAudioUrl;
+    this.signedAudioUrlTtlSeconds = options.signedAudioUrlTtlSeconds ?? 15 * 60;
   }
 
   async triggerAutomaticScoring(input: AutomaticScoringTriggerInput) {
@@ -445,6 +463,34 @@ export class ScoringService {
         audioStartMs: citation.audioStartMs,
         audioEndMs: citation.audioEndMs
       }
+    };
+  }
+
+  async getRawEvidenceForRun(input: {
+    readonly studyId: string;
+    readonly runId: string;
+  }): Promise<ResearcherRawEvidence> {
+    const run = await this.runStore.getById(input.runId);
+
+    if (!run || run.studyId !== input.studyId) {
+      throw new ScoringNotFoundError("Run evidence was not found.");
+    }
+
+    const expiresAt = new Date(this.now().getTime() + this.signedAudioUrlTtlSeconds * 1000);
+    const audioAssets = (await this.runStore.listInterviewAudioAssetsByRun(run.id)).map((asset) => {
+      const signedUrl = asset.status === "available" ? this.createSignedAudioUrl(asset, expiresAt) : undefined;
+
+      return {
+        ...asset,
+        ...(signedUrl ? { signedUrl, signedUrlExpiresAt: expiresAt.toISOString() } : {})
+      };
+    });
+
+    return {
+      run,
+      surveyResponses: await this.runStore.listSurveyResponsesByRun(run.id),
+      interviewTurns: await this.runStore.listInterviewTurnsByRun(run.id),
+      audioAssets
     };
   }
 
@@ -653,6 +699,18 @@ function createDefaultFlags(status: Run["status"]): readonly ScoreFlag[] {
   }
 
   return [];
+}
+
+function createLocalSignedAudioUrl(asset: InterviewAudioAsset, expiresAt: Date) {
+  if (!asset.storageUri.startsWith("s3://")) {
+    return undefined;
+  }
+
+  const url = new URL("https://signed-audio.local/education-researcher");
+  url.searchParams.set("assetId", asset.id);
+  url.searchParams.set("expiresAt", expiresAt.toISOString());
+  url.searchParams.set("storageUri", asset.storageUri);
+  return url.toString();
 }
 
 function parseConfidence(value: unknown) {

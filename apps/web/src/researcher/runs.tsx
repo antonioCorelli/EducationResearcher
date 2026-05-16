@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import type {
   EvidenceCitation,
   ParticipantSlot,
+  RawEvidenceState,
   ResolvedEvidenceCitation,
   Run,
   RunScoreReview,
@@ -16,8 +17,10 @@ import type {
 interface ResearcherRunsProps {
   readonly activeStudySetupTab: StudySetupTab;
   readonly isLoadingEvidenceCitationId: string | null;
+  readonly isLoadingRawEvidenceRunId: string | null;
   readonly isCreatingRuns: boolean;
   readonly participantSlots: readonly ParticipantSlot[];
+  readonly rawEvidenceState: RawEvidenceState;
   readonly runError: string;
   readonly runState: RunState;
   readonly scoreReviewState: ScoreReviewState;
@@ -27,15 +30,19 @@ interface ResearcherRunsProps {
   readonly selectedStudy: StudyShell | undefined;
   readonly onCreateRuns: (event: FormEvent<HTMLFormElement>) => void;
   readonly onDismissEvidenceCitation: () => void;
+  readonly onDismissRawEvidence: () => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+  readonly onOpenRawEvidence: (runId: string) => void;
   readonly onSelectedRunParticipantSlotIdsChange: (participantSlotIds: readonly string[]) => void;
 }
 
 export function ResearcherRuns({
   activeStudySetupTab,
   isLoadingEvidenceCitationId,
+  isLoadingRawEvidenceRunId,
   isCreatingRuns,
   participantSlots,
+  rawEvidenceState,
   runError,
   runState,
   scoreReviewState,
@@ -45,7 +52,9 @@ export function ResearcherRuns({
   selectedStudy,
   onCreateRuns,
   onDismissEvidenceCitation,
+  onDismissRawEvidence,
   onOpenEvidenceCitation,
+  onOpenRawEvidence,
   onSelectedRunParticipantSlotIdsChange
 }: ResearcherRunsProps) {
   const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
@@ -117,6 +126,7 @@ export function ResearcherRuns({
             <span role="columnheader">Interview cap</span>
             <span role="columnheader">Current</span>
             <span role="columnheader">Access</span>
+            <span role="columnheader">Evidence</span>
           </div>
           {runs.map((run) => (
             <div className="run-row" key={run.id} role="row">
@@ -141,6 +151,16 @@ export function ResearcherRuns({
                   "Unavailable"
                 )}
               </span>
+              <span role="cell">
+                <button
+                  className="secondary-button compact-button"
+                  disabled={isLoadingRawEvidenceRunId === run.id}
+                  onClick={() => onOpenRawEvidence(run.id)}
+                  type="button"
+                >
+                  {isLoadingRawEvidenceRunId === run.id ? "Opening" : "View evidence"}
+                </button>
+              </span>
             </div>
           ))}
         </div>
@@ -152,7 +172,9 @@ export function ResearcherRuns({
         scoreReviews={scoreReviews}
         selectedEvidenceCitation={selectedEvidenceCitation}
         selectedEvidenceCitationError={selectedEvidenceCitationError}
+        rawEvidenceState={rawEvidenceState}
         onDismissEvidenceCitation={onDismissEvidenceCitation}
+        onDismissRawEvidence={onDismissRawEvidence}
         onOpenEvidenceCitation={onOpenEvidenceCitation}
       />
     </section>
@@ -166,7 +188,9 @@ interface ScoreReviewListProps {
   readonly scoreReviews: readonly RunScoreReview[];
   readonly selectedEvidenceCitation: ResolvedEvidenceCitation | null;
   readonly selectedEvidenceCitationError: string;
+  readonly rawEvidenceState: RawEvidenceState;
   readonly onDismissEvidenceCitation: () => void;
+  readonly onDismissRawEvidence: () => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
 }
 
@@ -177,7 +201,9 @@ export function ScoreReviewList({
   scoreReviews,
   selectedEvidenceCitation,
   selectedEvidenceCitationError,
+  rawEvidenceState,
   onDismissEvidenceCitation,
+  onDismissRawEvidence,
   onOpenEvidenceCitation
 }: ScoreReviewListProps) {
   const scoredReviews = scoreReviews.filter((review) => review.scoringRun);
@@ -267,6 +293,7 @@ export function ScoreReviewList({
       {selectedEvidenceCitation ? (
         <EvidenceCitationPanel citation={selectedEvidenceCitation} onDismiss={onDismissEvidenceCitation} />
       ) : null}
+      <RawEvidencePanel rawEvidenceState={rawEvidenceState} onDismiss={onDismissRawEvidence} />
     </div>
   );
 }
@@ -383,6 +410,99 @@ function EvidenceCitationPanel({
   );
 }
 
+function RawEvidencePanel({
+  rawEvidenceState,
+  onDismiss
+}: {
+  readonly rawEvidenceState: RawEvidenceState;
+  readonly onDismiss: () => void;
+}) {
+  if (rawEvidenceState.status !== "ready") {
+    if (rawEvidenceState.status === "error") {
+      return <p className="form-error">{rawEvidenceState.message}</p>;
+    }
+
+    if (rawEvidenceState.status === "loading") {
+      return <p className="muted-copy">Loading raw evidence</p>;
+    }
+
+    return null;
+  }
+
+  const { evidence, focusSourceId } = rawEvidenceState;
+
+  return (
+    <section className="evidence-panel raw-evidence-panel" id="raw-evidence-panel" aria-labelledby="raw-evidence-title">
+      <div className="section-heading">
+        <div>
+          <h3 id="raw-evidence-title">Raw evidence</h3>
+          <p>Run {evidence.run.id}</p>
+        </div>
+        <button className="secondary-button compact-button" onClick={onDismiss} type="button">
+          Close
+        </button>
+      </div>
+      <div className="raw-evidence-grid">
+        <section aria-labelledby="survey-evidence-title">
+          <h4 id="survey-evidence-title">Survey responses</h4>
+          {evidence.surveyResponses.length === 0 ? <p className="muted-copy">No survey responses captured</p> : null}
+          {evidence.surveyResponses.map((response) => (
+            <article
+              className={focusSourceId === response.id ? "raw-evidence-item focused-raw-evidence" : "raw-evidence-item"}
+              id={`raw-evidence-${response.id}`}
+              key={response.id}
+            >
+              <span>{response.surveyQuestionId}</span>
+              <p>{response.responseText}</p>
+              <small>{formatDateTime(response.submittedAt)}</small>
+            </article>
+          ))}
+        </section>
+        <section aria-labelledby="transcript-evidence-title">
+          <h4 id="transcript-evidence-title">Transcript turns</h4>
+          {evidence.interviewTurns.length === 0 ? <p className="muted-copy">No transcript turns captured</p> : null}
+          {evidence.interviewTurns.map((turn) => (
+            <article
+              className={focusSourceId === turn.id ? "raw-evidence-item focused-raw-evidence" : "raw-evidence-item"}
+              id={`raw-evidence-${turn.id}`}
+              key={turn.id}
+            >
+              <span>{formatSpeaker(turn.speaker)}</span>
+              <p>{turn.text}</p>
+              <small>{formatOptionalAudioSpan(turn.audioStartMs, turn.audioEndMs)}</small>
+            </article>
+          ))}
+        </section>
+        <section aria-labelledby="audio-evidence-title">
+          <h4 id="audio-evidence-title">Audio</h4>
+          {evidence.audioAssets.length === 0 ? <p className="muted-copy">No audio assets captured</p> : null}
+          {evidence.audioAssets.map((asset) => (
+            <article
+              className={focusSourceId === asset.id ? "raw-evidence-item focused-raw-evidence" : "raw-evidence-item"}
+              id={`raw-evidence-${asset.id}`}
+              key={asset.id}
+            >
+              <span>{asset.status}</span>
+              <p>{formatAudioDuration(asset.durationSeconds)}</p>
+              {asset.signedUrl ? (
+                <>
+                  <audio controls preload="none" src={asset.signedUrl} />
+                  <a href={asset.signedUrl} rel="noreferrer" target="_blank">
+                    Open signed audio link
+                  </a>
+                </>
+              ) : (
+                <small>Audio link unavailable</small>
+              )}
+              {asset.signedUrlExpiresAt ? <small>Link expires {formatDateTime(asset.signedUrlExpiresAt)}</small> : null}
+            </article>
+          ))}
+        </section>
+      </div>
+    </section>
+  );
+}
+
 function formatRunStatus(run: Run) {
   return run.status.replaceAll("_", " ");
 }
@@ -450,6 +570,14 @@ function formatAudioSpan(startMs: number, endMs: number) {
 
 function formatMilliseconds(value: number) {
   return `${(value / 1000).toFixed(1)}s`;
+}
+
+function formatAudioDuration(value: number) {
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.round(value % 60)
+    .toString()
+    .padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
 function formatDateTime(value: string) {

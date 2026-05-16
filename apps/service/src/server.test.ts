@@ -4185,6 +4185,148 @@ describe("researcher evidence citation routes", () => {
     await server.close();
   });
 
+  it("returns authorized raw evidence with signed audio links and audit logging", async () => {
+    const run = createFixtureRun({ status: "scored" });
+    const runStore = new InMemoryRunStore([run]);
+    const operationsStore = new InMemoryOperationalEventStore();
+
+    await runStore.submitSurvey(
+      [
+        {
+          id: "survey_response_001",
+          studyId: run.studyId,
+          participantSlotId: run.participantSlotId,
+          runId: run.id,
+          surveyVersionId: run.surveyVersionId,
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed that the example changed my reasoning.",
+          submittedAt: "2026-05-06T12:10:00.000Z",
+          createdAt: "2026-05-06T12:10:00.000Z"
+        }
+      ],
+      run,
+      "scored"
+    );
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        sessionNumber: 1,
+        status: "completed",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:35:00.000Z",
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:35:00.000Z"
+      },
+      run,
+      "scored"
+    );
+    await runStore.saveInterviewArtifacts({
+      interviewSession: {
+        id: "interview_session_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        sessionNumber: 1,
+        status: "completed",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:35:00.000Z",
+        audioDurationSeconds: 900,
+        transcriptTokenCount: 120,
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:35:00.000Z"
+      },
+      turns: [
+        {
+          id: "interview_turn_001",
+          studyId: run.studyId,
+          participantSlotId: run.participantSlotId,
+          runId: run.id,
+          interviewSessionId: "interview_session_001",
+          speaker: "participant",
+          text: "The second example made the pattern much clearer.",
+          audioStartMs: 60000,
+          audioEndMs: 68000,
+          createdAt: "2026-05-06T12:25:00.000Z"
+        }
+      ],
+      audioAsset: {
+        id: "interview_audio_asset_001",
+        studyId: run.studyId,
+        participantSlotId: run.participantSlotId,
+        runId: run.id,
+        interviewSessionId: "interview_session_001",
+        storageUri: "s3://fixture-bucket/run_fixture_001/audio.wav",
+        durationSeconds: 900,
+        status: "available",
+        createdAt: "2026-05-06T12:35:00.000Z"
+      }
+    });
+
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      operationalEventStore: operationsStore,
+      runStore,
+      scoringServiceOptions: {
+        now: () => new Date("2026-05-06T12:45:00.000Z"),
+        createSignedAudioUrl: (asset, expiresAt) => `https://signed.example.test/${asset.id}?expires=${expiresAt.toISOString()}`
+      },
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/runs/run_fixture_001/raw-evidence",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      run: {
+        id: "run_fixture_001"
+      },
+      surveyResponses: [
+        {
+          id: "survey_response_001",
+          responseText: "I noticed that the example changed my reasoning."
+        }
+      ],
+      interviewTurns: [
+        {
+          id: "interview_turn_001",
+          text: "The second example made the pattern much clearer."
+        }
+      ],
+      audioAssets: [
+        {
+          id: "interview_audio_asset_001",
+          signedUrl: "https://signed.example.test/interview_audio_asset_001?expires=2026-05-06T13:00:00.000Z",
+          signedUrlExpiresAt: "2026-05-06T13:00:00.000Z"
+        }
+      ]
+    });
+    await expect(operationsStore.listAuditLogsByStudy("study_fixture_001")).resolves.toEqual([
+      expect.objectContaining({
+        actorUserId: researcher.id,
+        entityType: "run",
+        entityId: "run_fixture_001",
+        action: "read_raw_artifact",
+        metadata: expect.objectContaining({
+          rawArtifactView: "run_raw_evidence",
+          surveyResponseCount: 1,
+          interviewTurnCount: 1,
+          audioAssetCount: 1
+        })
+      })
+    ]);
+
+    await server.close();
+  });
+
   it("denies citation resolution across studies before reading raw evidence", async () => {
     const server = buildServer({
       authProvider: createFakeAuthProvider(),
