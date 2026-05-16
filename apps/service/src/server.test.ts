@@ -12,7 +12,7 @@ import {
   type ParticipantAccessToken,
   type Run
 } from "./runs.js";
-import { InMemoryScoringStore, type EvidenceCitation } from "./scoring.js";
+import { InMemoryScoringStore, type EvidenceCitation, type ObjectiveScore, type ScoringRun } from "./scoring.js";
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
@@ -199,6 +199,38 @@ function createFixtureEvidenceCitation(overrides: Partial<EvidenceCitation> = {}
     sourceType: "survey_response",
     sourceId: "survey_response_001",
     quote: "I noticed that the example changed my reasoning.",
+    createdAt: "2026-05-06T12:40:00.000Z",
+    ...overrides
+  };
+}
+
+function createFixtureScoringRun(overrides: Partial<ScoringRun> = {}): ScoringRun {
+  return {
+    id: "scoring_run_001",
+    runId: "run_fixture_001",
+    status: "completed",
+    trigger: "automatic",
+    modelName: "fake-scoring",
+    modelVersion: "local-1",
+    serviceRequestId: "req_scoring_001",
+    promptVersion: "scoring-v1",
+    objectiveVersionSetHash: "sha256:fixture",
+    scoredAt: "2026-05-06T12:40:00.000Z",
+    createdAt: "2026-05-06T12:40:00.000Z",
+    ...overrides
+  };
+}
+
+function createFixtureObjectiveScore(overrides: Partial<ObjectiveScore> = {}): ObjectiveScore {
+  return {
+    id: "objective_score_001",
+    scoringRunId: "scoring_run_001",
+    runId: "run_fixture_001",
+    objectiveVersionId: "objective_version_001",
+    gradeLabel: "2",
+    confidence: 0.36,
+    rationale: "Survey and interview evidence conflict, and the interview ended early.",
+    flags: ["low_confidence", "survey_interview_contradiction", "partial_run"],
     createdAt: "2026-05-06T12:40:00.000Z",
     ...overrides
   };
@@ -3806,6 +3838,299 @@ describe("researcher objective routes", () => {
 });
 
 describe("researcher evidence citation routes", () => {
+  it("lists researcher score reviews grouped by participant run and objective", async () => {
+    const runs = [
+      createFixtureRun({ id: "run_completed_001", status: "scored", participantSlotId: "slot_fixture_001" }),
+      createFixtureRun({
+        id: "run_stale_001",
+        status: "scored",
+        participantSlotId: "slot_fixture_001",
+        createdAt: "2026-05-07T12:00:00.000Z",
+        updatedAt: "2026-05-07T12:40:00.000Z"
+      }),
+      createFixtureRun({
+        id: "run_partial_001",
+        status: "scored",
+        participantSlotId: "slot_fixture_001",
+        createdAt: "2026-05-08T12:00:00.000Z",
+        updatedAt: "2026-05-08T12:40:00.000Z"
+      }),
+      createFixtureRun({
+        id: "run_technical_001",
+        status: "scored",
+        participantSlotId: "slot_fixture_001",
+        createdAt: "2026-05-09T12:00:00.000Z",
+        updatedAt: "2026-05-09T12:40:00.000Z"
+      })
+    ];
+    const scoringRuns = [
+      createFixtureScoringRun({ id: "scoring_run_completed_001", runId: "run_completed_001" }),
+      createFixtureScoringRun({
+        id: "scoring_run_stale_001",
+        runId: "run_stale_001",
+        scoredAt: "2026-05-07T12:40:00.000Z",
+        createdAt: "2026-05-07T12:40:00.000Z"
+      }),
+      createFixtureScoringRun({
+        id: "scoring_run_partial_001",
+        runId: "run_partial_001",
+        scoredAt: "2026-05-08T12:40:00.000Z",
+        createdAt: "2026-05-08T12:40:00.000Z"
+      }),
+      createFixtureScoringRun({
+        id: "scoring_run_technical_001",
+        runId: "run_technical_001",
+        scoredAt: "2026-05-09T12:40:00.000Z",
+        createdAt: "2026-05-09T12:40:00.000Z"
+      })
+    ];
+    const objectiveScores = [
+      createFixtureObjectiveScore({
+        id: "objective_score_completed_001",
+        scoringRunId: "scoring_run_completed_001",
+        runId: "run_completed_001",
+        confidence: 0.87,
+        flags: []
+      }),
+      createFixtureObjectiveScore({
+        id: "objective_score_stale_001",
+        scoringRunId: "scoring_run_stale_001",
+        runId: "run_stale_001",
+        confidence: 0.45,
+        flags: ["low_confidence", "stale_run", "missing_interview_evidence"]
+      }),
+      createFixtureObjectiveScore({
+        id: "objective_score_partial_001",
+        scoringRunId: "scoring_run_partial_001",
+        runId: "run_partial_001",
+        confidence: 0.4,
+        flags: ["low_confidence", "partial_run", "missing_interview_evidence"]
+      }),
+      createFixtureObjectiveScore({
+        id: "objective_score_technical_001",
+        scoringRunId: "scoring_run_technical_001",
+        runId: "run_technical_001",
+        confidence: 0.33,
+        flags: ["low_confidence", "technical_interruption", "missing_interview_evidence"]
+      })
+    ];
+    const citations = [
+      createFixtureEvidenceCitation({
+        id: "evidence_citation_completed_001",
+        objectiveScoreId: "objective_score_completed_001",
+        runId: "run_completed_001"
+      })
+    ];
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([createFixtureObjectiveVersion()]),
+      runStore: new InMemoryRunStore(runs),
+      scoringStore: new InMemoryScoringStore(scoringRuns, objectiveScores, citations),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/score-reviews",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      scoreReviews: [
+        {
+          run: {
+            id: "run_technical_001"
+          },
+          scoringRun: {
+            id: "scoring_run_technical_001",
+            modelName: "fake-scoring",
+            promptVersion: "scoring-v1"
+          },
+          objectiveScores: [
+            {
+              objectiveVersion: {
+                title: "Reasoning Quality",
+                versionNumber: 1
+              },
+              score: {
+                confidence: 0.33,
+                flags: ["low_confidence", "technical_interruption", "missing_interview_evidence"]
+              }
+            }
+          ]
+        },
+        {
+          run: {
+            id: "run_partial_001"
+          },
+          objectiveScores: [
+            {
+              score: {
+                flags: ["low_confidence", "partial_run", "missing_interview_evidence"]
+              }
+            }
+          ]
+        },
+        {
+          run: {
+            id: "run_stale_001"
+          },
+          objectiveScores: [
+            {
+              score: {
+                flags: ["low_confidence", "stale_run", "missing_interview_evidence"]
+              }
+            }
+          ]
+        },
+        {
+          run: {
+            id: "run_completed_001"
+          },
+          objectiveScores: [
+            {
+              citations: [
+                {
+                  id: "evidence_citation_completed_001",
+                  sourceType: "survey_response"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
+  it("loads score reviews when one participant run is scored and the remaining created runs are unscored", async () => {
+    const runs = Array.from({ length: 10 }, (_unused, index) =>
+      createFixtureRun({
+        id: `run_fixture_${String(index + 1).padStart(3, "0")}`,
+        participantSlotId: `slot_fixture_${String(index + 1).padStart(3, "0")}`,
+        status: index === 3 ? "scored" : "created",
+        currentRunForSlot: true,
+        createdAt: `2026-05-${String(index + 1).padStart(2, "0")}T12:00:00.000Z`,
+        updatedAt: `2026-05-${String(index + 1).padStart(2, "0")}T12:00:00.000Z`
+      })
+    );
+    const scoredRun = runs[3]!;
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([createFixtureObjectiveVersion()]),
+      runStore: new InMemoryRunStore(runs),
+      scoringStore: new InMemoryScoringStore(
+        [createFixtureScoringRun({ id: "scoring_run_single_completed_001", runId: scoredRun.id })],
+        [
+          createFixtureObjectiveScore({
+            id: "objective_score_single_completed_001",
+            scoringRunId: "scoring_run_single_completed_001",
+            runId: scoredRun.id,
+            confidence: 0.82,
+            flags: []
+          })
+        ],
+        [
+          createFixtureEvidenceCitation({
+            id: "evidence_citation_single_completed_001",
+            objectiveScoreId: "objective_score_single_completed_001",
+            runId: scoredRun.id
+          })
+        ]
+      ),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/score-reviews",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const scoreReviews = response.json().scoreReviews;
+
+    expect(scoreReviews).toHaveLength(10);
+    expect(scoreReviews.filter((review: { scoringRun?: unknown }) => review.scoringRun)).toHaveLength(1);
+    expect(scoreReviews).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          run: expect.objectContaining({
+            id: scoredRun.id,
+            status: "scored"
+          }),
+          scoringRun: expect.objectContaining({
+            id: "scoring_run_single_completed_001"
+          }),
+          objectiveScores: [
+            expect.objectContaining({
+              score: expect.objectContaining({
+                confidence: 0.82
+              }),
+              citations: [
+                expect.objectContaining({
+                  id: "evidence_citation_single_completed_001"
+                })
+              ]
+            })
+          ]
+        })
+      ])
+    );
+
+    await server.close();
+  });
+
+  it("keeps score reviews loadable when a persisted score references archived objective metadata", async () => {
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      objectiveVersionStore: new InMemoryObjectiveVersionStore([]),
+      runStore: new InMemoryRunStore([createFixtureRun({ status: "scored" })]),
+      scoringStore: new InMemoryScoringStore(
+        [createFixtureScoringRun()],
+        [createFixtureObjectiveScore({ objectiveVersionId: "objective_version_archived_001" })],
+        []
+      ),
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/score-reviews",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      scoreReviews: [
+        {
+          objectiveScores: [
+            {
+              objectiveVersion: {
+                id: "objective_version_archived_001",
+                title: "Archived objective",
+                status: "missing"
+              },
+              score: {
+                objectiveVersionId: "objective_version_archived_001"
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    await server.close();
+  });
+
   it("resolves authorized citations to raw survey evidence", async () => {
     const run = createFixtureRun({ status: "interview_completed" });
     const runStore = new InMemoryRunStore([run]);

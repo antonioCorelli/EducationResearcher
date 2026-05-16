@@ -1,32 +1,56 @@
 import { useState, type FormEvent } from "react";
 
-import type { ParticipantSlot, Run, RunState, StudySetupTab, StudyShell } from "../App";
+import type {
+  EvidenceCitation,
+  ParticipantSlot,
+  ResolvedEvidenceCitation,
+  Run,
+  RunScoreReview,
+  RunState,
+  ScoreFlag,
+  ScoreReviewState,
+  StudySetupTab,
+  StudyShell
+} from "../App";
 
 interface ResearcherRunsProps {
   readonly activeStudySetupTab: StudySetupTab;
+  readonly isLoadingEvidenceCitationId: string | null;
   readonly isCreatingRuns: boolean;
   readonly participantSlots: readonly ParticipantSlot[];
   readonly runError: string;
   readonly runState: RunState;
+  readonly scoreReviewState: ScoreReviewState;
+  readonly selectedEvidenceCitation: ResolvedEvidenceCitation | null;
+  readonly selectedEvidenceCitationError: string;
   readonly selectedRunParticipantSlotIds: readonly string[];
   readonly selectedStudy: StudyShell | undefined;
   readonly onCreateRuns: (event: FormEvent<HTMLFormElement>) => void;
+  readonly onDismissEvidenceCitation: () => void;
+  readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
   readonly onSelectedRunParticipantSlotIdsChange: (participantSlotIds: readonly string[]) => void;
 }
 
 export function ResearcherRuns({
   activeStudySetupTab,
+  isLoadingEvidenceCitationId,
   isCreatingRuns,
   participantSlots,
   runError,
   runState,
+  scoreReviewState,
+  selectedEvidenceCitation,
+  selectedEvidenceCitationError,
   selectedRunParticipantSlotIds,
   selectedStudy,
   onCreateRuns,
+  onDismissEvidenceCitation,
+  onOpenEvidenceCitation,
   onSelectedRunParticipantSlotIdsChange
 }: ResearcherRunsProps) {
   const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
   const runs = runState.status === "ready" ? runState.runs : [];
+  const scoreReviews = scoreReviewState.status === "ready" ? scoreReviewState.scoreReviews : [];
   const activeParticipantSlots = participantSlots.filter((slot) => slot.status === "active");
   const participantCodeBySlotId = new Map(participantSlots.map((slot) => [slot.id, slot.participantCode]));
   const currentRunBySlotId = new Map(runs.filter((run) => run.currentRunForSlot).map((run) => [run.participantSlotId, run]));
@@ -121,12 +145,311 @@ export function ResearcherRuns({
           ))}
         </div>
       ) : null}
+      <ScoreReviewList
+        isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+        participantCodeBySlotId={participantCodeBySlotId}
+        scoreReviewState={scoreReviewState}
+        scoreReviews={scoreReviews}
+        selectedEvidenceCitation={selectedEvidenceCitation}
+        selectedEvidenceCitationError={selectedEvidenceCitationError}
+        onDismissEvidenceCitation={onDismissEvidenceCitation}
+        onOpenEvidenceCitation={onOpenEvidenceCitation}
+      />
+    </section>
+  );
+}
+
+interface ScoreReviewListProps {
+  readonly isLoadingEvidenceCitationId: string | null;
+  readonly participantCodeBySlotId: ReadonlyMap<string, string>;
+  readonly scoreReviewState: ScoreReviewState;
+  readonly scoreReviews: readonly RunScoreReview[];
+  readonly selectedEvidenceCitation: ResolvedEvidenceCitation | null;
+  readonly selectedEvidenceCitationError: string;
+  readonly onDismissEvidenceCitation: () => void;
+  readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+}
+
+export function ScoreReviewList({
+  isLoadingEvidenceCitationId,
+  participantCodeBySlotId,
+  scoreReviewState,
+  scoreReviews,
+  selectedEvidenceCitation,
+  selectedEvidenceCitationError,
+  onDismissEvidenceCitation,
+  onOpenEvidenceCitation
+}: ScoreReviewListProps) {
+  const scoredReviews = scoreReviews.filter((review) => review.scoringRun);
+
+  return (
+    <div className="score-review-section" aria-labelledby="score-review-title">
+      <div className="section-heading">
+        <h2 id="score-review-title">Score review</h2>
+        {scoredReviews.length > 0 ? <span className="version-pill">{scoredReviews.length} scored</span> : null}
+      </div>
+      {scoreReviewState.status === "loading" ? <p className="muted-copy">Loading score reviews</p> : null}
+      {scoreReviewState.status === "error" ? <p className="form-error">{scoreReviewState.message}</p> : null}
+      {scoreReviewState.status === "ready" && scoredReviews.length === 0 ? (
+        <p className="muted-copy">No scored participant runs yet</p>
+      ) : null}
+      {scoredReviews.length > 0 ? (
+        <div className="score-review-list">
+          {scoredReviews.map((review) => (
+            <article className="score-review-run" key={review.run.id}>
+              <div className="score-review-run-heading">
+                <div>
+                  <h3>{participantCodeBySlotId.get(review.run.participantSlotId) ?? review.run.participantSlotId}</h3>
+                  <p>
+                    Run {review.run.id} · {formatRunStatus(review.run)}
+                  </p>
+                </div>
+                {review.scoringRun ? (
+                  <dl className="score-metadata">
+                    <div>
+                      <dt>Scored</dt>
+                      <dd>{formatDateTime(review.scoringRun.scoredAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Trigger</dt>
+                      <dd>{formatScoringTrigger(review.scoringRun.trigger)}</dd>
+                    </div>
+                    <div>
+                      <dt>Model</dt>
+                      <dd>{review.scoringRun.modelName}</dd>
+                    </div>
+                    <div>
+                      <dt>Prompt</dt>
+                      <dd>{review.scoringRun.promptVersion}</dd>
+                    </div>
+                  </dl>
+                ) : null}
+              </div>
+              <div className="objective-score-list">
+                {review.objectiveScores.map(({ objectiveVersion, score, citations }) => {
+                  const lowConfidence = score.confidence < 0.5 || score.flags.includes("low_confidence");
+
+                  return (
+                    <section className={lowConfidence ? "objective-score low-confidence-score" : "objective-score"} key={score.id}>
+                      <div className="objective-score-heading">
+                        <div>
+                          <h4>{objectiveVersion.title}</h4>
+                          <p>
+                            {objectiveVersion.status === "missing"
+                              ? `Objective reference ${objectiveVersion.id}`
+                              : `Objective v${objectiveVersion.versionNumber}`}
+                          </p>
+                        </div>
+                        <div className="score-grade-stack">
+                          <strong>{score.gradeLabel}</strong>
+                          <span className={lowConfidence ? "confidence-pill low-confidence-pill" : "confidence-pill"}>
+                            {formatConfidence(score.confidence)}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="score-rationale">{score.rationale}</p>
+                      <FlagList flags={score.flags} />
+                      <CitationList
+                        citations={citations}
+                        isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+                        runId={review.run.id}
+                        onOpenEvidenceCitation={onOpenEvidenceCitation}
+                      />
+                    </section>
+                  );
+                })}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {selectedEvidenceCitationError ? <p className="form-error">{selectedEvidenceCitationError}</p> : null}
+      {selectedEvidenceCitation ? (
+        <EvidenceCitationPanel citation={selectedEvidenceCitation} onDismiss={onDismissEvidenceCitation} />
+      ) : null}
+    </div>
+  );
+}
+
+function FlagList({ flags }: { readonly flags: readonly ScoreFlag[] }) {
+  if (flags.length === 0) {
+    return <p className="muted-copy">No scoring flags</p>;
+  }
+
+  return (
+    <div className="score-flag-list" aria-label="Score flags">
+      {flags.map((flag) => (
+        <span className={flag === "low_confidence" ? "score-flag low-confidence-flag" : "score-flag"} key={flag}>
+          {formatScoreFlag(flag)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CitationList({
+  citations,
+  isLoadingEvidenceCitationId,
+  runId,
+  onOpenEvidenceCitation
+}: {
+  readonly citations: readonly EvidenceCitation[];
+  readonly isLoadingEvidenceCitationId: string | null;
+  readonly runId: string;
+  readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+}) {
+  if (citations.length === 0) {
+    return <p className="muted-copy">No cited evidence</p>;
+  }
+
+  return (
+    <div className="citation-list" aria-label="Evidence citations">
+      {citations.map((citation) => (
+        <button
+          className="citation-link"
+          key={citation.id}
+          onClick={() => onOpenEvidenceCitation(runId, citation.id)}
+          type="button"
+        >
+          <span>{formatCitationSource(citation)}</span>
+          <small>{isLoadingEvidenceCitationId === citation.id ? "Opening evidence" : citation.quote}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function EvidenceCitationPanel({
+  citation,
+  onDismiss
+}: {
+  readonly citation: ResolvedEvidenceCitation;
+  readonly onDismiss: () => void;
+}) {
+  return (
+    <section className="evidence-panel" aria-labelledby="evidence-panel-title">
+      <div className="section-heading">
+        <h3 id="evidence-panel-title">{formatResolvedEvidenceTitle(citation)}</h3>
+        <button className="secondary-button compact-button" onClick={onDismiss} type="button">
+          Close
+        </button>
+      </div>
+      <blockquote>{citation.citation.quote}</blockquote>
+      {citation.source.type === "survey_response" ? (
+        <dl className="evidence-details">
+          <div>
+            <dt>Survey question</dt>
+            <dd>{citation.source.surveyResponse.surveyQuestionId}</dd>
+          </div>
+          <div>
+            <dt>Full response</dt>
+            <dd>{citation.source.surveyResponse.responseText}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {citation.source.type === "interview_turn" ? (
+        <dl className="evidence-details">
+          <div>
+            <dt>Speaker</dt>
+            <dd>{formatSpeaker(citation.source.interviewTurn.speaker)}</dd>
+          </div>
+          <div>
+            <dt>Transcript turn</dt>
+            <dd>{citation.source.interviewTurn.text}</dd>
+          </div>
+          <div>
+            <dt>Audio span</dt>
+            <dd>{formatOptionalAudioSpan(citation.source.interviewTurn.audioStartMs, citation.source.interviewTurn.audioEndMs)}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {citation.source.type === "audio_span" ? (
+        <dl className="evidence-details">
+          <div>
+            <dt>Audio asset</dt>
+            <dd>{citation.source.audioAsset.storageUri}</dd>
+          </div>
+          <div>
+            <dt>Audio span</dt>
+            <dd>{formatAudioSpan(citation.source.audioStartMs, citation.source.audioEndMs)}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>{citation.source.audioAsset.status}</dd>
+          </div>
+        </dl>
+      ) : null}
     </section>
   );
 }
 
 function formatRunStatus(run: Run) {
   return run.status.replaceAll("_", " ");
+}
+
+function formatScoringTrigger(trigger: "automatic" | "manual_rescore") {
+  return trigger === "manual_rescore" ? "Manual rescore" : "Automatic";
+}
+
+function formatConfidence(confidence: number) {
+  return `${Math.round(confidence * 100)}% confidence`;
+}
+
+function formatScoreFlag(flag: ScoreFlag) {
+  const labels: Record<ScoreFlag, string> = {
+    low_confidence: "Low confidence",
+    missing_interview_evidence: "Missing interview evidence",
+    survey_interview_contradiction: "Survey/interview contradiction",
+    stale_run: "Stale run",
+    partial_run: "Partial run",
+    technical_interruption: "Technical interruption"
+  };
+
+  return labels[flag];
+}
+
+function formatCitationSource(citation: EvidenceCitation) {
+  if (citation.sourceType === "survey_response") {
+    return "Survey evidence";
+  }
+
+  if (citation.sourceType === "interview_turn") {
+    return "Interview transcript";
+  }
+
+  return `Audio span ${formatOptionalAudioSpan(citation.audioStartMs, citation.audioEndMs)}`;
+}
+
+function formatResolvedEvidenceTitle(citation: ResolvedEvidenceCitation) {
+  if (citation.source.type === "survey_response") {
+    return "Survey evidence";
+  }
+
+  if (citation.source.type === "interview_turn") {
+    return "Interview transcript evidence";
+  }
+
+  return "Audio evidence";
+}
+
+function formatSpeaker(speaker: "ai" | "participant") {
+  return speaker === "ai" ? "AI interviewer" : "Participant";
+}
+
+function formatOptionalAudioSpan(startMs: number | undefined, endMs: number | undefined) {
+  if (startMs === undefined || endMs === undefined) {
+    return "No timing";
+  }
+
+  return formatAudioSpan(startMs, endMs);
+}
+
+function formatAudioSpan(startMs: number, endMs: number) {
+  return `${formatMilliseconds(startMs)}-${formatMilliseconds(endMs)}`;
+}
+
+function formatMilliseconds(value: number) {
+  return `${(value / 1000).toFixed(1)}s`;
 }
 
 function formatDateTime(value: string) {

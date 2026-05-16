@@ -1415,6 +1415,26 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
+  server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/score-reviews",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read_raw_artifact");
+
+        return await scoringService.listScoreReviewsForStudy(request.params.studyId);
+      } catch (error) {
+        const safeResponse = toSafeAuthorizationResponse(error) ?? toSafeScoringValidationResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
   server.post<{ Params: StudyParams }>(
     "/researcher/studies/:studyId/runs",
     { preHandler: requireResearcher },

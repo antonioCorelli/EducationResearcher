@@ -171,6 +171,123 @@ export interface Run {
   readonly updatedAt: string;
 }
 
+export type ScoreFlag =
+  | "low_confidence"
+  | "missing_interview_evidence"
+  | "survey_interview_contradiction"
+  | "stale_run"
+  | "partial_run"
+  | "technical_interruption";
+
+export type EvidenceCitationSourceType = "survey_response" | "interview_turn" | "audio_span";
+
+export interface ScoringRun {
+  readonly id: string;
+  readonly runId: string;
+  readonly status: "completed";
+  readonly trigger: "automatic" | "manual_rescore";
+  readonly modelName: string;
+  readonly modelVersion: string;
+  readonly serviceRequestId: string;
+  readonly promptVersion: string;
+  readonly objectiveVersionSetHash: string;
+  readonly scoredAt: string;
+  readonly createdAt: string;
+}
+
+export interface ObjectiveScore {
+  readonly id: string;
+  readonly scoringRunId: string;
+  readonly runId: string;
+  readonly objectiveVersionId: string;
+  readonly gradeLabel: string;
+  readonly confidence: number;
+  readonly rationale: string;
+  readonly flags: readonly ScoreFlag[];
+  readonly createdAt: string;
+}
+
+export interface EvidenceCitation {
+  readonly id: string;
+  readonly objectiveScoreId: string;
+  readonly runId: string;
+  readonly sourceType: EvidenceCitationSourceType;
+  readonly sourceId: string;
+  readonly quote: string;
+  readonly audioStartMs?: number;
+  readonly audioEndMs?: number;
+  readonly createdAt: string;
+}
+
+export interface ScoreReviewObjectiveVersion {
+  readonly id: string;
+  readonly objectiveKey: string;
+  readonly versionNumber: number;
+  readonly title: string;
+  readonly sortOrder: number;
+  readonly status?: "missing";
+}
+
+export interface ObjectiveScoreReview {
+  readonly objectiveVersion: ScoreReviewObjectiveVersion;
+  readonly score: ObjectiveScore;
+  readonly citations: readonly EvidenceCitation[];
+}
+
+export interface RunScoreReview {
+  readonly run: Run;
+  readonly scoringRun?: ScoringRun;
+  readonly objectiveScores: readonly ObjectiveScoreReview[];
+}
+
+export type ScoreReviewState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly scoreReviews: RunScoreReview[] }
+  | { readonly status: "error"; readonly message: string };
+
+export type ResolvedEvidenceCitation =
+  | {
+      readonly citation: EvidenceCitation;
+      readonly source: {
+        readonly type: "survey_response";
+        readonly surveyResponse: {
+          readonly id: string;
+          readonly surveyQuestionId: string;
+          readonly responseText: string;
+          readonly submittedAt: string;
+        };
+      };
+    }
+  | {
+      readonly citation: EvidenceCitation;
+      readonly source: {
+        readonly type: "interview_turn";
+        readonly interviewTurn: {
+          readonly id: string;
+          readonly speaker: "ai" | "participant";
+          readonly text: string;
+          readonly audioStartMs?: number;
+          readonly audioEndMs?: number;
+          readonly createdAt: string;
+        };
+      };
+    }
+  | {
+      readonly citation: EvidenceCitation;
+      readonly source: {
+        readonly type: "audio_span";
+        readonly audioAsset: {
+          readonly id: string;
+          readonly storageUri: string;
+          readonly durationSeconds: number;
+          readonly status: string;
+          readonly createdAt: string;
+        };
+        readonly audioStartMs: number;
+        readonly audioEndMs: number;
+      };
+    };
+
 export type SurveyLayoutItem =
   | {
       readonly type: "question";
@@ -583,6 +700,46 @@ async function fetchRuns(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchScoreReviews(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/score-reviews`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message ?? "Unable to load score reviews.");
+  }
+
+  return (await response.json()) as {
+    scoreReviews: RunScoreReview[];
+  };
+}
+
+async function fetchResolvedEvidenceCitation(
+  accessToken: string,
+  studyId: string,
+  runId: string,
+  evidenceCitationId: string
+) {
+  const response = await fetch(
+    `${serviceBaseUrl}/researcher/studies/${studyId}/runs/${runId}/evidence-citations/${evidenceCitationId}`,
+    {
+      headers: {
+        authorization: `Bearer ${accessToken}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message ?? "Unable to load citation evidence.");
+  }
+
+  return (await response.json()) as ResolvedEvidenceCitation;
+}
+
 export function App() {
   const [path, setPath] = useState(getCurrentPath);
   const [session, setSession] = useState<SessionState>({ status: "checking" });
@@ -594,6 +751,7 @@ export function App() {
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
   const [participantSlotState, setParticipantSlotState] = useState<ParticipantSlotState>({ status: "idle" });
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
+  const [scoreReviewState, setScoreReviewState] = useState<ScoreReviewState>({ status: "idle" });
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
   const [objectiveState, setObjectiveState] = useState<ObjectiveState>({ status: "idle" });
@@ -617,6 +775,9 @@ export function App() {
   const [selectedRunParticipantSlotIds, setSelectedRunParticipantSlotIds] = useState<readonly string[]>([]);
   const [runError, setRunError] = useState("");
   const [isCreatingRuns, setIsCreatingRuns] = useState(false);
+  const [selectedEvidenceCitation, setSelectedEvidenceCitation] = useState<ResolvedEvidenceCitation | null>(null);
+  const [selectedEvidenceCitationError, setSelectedEvidenceCitationError] = useState("");
+  const [isLoadingEvidenceCitationId, setIsLoadingEvidenceCitationId] = useState<string | null>(null);
   const [consentText, setConsentText] = useState(defaultConsentForm.consentText);
   const [consentMethod, setConsentMethod] = useState<ConsentMethod>(defaultConsentForm.consentMethod);
   const [consentError, setConsentError] = useState("");
@@ -707,16 +868,30 @@ export function App() {
   useEffect(() => {
     if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
       setRunState({ status: "idle" });
+      setScoreReviewState({ status: "idle" });
       return;
     }
 
     setRunState({ status: "loading" });
+    setScoreReviewState({ status: "loading" });
     fetchRuns(accessToken, selectedStudyId)
       .then((runs) => {
         setRunState({ status: "ready", ...runs });
         setRunError("");
       })
       .catch(() => setRunState({ status: "error", message: "Unable to load runs." }));
+    fetchScoreReviews(accessToken, selectedStudyId)
+      .then((scoreReviews) => {
+        setScoreReviewState({ status: "ready", ...scoreReviews });
+        setSelectedEvidenceCitation(null);
+        setSelectedEvidenceCitationError("");
+      })
+      .catch((error) =>
+        setScoreReviewState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Unable to load score reviews."
+        })
+      );
   }, [accessToken, selectedStudyId, session.status]);
 
   useEffect(() => {
@@ -993,6 +1168,8 @@ export function App() {
   async function reloadRuns(token: string, studyId: string) {
     const runs = await fetchRuns(token, studyId);
     setRunState({ status: "ready", ...runs });
+    const scoreReviews = await fetchScoreReviews(token, studyId);
+    setScoreReviewState({ status: "ready", ...scoreReviews });
   }
 
   async function handleSaveParticipantSlot(event: FormEvent<HTMLFormElement>) {
@@ -1205,6 +1382,29 @@ export function App() {
       setRunError(error instanceof Error ? error.message : "Unable to create runs.");
     } finally {
       setIsCreatingRuns(false);
+    }
+  }
+
+  async function handleOpenEvidenceCitation(runId: string, evidenceCitationId: string) {
+    setSelectedEvidenceCitationError("");
+    setSelectedEvidenceCitation(null);
+
+    const token = localStorage.getItem(accessTokenStorageKey);
+
+    if (!token || !selectedStudyId) {
+      setSelectedEvidenceCitationError("Select a study before opening evidence.");
+      return;
+    }
+
+    setIsLoadingEvidenceCitationId(evidenceCitationId);
+
+    try {
+      const resolvedCitation = await fetchResolvedEvidenceCitation(token, selectedStudyId, runId, evidenceCitationId);
+      setSelectedEvidenceCitation(resolvedCitation);
+    } catch (error) {
+      setSelectedEvidenceCitationError(error instanceof Error ? error.message : "Unable to load citation evidence.");
+    } finally {
+      setIsLoadingEvidenceCitationId(null);
     }
   }
 
@@ -2062,12 +2262,21 @@ export function App() {
           <ResearcherRuns
             activeStudySetupTab={activeStudySetupTab}
             isCreatingRuns={isCreatingRuns}
+            isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
             participantSlots={participantSlots}
             runError={runError}
             runState={runState}
+            scoreReviewState={scoreReviewState}
+            selectedEvidenceCitation={selectedEvidenceCitation}
+            selectedEvidenceCitationError={selectedEvidenceCitationError}
             selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
             selectedStudy={selectedStudy}
             onCreateRuns={handleCreateRuns}
+            onDismissEvidenceCitation={() => {
+              setSelectedEvidenceCitation(null);
+              setSelectedEvidenceCitationError("");
+            }}
+            onOpenEvidenceCitation={handleOpenEvidenceCitation}
             onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
           />
         }

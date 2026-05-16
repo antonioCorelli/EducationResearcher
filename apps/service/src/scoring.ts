@@ -144,6 +144,20 @@ export interface ResolvedEvidenceCitation {
   readonly source: ResolvedEvidenceCitationSource;
 }
 
+export interface ResearcherObjectiveScoreReview {
+  readonly objectiveVersion: Pick<ObjectiveVersion, "id" | "objectiveKey" | "versionNumber" | "title" | "sortOrder"> & {
+    readonly status?: "missing";
+  };
+  readonly score: ObjectiveScore;
+  readonly citations: readonly EvidenceCitation[];
+}
+
+export interface ResearcherRunScoreReview {
+  readonly run: Run;
+  readonly scoringRun?: ScoringRun;
+  readonly objectiveScores: readonly ResearcherObjectiveScoreReview[];
+}
+
 export interface ScoringStore {
   saveScoringRun(input: {
     readonly scoringRun: ScoringRun;
@@ -155,6 +169,8 @@ export interface ScoringStore {
     readonly evidenceCitations: readonly EvidenceCitation[];
   }>;
   listScoringRunsByRun(runId: string): Promise<ScoringRun[]>;
+  listObjectiveScoresByScoringRun(scoringRunId: string): Promise<ObjectiveScore[]>;
+  listEvidenceCitationsByObjectiveScore(objectiveScoreId: string): Promise<EvidenceCitation[]>;
   getEvidenceCitationByRun(runId: string, evidenceCitationId: string): Promise<EvidenceCitation | undefined>;
 }
 
@@ -280,6 +296,7 @@ export class ScoringService {
     private readonly runStore: Pick<
       RunStore,
       | "getById"
+      | "listByStudy"
       | "listSurveyResponsesByRun"
       | "listGapMapsByRun"
       | "listInterviewTurnsByRun"
@@ -299,6 +316,64 @@ export class ScoringService {
 
   async triggerAutomaticScoring(input: AutomaticScoringTriggerInput) {
     return this.scoreRun(input.run.id, "automatic");
+  }
+
+  async listScoreReviewsForStudy(studyId: string): Promise<{ readonly scoreReviews: readonly ResearcherRunScoreReview[] }> {
+    const runs = (await this.runStore.listByStudy(studyId)).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const objectiveVersions = await this.objectiveVersionStore.listByStudy(studyId);
+    const objectiveVersionsById = new Map(objectiveVersions.map((objectiveVersion) => [objectiveVersion.id, objectiveVersion]));
+    const scoreReviews = await Promise.all(
+      runs.map(async (run): Promise<ResearcherRunScoreReview> => {
+        const scoringRun = (await this.scoringStore.listScoringRunsByRun(run.id))[0];
+
+        if (!scoringRun) {
+          return {
+            run,
+            objectiveScores: []
+          };
+        }
+
+        const objectiveScores = await this.scoringStore.listObjectiveScoresByScoringRun(scoringRun.id);
+        const objectiveScoreReviews = await Promise.all(
+          objectiveScores.map(async (score) => {
+            const objectiveVersion = objectiveVersionsById.get(score.objectiveVersionId);
+
+            return {
+              objectiveVersion: objectiveVersion
+                ? {
+                    id: objectiveVersion.id,
+                    objectiveKey: objectiveVersion.objectiveKey,
+                    versionNumber: objectiveVersion.versionNumber,
+                    title: objectiveVersion.title,
+                    sortOrder: objectiveVersion.sortOrder
+                  }
+                : {
+                    id: score.objectiveVersionId,
+                    objectiveKey: score.objectiveVersionId,
+                    versionNumber: 0,
+                    title: "Archived objective",
+                    sortOrder: Number.MAX_SAFE_INTEGER,
+                    status: "missing" as const
+                  },
+              score,
+              citations: await this.scoringStore.listEvidenceCitationsByObjectiveScore(score.id)
+            };
+          })
+        );
+
+        return {
+          run,
+          scoringRun,
+          objectiveScores: objectiveScoreReviews.sort(
+            (left, right) => left.objectiveVersion.sortOrder - right.objectiveVersion.sortOrder
+          )
+        };
+      })
+    );
+
+    return {
+      scoreReviews
+    };
   }
 
   async resolveEvidenceCitation(input: {
@@ -933,16 +1008,13 @@ export class DynamoDbScoringStore implements ScoringStore {
   }
 
   async listScoringRunsByRun(runId: string) {
-    const response = await this.documentClient.send(
-      new QueryCommand({
-        TableName: this.tableName,
-        IndexName: "byRunScoring",
-        KeyConditionExpression: "gsi1pk = :run",
-        ExpressionAttributeValues: {
-          ":run": `RUN#${runId}`
-        }
-      })
-    );
+    const response = await this.queryOrEmpty({
+      IndexName: "byRunScoring",
+      KeyConditionExpression: "gsi1pk = :run",
+      ExpressionAttributeValues: {
+        ":run": `RUN#${runId}`
+      }
+    });
 
     return (response.Items ?? [])
       .filter((item) => item.entity === "scoring_run")
@@ -951,25 +1023,71 @@ export class DynamoDbScoringStore implements ScoringStore {
   }
 
   async getEvidenceCitationByRun(runId: string, evidenceCitationId: string) {
-    const response = await this.documentClient.send(
-      new QueryCommand({
-        TableName: this.tableName,
-        IndexName: "byRunScoring",
-        KeyConditionExpression: "gsi1pk = :run",
-        FilterExpression: "#entity = :entity AND id = :id",
-        ExpressionAttributeNames: {
-          "#entity": "entity"
-        },
-        ExpressionAttributeValues: {
-          ":run": `RUN#${runId}`,
-          ":entity": "evidence_citation",
-          ":id": evidenceCitationId
-        }
-      })
-    );
+    const response = await this.queryOrEmpty({
+      IndexName: "byRunScoring",
+      KeyConditionExpression: "gsi1pk = :run",
+      FilterExpression: "#entity = :entity AND id = :id",
+      ExpressionAttributeNames: {
+        "#entity": "entity"
+      },
+      ExpressionAttributeValues: {
+        ":run": `RUN#${runId}`,
+        ":entity": "evidence_citation",
+        ":id": evidenceCitationId
+      }
+    });
     const item = response.Items?.find((candidate) => candidate.entity === "evidence_citation");
 
     return item ? toEvidenceCitation(item as EvidenceCitationItem) : undefined;
+  }
+
+  async listObjectiveScoresByScoringRun(scoringRunId: string) {
+    const response = await this.queryOrEmpty({
+      KeyConditionExpression: "pk = :scoringRun AND begins_with(sk, :scorePrefix)",
+      ExpressionAttributeValues: {
+        ":scoringRun": `SCORING_RUN#${scoringRunId}`,
+        ":scorePrefix": "OBJECTIVE_SCORE#"
+      }
+    });
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "objective_score")
+      .map((item) => toObjectiveScore(item as ObjectiveScoreItem))
+      .sort((left, right) => left.objectiveVersionId.localeCompare(right.objectiveVersionId));
+  }
+
+  async listEvidenceCitationsByObjectiveScore(objectiveScoreId: string) {
+    const response = await this.queryOrEmpty({
+      KeyConditionExpression: "pk = :objectiveScore AND begins_with(sk, :citationPrefix)",
+      ExpressionAttributeValues: {
+        ":objectiveScore": `OBJECTIVE_SCORE#${objectiveScoreId}`,
+        ":citationPrefix": "CITATION#"
+      }
+    });
+
+    return (response.Items ?? [])
+      .filter((item) => item.entity === "evidence_citation")
+      .map((item) => toEvidenceCitation(item as EvidenceCitationItem))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  private async queryOrEmpty(input: Omit<ConstructorParameters<typeof QueryCommand>[0], "TableName">) {
+    try {
+      return await this.documentClient.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          ...input
+        })
+      );
+    } catch (error) {
+      if (isDynamoResourceNotFound(error)) {
+        return {
+          Items: []
+        };
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -979,6 +1097,13 @@ export function createConfiguredScoringStore() {
 
 function getEvidenceScoringTableName(environment = process.env.EDUCATION_RESEARCHER_ENV ?? "local") {
   return `education-researcher-${environment}-evidence-scoring`;
+}
+
+function isDynamoResourceNotFound(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.name === "ResourceNotFoundException" || error.message.includes("Requested resource not found"))
+  );
 }
 
 function toScoringRunItem(scoringRun: ScoringRun): ScoringRunItem {
@@ -1036,6 +1161,20 @@ function toObjectiveScoreItem(score: ObjectiveScore): ObjectiveScoreItem {
     rationale: score.rationale,
     flags: score.flags,
     createdAt: score.createdAt
+  };
+}
+
+function toObjectiveScore(item: ObjectiveScoreItem): ObjectiveScore {
+  return {
+    id: item.id,
+    scoringRunId: item.scoringRunId,
+    runId: item.runId,
+    objectiveVersionId: item.objectiveVersionId,
+    gradeLabel: item.gradeLabel,
+    confidence: item.confidence,
+    rationale: item.rationale,
+    flags: item.flags,
+    createdAt: item.createdAt
   };
 }
 
