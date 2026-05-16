@@ -65,6 +65,7 @@ import {
   type SaveInterviewArtifactsInput,
   type SubmitParticipantSurveyInput
 } from "./runs.js";
+import { RunDashboardService } from "./run-dashboard.js";
 import {
   ScoringService,
   createConfiguredScoringGenerator,
@@ -998,6 +999,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     scoringServiceOptions,
     scoringGenerator
   );
+  const runDashboardService = new RunDashboardService(participantSlotStore, runStore, scoringStore);
   const runService = new RunService(
     runStore,
     participantAccessTokenStore,
@@ -1406,6 +1408,26 @@ export function buildServer(options: BuildServerOptions = {}) {
         await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read");
 
         return runService.listForStudy(request.params.studyId);
+      } catch (error) {
+        const safeAuthorization = toSafeAuthorizationResponse(error);
+
+        if (safeAuthorization) {
+          return reply.code(safeAuthorization.statusCode).send(safeAuthorization.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
+  server.get<{ Params: StudyParams }>(
+    "/researcher/studies/:studyId/run-dashboard",
+    { preHandler: requireResearcher },
+    async (request, reply) => {
+      try {
+        await studyAuthorization.requireStudyAccess(request.user!, request.params.studyId, "read");
+
+        return runDashboardService.listForStudy(request.params.studyId);
       } catch (error) {
         const safeAuthorization = toSafeAuthorizationResponse(error);
 

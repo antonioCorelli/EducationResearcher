@@ -241,6 +241,52 @@ export interface RunScoreReview {
   readonly objectiveScores: readonly ObjectiveScoreReview[];
 }
 
+export interface ResearcherSafeRunStatus {
+  readonly value: Run["status"];
+  readonly label: string;
+  readonly isStale: boolean;
+  readonly isPartial: boolean;
+  readonly isTechnicalInterruption: boolean;
+  readonly isCompleted: boolean;
+  readonly isScored: boolean;
+}
+
+export interface ResearcherRunArtifactSummary {
+  readonly consentRecordCount: number;
+  readonly surveyResponseCount: number;
+  readonly gapMapCount: number;
+  readonly interviewSessionCount: number;
+  readonly interviewTurnCount: number;
+  readonly audioAssetCount: number;
+  readonly audioDurationSeconds: number;
+  readonly transcriptTokenCount: number;
+}
+
+export interface ResearcherRunScoringSummary {
+  readonly state: "not_started" | "completed";
+  readonly scoringRunCount: number;
+  readonly latestScoredAt?: string;
+  readonly latestTrigger?: ScoringRun["trigger"];
+}
+
+export interface ResearcherDashboardRun {
+  readonly id: string;
+  readonly status: ResearcherSafeRunStatus;
+  readonly freshnessDeadlineAt: string;
+  readonly currentRunForSlot: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly artifactSummary: ResearcherRunArtifactSummary;
+  readonly scoringSummary: ResearcherRunScoringSummary;
+}
+
+export interface ResearcherRunDashboardSlot {
+  readonly participantSlot: ParticipantSlot;
+  readonly currentRun?: ResearcherDashboardRun;
+  readonly latestRun?: ResearcherDashboardRun;
+  readonly runs: readonly ResearcherDashboardRun[];
+}
+
 export type ScoreReviewState =
   | { readonly status: "idle" | "loading" }
   | { readonly status: "ready"; readonly scoreReviews: RunScoreReview[] }
@@ -371,6 +417,11 @@ export type ParticipantSlotState =
 export type RunState =
   | { readonly status: "idle" | "loading" }
   | { readonly status: "ready"; readonly runs: Run[] }
+  | { readonly status: "error"; readonly message: string };
+
+export type RunDashboardState =
+  | { readonly status: "idle" | "loading" }
+  | { readonly status: "ready"; readonly slots: ResearcherRunDashboardSlot[] }
   | { readonly status: "error"; readonly message: string };
 
 export type SurveyDraftItem =
@@ -733,6 +784,22 @@ async function fetchRuns(accessToken: string, studyId: string) {
   };
 }
 
+async function fetchRunDashboard(accessToken: string, studyId: string) {
+  const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/run-dashboard`, {
+    headers: {
+      authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to load run dashboard.");
+  }
+
+  return (await response.json()) as {
+    slots: ResearcherRunDashboardSlot[];
+  };
+}
+
 async function fetchScoreReviews(accessToken: string, studyId: string) {
   const response = await fetch(`${serviceBaseUrl}/researcher/studies/${studyId}/score-reviews`, {
     headers: {
@@ -813,6 +880,7 @@ export function App() {
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
   const [participantSlotState, setParticipantSlotState] = useState<ParticipantSlotState>({ status: "idle" });
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
+  const [runDashboardState, setRunDashboardState] = useState<RunDashboardState>({ status: "idle" });
   const [scoreReviewState, setScoreReviewState] = useState<ScoreReviewState>({ status: "idle" });
   const [consentState, setConsentState] = useState<ConsentState>({ status: "idle" });
   const [surveyState, setSurveyState] = useState<SurveyState>({ status: "idle" });
@@ -934,11 +1002,13 @@ export function App() {
   useEffect(() => {
     if (session.status !== "signed-in" || !accessToken || !selectedStudyId) {
       setRunState({ status: "idle" });
+      setRunDashboardState({ status: "idle" });
       setScoreReviewState({ status: "idle" });
       return;
     }
 
     setRunState({ status: "loading" });
+    setRunDashboardState({ status: "loading" });
     setScoreReviewState({ status: "loading" });
     fetchRuns(accessToken, selectedStudyId)
       .then((runs) => {
@@ -946,6 +1016,9 @@ export function App() {
         setRunError("");
       })
       .catch(() => setRunState({ status: "error", message: "Unable to load runs." }));
+    fetchRunDashboard(accessToken, selectedStudyId)
+      .then((dashboard) => setRunDashboardState({ status: "ready", ...dashboard }))
+      .catch(() => setRunDashboardState({ status: "error", message: "Unable to load run dashboard." }));
     fetchScoreReviews(accessToken, selectedStudyId)
       .then((scoreReviews) => {
         setScoreReviewState({ status: "ready", ...scoreReviews });
@@ -1229,11 +1302,15 @@ export function App() {
   async function reloadParticipantSlots(token: string, studyId: string) {
     const participantSlots = await fetchParticipantSlots(token, studyId);
     setParticipantSlotState({ status: "ready", ...participantSlots });
+    const runDashboard = await fetchRunDashboard(token, studyId);
+    setRunDashboardState({ status: "ready", ...runDashboard });
   }
 
   async function reloadRuns(token: string, studyId: string) {
     const runs = await fetchRuns(token, studyId);
     setRunState({ status: "ready", ...runs });
+    const runDashboard = await fetchRunDashboard(token, studyId);
+    setRunDashboardState({ status: "ready", ...runDashboard });
     const scoreReviews = await fetchScoreReviews(token, studyId);
     setScoreReviewState({ status: "ready", ...scoreReviews });
   }
@@ -2381,6 +2458,7 @@ export function App() {
             participantSlots={participantSlots}
             rawEvidenceState={rawEvidenceState}
             runError={runError}
+            runDashboardState={runDashboardState}
             runState={runState}
             scoreReviewState={scoreReviewState}
             selectedEvidenceCitation={selectedEvidenceCitation}

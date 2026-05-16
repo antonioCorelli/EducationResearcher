@@ -3,9 +3,11 @@ import { useState, type FormEvent } from "react";
 import type {
   EvidenceCitation,
   ParticipantSlot,
+  ResearcherRunDashboardSlot,
   RawEvidenceState,
   ResolvedEvidenceCitation,
   Run,
+  RunDashboardState,
   RunScoreReview,
   RunState,
   ScoreFlag,
@@ -24,6 +26,7 @@ interface ResearcherRunsProps {
   readonly participantSlots: readonly ParticipantSlot[];
   readonly rawEvidenceState: RawEvidenceState;
   readonly rescoreError: string;
+  readonly runDashboardState: RunDashboardState;
   readonly runError: string;
   readonly runState: RunState;
   readonly scoreReviewState: ScoreReviewState;
@@ -49,6 +52,7 @@ export function ResearcherRuns({
   participantSlots,
   rawEvidenceState,
   rescoreError,
+  runDashboardState,
   runError,
   runState,
   scoreReviewState,
@@ -90,6 +94,7 @@ export function ResearcherRuns({
       <div className="section-heading">
         <h2 id="runs-title">Researcher-authorized runs</h2>
       </div>
+      <RunStatusDashboard runDashboardState={runDashboardState} />
       <form className="run-create-panel" onSubmit={onCreateRuns}>
         <div className="run-slot-picker" role="group" aria-label="Participant slots for new runs">
           {activeParticipantSlots.map((slot) => {
@@ -188,6 +193,73 @@ export function ResearcherRuns({
         isRescoringRunId={isRescoringRunId}
       />
     </section>
+  );
+}
+
+function RunStatusDashboard({ runDashboardState }: { readonly runDashboardState: RunDashboardState }) {
+  const slots = runDashboardState.status === "ready" ? runDashboardState.slots : [];
+
+  return (
+    <section className="run-dashboard" aria-labelledby="run-dashboard-title">
+      <div className="section-heading">
+        <h3 id="run-dashboard-title">Run status dashboard</h3>
+        {slots.length > 0 ? <span className="version-pill">{slots.length} slots</span> : null}
+      </div>
+      {runDashboardState.status === "loading" ? <p className="muted-copy">Loading run dashboard</p> : null}
+      {runDashboardState.status === "error" ? <p className="form-error">{runDashboardState.message}</p> : null}
+      {runDashboardState.status === "ready" && slots.length === 0 ? <p className="muted-copy">No participant slots yet</p> : null}
+      {slots.length > 0 ? (
+        <div className="run-dashboard-table" role="table" aria-label="Run status dashboard">
+          <div className="run-dashboard-row run-dashboard-header" role="row">
+            <span role="columnheader">Participant</span>
+            <span role="columnheader">Latest run</span>
+            <span role="columnheader">Artifacts</span>
+            <span role="columnheader">Scoring</span>
+            <span role="columnheader">Associated runs</span>
+          </div>
+          {slots.map((slot) => (
+            <RunStatusDashboardRow key={slot.participantSlot.id} slot={slot} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function RunStatusDashboardRow({ slot }: { readonly slot: ResearcherRunDashboardSlot }) {
+  const latestRun = slot.latestRun;
+
+  return (
+    <div className="run-dashboard-row" role="row">
+      <span role="cell">
+        <strong>{slot.participantSlot.participantCode}</strong>
+        <small>{slot.participantSlot.status === "archived" ? "Archived slot" : "Active slot"}</small>
+      </span>
+      <span role="cell">
+        {latestRun ? (
+          <>
+            <span className={getStatusPillClassName(latestRun.status)}>{latestRun.status.label}</span>
+            <small>
+              Updated {formatDateTime(latestRun.updatedAt)} | Fresh until {formatDateTime(latestRun.freshnessDeadlineAt)}
+            </small>
+          </>
+        ) : (
+          <span className="muted-copy">No runs</span>
+        )}
+      </span>
+      <span role="cell">{latestRun ? formatArtifactSummary(latestRun.artifactSummary) : "No artifacts captured"}</span>
+      <span role="cell">{latestRun ? formatScoringSummary(latestRun.scoringSummary) : "Not started"}</span>
+      <span role="cell">
+        {slot.runs.length > 0 ? (
+          <span>
+            {slot.runs.length} run{slot.runs.length === 1 ? "" : "s"}
+            {slot.currentRun ? ` | current ${slot.currentRun.status.label}` : ""}
+          </span>
+        ) : (
+          "None"
+        )}
+      </span>
+    </div>
   );
 }
 
@@ -549,6 +621,46 @@ function RawEvidencePanel({
 
 function formatRunStatus(run: Run) {
   return run.status.replaceAll("_", " ");
+}
+
+function getStatusPillClassName(status: ResearcherRunDashboardSlot["runs"][number]["status"]) {
+  if (status.isTechnicalInterruption) {
+    return "run-status-pill technical-status-pill";
+  }
+
+  if (status.isStale || status.isPartial) {
+    return "run-status-pill caution-status-pill";
+  }
+
+  if (status.isScored || status.isCompleted) {
+    return "run-status-pill complete-status-pill";
+  }
+
+  return "run-status-pill";
+}
+
+function formatArtifactSummary(summary: ResearcherRunDashboardSlot["runs"][number]["artifactSummary"]) {
+  return [
+    formatCount(summary.surveyResponseCount, "survey response"),
+    formatCount(summary.interviewTurnCount, "transcript turn"),
+    formatCount(summary.audioAssetCount, "audio asset"),
+    formatAudioDuration(summary.audioDurationSeconds)
+  ].join(" | ");
+}
+
+function formatCount(count: number, singularLabel: string) {
+  return `${count} ${singularLabel}${count === 1 ? "" : "s"}`;
+}
+
+function formatScoringSummary(summary: ResearcherRunDashboardSlot["runs"][number]["scoringSummary"]) {
+  if (summary.state === "not_started") {
+    return "Not started";
+  }
+
+  const latestScoredAt = summary.latestScoredAt ? ` | ${formatDateTime(summary.latestScoredAt)}` : "";
+  const trigger = summary.latestTrigger ? formatScoringTrigger(summary.latestTrigger) : "Completed";
+
+  return `${trigger}${latestScoredAt}`;
 }
 
 function formatScoringTrigger(trigger: "automatic" | "manual_rescore") {

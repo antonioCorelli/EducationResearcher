@@ -2003,6 +2003,177 @@ describe("researcher run routes", () => {
     await server.close();
   });
 
+  it("lists a researcher-safe run dashboard with slots, statuses, artifacts, and scoring summaries", async () => {
+    const run: Run = {
+      id: "run_dashboard_technical_001",
+      studyId: "study_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      consentVersionId: "consent_version_active",
+      surveyVersionId: "survey_version_active",
+      personaVersionId: "persona_version_v1_default_001",
+      objectiveVersionIds: ["objective_version_001"],
+      freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+      maxInterviewMinutes: 45,
+      status: "technical_interruption",
+      currentRunForSlot: true,
+      createdAt: "2026-05-06T12:00:00.000Z",
+      updatedAt: "2026-05-06T12:30:00.000Z"
+    };
+    const runStore = new InMemoryRunStore([run]);
+    await runStore.submitSurvey(
+      [
+        {
+          id: "survey_response_dashboard_001",
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          runId: run.id,
+          surveyVersionId: "survey_version_active",
+          surveyQuestionId: "survey_question_001",
+          responseText: "I used the example to revise my explanation.",
+          submittedAt: "2026-05-06T12:10:00.000Z",
+          createdAt: "2026-05-06T12:10:00.000Z"
+        }
+      ],
+      run,
+      "technical_interruption"
+    );
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_dashboard_001",
+        studyId: "study_fixture_001",
+        participantSlotId: "slot_fixture_001",
+        runId: run.id,
+        sessionNumber: 1,
+        status: "interrupted",
+        safeStatus: "technical_interruption",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:30:00.000Z",
+        audioDurationSeconds: 120,
+        transcriptTokenCount: 320,
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:30:00.000Z"
+      },
+      run,
+      "technical_interruption"
+    );
+    await runStore.saveInterviewArtifacts({
+      interviewSession: {
+        id: "interview_session_dashboard_001",
+        studyId: "study_fixture_001",
+        participantSlotId: "slot_fixture_001",
+        runId: run.id,
+        sessionNumber: 1,
+        status: "interrupted",
+        safeStatus: "technical_interruption",
+        startedAt: "2026-05-06T12:20:00.000Z",
+        endedAt: "2026-05-06T12:30:00.000Z",
+        audioDurationSeconds: 120,
+        transcriptTokenCount: 320,
+        createdAt: "2026-05-06T12:20:00.000Z",
+        updatedAt: "2026-05-06T12:30:00.000Z"
+      },
+      turns: [
+        {
+          id: "interview_turn_dashboard_001",
+          studyId: "study_fixture_001",
+          participantSlotId: "slot_fixture_001",
+          runId: run.id,
+          interviewSessionId: "interview_session_dashboard_001",
+          speaker: "participant",
+          text: "The worked example helped me compare the two strategies.",
+          audioStartMs: 0,
+          audioEndMs: 8000,
+          createdAt: "2026-05-06T12:25:00.000Z"
+        }
+      ],
+      audioAsset: {
+        id: "interview_audio_dashboard_001",
+        studyId: "study_fixture_001",
+        participantSlotId: "slot_fixture_001",
+        runId: run.id,
+        interviewSessionId: "interview_session_dashboard_001",
+        storageUri: "s3://fixture/dashboard.wav",
+        durationSeconds: 120,
+        status: "available",
+        createdAt: "2026-05-06T12:30:00.000Z"
+      }
+    });
+    const scoringStore = new InMemoryScoringStore([
+      {
+        id: "scoring_run_dashboard_001",
+        runId: run.id,
+        status: "completed",
+        trigger: "automatic",
+        modelName: "fake-scoring",
+        modelVersion: "local-1",
+        serviceRequestId: "req_dashboard_scoring_001",
+        promptVersion: "scoring-v1",
+        objectiveVersionSetHash: "sha256:dashboard",
+        scoredAt: "2026-05-06T12:40:00.000Z",
+        createdAt: "2026-05-06T12:40:00.000Z"
+      }
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantSlotStore: new InMemoryParticipantSlotStore(activeParticipantSlots),
+      runStore,
+      scoringStore,
+      studyShellStore: new InMemoryStudyShellStore([configuredStudy])
+    });
+    const response = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/run-dashboard",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      slots: [
+        {
+          participantSlot: {
+            id: "slot_fixture_001",
+            participantCode: "P001"
+          },
+          latestRun: {
+            id: "run_dashboard_technical_001",
+            status: {
+              value: "technical_interruption",
+              label: "Technical interruption",
+              isTechnicalInterruption: true
+            },
+            artifactSummary: {
+              surveyResponseCount: 1,
+              interviewSessionCount: 1,
+              interviewTurnCount: 1,
+              audioAssetCount: 1,
+              audioDurationSeconds: 120,
+              transcriptTokenCount: 320
+            },
+            scoringSummary: {
+              state: "completed",
+              scoringRunCount: 1,
+              latestTrigger: "automatic",
+              latestScoredAt: "2026-05-06T12:40:00.000Z"
+            }
+          }
+        },
+        {
+          participantSlot: {
+            id: "slot_fixture_002",
+            participantCode: "P002"
+          },
+          runs: []
+        }
+      ]
+    });
+    expect(JSON.stringify(response.json())).not.toMatch(/disconnect|provider|stack|diagnostic/i);
+
+    await server.close();
+  });
+
   it("validates run prerequisites, researcher authorization, slot state, and service-owned metadata", async () => {
     const missingConfigStudy = createFixtureStudy({
       id: "study_missing_config",

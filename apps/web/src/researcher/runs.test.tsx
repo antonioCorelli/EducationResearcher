@@ -1,10 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { RunScoreReview } from "../App";
-import { ScoreReviewList } from "./runs";
+import type { ResearcherDashboardRun, ResearcherRunDashboardSlot, RunScoreReview } from "../App";
+import { ResearcherRuns, ScoreReviewList } from "./runs";
 
 const noop = () => undefined;
+const noopSubmit = (event: { preventDefault: () => void }) => event.preventDefault();
 
 function createScoreReview(runId: string, flags: RunScoreReview["objectiveScores"][number]["score"]["flags"]): RunScoreReview {
   return {
@@ -87,7 +88,129 @@ function createScoreReview(runId: string, flags: RunScoreReview["objectiveScores
   };
 }
 
+function createDashboardSlot(
+  slotId: string,
+  participantCode: string,
+  statusValue: ResearcherRunDashboardSlot["runs"][number]["status"]["value"],
+  statusLabel: string,
+  scoringOverrides: Partial<ResearcherRunDashboardSlot["runs"][number]["scoringSummary"]> = {}
+): ResearcherRunDashboardSlot {
+  const run: ResearcherDashboardRun = {
+    id: `run_${slotId}`,
+    status: {
+      value: statusValue,
+      label: statusLabel,
+      isStale: statusValue === "stale",
+      isPartial: statusValue === "partial",
+      isTechnicalInterruption: statusValue === "technical_interruption",
+      isCompleted: statusValue === "interview_completed" || statusValue === "scored",
+      isScored: statusValue === "scored"
+    },
+    freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
+    currentRunForSlot: true,
+    createdAt: "2026-05-06T12:00:00.000Z",
+    updatedAt: "2026-05-06T12:30:00.000Z",
+    artifactSummary: {
+      consentRecordCount: 1,
+      surveyResponseCount: 2,
+      gapMapCount: 1,
+      interviewSessionCount: 1,
+      interviewTurnCount: 3,
+      audioAssetCount: 1,
+      audioDurationSeconds: 120,
+      transcriptTokenCount: 450
+    },
+    scoringSummary: {
+      state: scoringOverrides.scoringRunCount ? "completed" : "not_started",
+      scoringRunCount: 0,
+      ...scoringOverrides
+    }
+  };
+
+  return {
+    participantSlot: {
+      id: slotId,
+      studyId: "study_fixture_001",
+      participantCode,
+      codeSource: "researcher_supplied",
+      status: "active",
+      createdAt: "2026-05-06T12:00:00.000Z",
+      updatedAt: "2026-05-06T12:00:00.000Z"
+    },
+    currentRun: run,
+    latestRun: run,
+    runs: [run]
+  };
+}
+
 describe("ScoreReviewList", () => {
+  it("renders a run status dashboard with safe statuses, artifact summaries, and scoring state", () => {
+    const dashboardSlots: ResearcherRunDashboardSlot[] = [
+      createDashboardSlot("slot_completed", "P001", "interview_completed", "Interview completed"),
+      createDashboardSlot("slot_scored", "P002", "scored", "Scored", {
+        scoringRunCount: 1,
+        latestScoredAt: "2026-05-06T12:40:00.000Z",
+        latestTrigger: "automatic"
+      }),
+      createDashboardSlot("slot_stale", "P003", "stale", "Stale"),
+      createDashboardSlot("slot_partial", "P004", "partial", "Partial"),
+      createDashboardSlot("slot_technical", "P005", "technical_interruption", "Technical interruption"),
+      {
+        participantSlot: {
+          id: "slot_empty",
+          studyId: "study_fixture_001",
+          participantCode: "P006",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        },
+        runs: []
+      }
+    ];
+    const markup = renderToStaticMarkup(
+      <ResearcherRuns
+        activeStudySetupTab="runs"
+        isCreatingRuns={false}
+        isLoadingEvidenceCitationId={null}
+        isLoadingRawEvidenceRunId={null}
+        isRescoringRunId={null}
+        participantSlots={dashboardSlots.map((slot) => slot.participantSlot)}
+        rawEvidenceState={{ status: "idle" }}
+        rescoreError=""
+        runDashboardState={{ status: "ready", slots: dashboardSlots }}
+        runError=""
+        runState={{ status: "ready", runs: [] }}
+        scoreReviewState={{ status: "ready", scoreReviews: [] }}
+        selectedEvidenceCitation={null}
+        selectedEvidenceCitationError=""
+        selectedRunParticipantSlotIds={[]}
+        selectedStudy={undefined}
+        onCreateRuns={noopSubmit}
+        onDismissEvidenceCitation={noop}
+        onDismissRawEvidence={noop}
+        onManualRescore={noop}
+        onOpenEvidenceCitation={noop}
+        onOpenRawEvidence={noop}
+        onSelectedRunParticipantSlotIdsChange={noop}
+      />
+    );
+
+    expect(markup).toContain("Run status dashboard");
+    expect(markup).toContain("Interview completed");
+    expect(markup).toContain("Scored");
+    expect(markup).toContain("Stale");
+    expect(markup).toContain("Partial");
+    expect(markup).toContain("Technical interruption");
+    expect(markup).toContain("2 survey responses");
+    expect(markup).toContain("3 transcript turns");
+    expect(markup).toContain("1 audio asset");
+    expect(markup).toContain("2:00");
+    expect(markup).toContain("Automatic");
+    expect(markup).toContain("No runs");
+    expect(markup).not.toMatch(/openai|diagnostic|provider error|stack trace|disconnect/i);
+  });
+
   it("renders confidence, rationale, safe flags, metadata, and citation links", () => {
     const markup = renderToStaticMarkup(
       <ScoreReviewList
