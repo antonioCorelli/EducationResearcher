@@ -3,6 +3,11 @@ import { config } from "dotenv";
 import { buildServer } from "./server.js";
 
 config({
+  path: fileURLToPath(new URL("../../../.env", import.meta.url))
+});
+
+config({
+  override: true,
   path: fileURLToPath(new URL("../.env", import.meta.url))
 });
 

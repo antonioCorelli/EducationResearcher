@@ -106,12 +106,36 @@ Start DynamoDB Local:
 npm run db:local
 ```
 
-Create local tables, reset them with first-build-slice fixture data, or synthesize the CDK data stack:
+Create local tables, reset them with first-build-slice fixture data, or synthesize the CDK stacks:
 
 ```bash
 npm run db:create
 npm run db:reset
 npm run infra:synth
+```
+
+`npm run infra:synth` writes templates to `apps/infra/cdk.out`. The small file at
+`apps/infra/cdk.out/cdk.out` only records the cloud assembly schema version; the stack templates are the
+`*.template.json` files in the same folder.
+
+Deploy infrastructure with CDK instead of zipping `cdk.out` manually:
+
+```bash
+npm run infra:list
+npm run infra:diff
+npm run infra:bootstrap
+npm run infra:deploy
+```
+
+After deploying the auth stack, set `AWS_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, and
+`EDUCATION_RESEARCHER_ENV=dev` in `.env`. The environment value is part of each DynamoDB table name, such as
+`education-researcher-dev-study-setup`.
+The local fake/test credentials are not automatically created in Cognito. Create a researcher user in the deployed
+user pool before signing in through the app:
+
+```bash
+aws cognito-idp admin-create-user --region us-east-1 --user-pool-id <pool-id> --username <email> --user-attributes Name=email,Value=<email> Name=email_verified,Value=true
+aws cognito-idp admin-set-user-password --region us-east-1 --user-pool-id <pool-id> --username <email> --password <password> --permanent
 ```
 
 See `docs/database-migration-workflow.md` for table names, fixture coverage, and migration workflow details.

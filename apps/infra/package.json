@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bootstrap": "cdk bootstrap --app \"npx tsx src/app.ts\"",
+    "deploy": "npm run build --workspace @education-researcher/data-schema && cdk deploy --app \"npx tsx src/app.ts\" --all",
+    "diff": "npm run build --workspace @education-researcher/data-schema && cdk diff --app \"npx tsx src/app.ts\" --all",
+    "list": "cdk list --app \"npx tsx src/app.ts\"",
     "synth": "npm run build --workspace @education-researcher/data-schema && cdk synth --app \"npx tsx src/app.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
