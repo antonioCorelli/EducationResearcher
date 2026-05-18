@@ -74,9 +74,85 @@ export function ResearcherRuns({
   onManualRescore,
   onSelectedRunParticipantSlotIdsChange
 }: ResearcherRunsProps) {
+  return (
+    <section
+      aria-labelledby="runs-title"
+      className="study-form study-setup-panel"
+      hidden={activeStudySetupTab !== "runs"}
+      id="runs-panel"
+    >
+      <div className="section-heading">
+        <h2 id="runs-title">Researcher-authorized runs</h2>
+      </div>
+      <ResearcherRunOperations
+        isCreatingRuns={isCreatingRuns}
+        isLoadingRawEvidenceRunId={isLoadingRawEvidenceRunId}
+        participantSlots={participantSlots}
+        rawEvidenceState={rawEvidenceState}
+        runDashboardState={runDashboardState}
+        runError={runError}
+        runState={runState}
+        selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
+        selectedStudy={selectedStudy}
+        onCreateRuns={onCreateRuns}
+        onDismissRawEvidence={onDismissRawEvidence}
+        onOpenRawEvidence={onOpenRawEvidence}
+        onSelectedRunParticipantSlotIdsChange={onSelectedRunParticipantSlotIdsChange}
+      />
+      <ResearcherRunAnalysis
+        isExportingScores={isExportingScores}
+        isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+        isRescoringRunId={isRescoringRunId}
+        participantSlots={participantSlots}
+        rawEvidenceState={rawEvidenceState}
+        rescoreError={rescoreError}
+        scoreExportError={scoreExportError}
+        scoreReviewState={scoreReviewState}
+        selectedEvidenceCitation={selectedEvidenceCitation}
+        selectedEvidenceCitationError={selectedEvidenceCitationError}
+        onDismissEvidenceCitation={onDismissEvidenceCitation}
+        onDismissRawEvidence={onDismissRawEvidence}
+        onExportScores={onExportScores}
+        onManualRescore={onManualRescore}
+        onOpenEvidenceCitation={onOpenEvidenceCitation}
+      />
+    </section>
+  );
+}
+
+interface ResearcherRunOperationsProps {
+  readonly isLoadingRawEvidenceRunId: string | null;
+  readonly isCreatingRuns: boolean;
+  readonly participantSlots: readonly ParticipantSlot[];
+  readonly rawEvidenceState: RawEvidenceState;
+  readonly runDashboardState: RunDashboardState;
+  readonly runError: string;
+  readonly runState: RunState;
+  readonly selectedRunParticipantSlotIds: readonly string[];
+  readonly selectedStudy: StudyShell | undefined;
+  readonly onCreateRuns: (event: FormEvent<HTMLFormElement>) => void;
+  readonly onDismissRawEvidence: () => void;
+  readonly onOpenRawEvidence: (runId: string) => void;
+  readonly onSelectedRunParticipantSlotIdsChange: (participantSlotIds: readonly string[]) => void;
+}
+
+export function ResearcherRunOperations({
+  isLoadingRawEvidenceRunId,
+  isCreatingRuns,
+  participantSlots,
+  rawEvidenceState,
+  runDashboardState,
+  runError,
+  runState,
+  selectedRunParticipantSlotIds,
+  selectedStudy,
+  onCreateRuns,
+  onDismissRawEvidence,
+  onOpenRawEvidence,
+  onSelectedRunParticipantSlotIdsChange
+}: ResearcherRunOperationsProps) {
   const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
   const runs = runState.status === "ready" ? runState.runs : [];
-  const scoreReviews = scoreReviewState.status === "ready" ? scoreReviewState.scoreReviews : [];
   const activeParticipantSlots = participantSlots.filter((slot) => slot.status === "active");
   const participantCodeBySlotId = new Map(participantSlots.map((slot) => [slot.id, slot.participantCode]));
   const currentRunBySlotId = new Map(runs.filter((run) => run.currentRunForSlot).map((run) => [run.participantSlotId, run]));
@@ -91,14 +167,9 @@ export function ResearcherRuns({
   }
 
   return (
-    <section
-      aria-labelledby="runs-title"
-      className="study-form study-setup-panel"
-      hidden={activeStudySetupTab !== "runs"}
-      id="runs-panel"
-    >
+    <section className="study-form workspace-task-panel" aria-labelledby="run-operations-title">
       <div className="section-heading">
-        <h2 id="runs-title">Researcher-authorized runs</h2>
+        <h2 id="run-operations-title">Run operations</h2>
       </div>
       <RunStatusDashboard runDashboardState={runDashboardState} />
       <form className="run-create-panel" onSubmit={onCreateRuns}>
@@ -183,23 +254,71 @@ export function ResearcherRuns({
           ))}
         </div>
       ) : null}
+      <RawEvidencePanel rawEvidenceState={rawEvidenceState} onDismiss={onDismissRawEvidence} />
+    </section>
+  );
+}
+
+interface ResearcherRunAnalysisProps {
+  readonly isExportingScores: boolean;
+  readonly isLoadingEvidenceCitationId: string | null;
+  readonly isRescoringRunId: string | null;
+  readonly participantSlots: readonly ParticipantSlot[];
+  readonly rawEvidenceState: RawEvidenceState;
+  readonly rescoreError: string;
+  readonly scoreExportError: string;
+  readonly scoreReviewState: ScoreReviewState;
+  readonly selectedEvidenceCitation: ResolvedEvidenceCitation | null;
+  readonly selectedEvidenceCitationError: string;
+  readonly onDismissEvidenceCitation: () => void;
+  readonly onDismissRawEvidence: () => void;
+  readonly onExportScores: () => void;
+  readonly onManualRescore: (runId: string) => void;
+  readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+}
+
+export function ResearcherRunAnalysis({
+  isExportingScores,
+  isLoadingEvidenceCitationId,
+  isRescoringRunId,
+  participantSlots,
+  rawEvidenceState,
+  rescoreError,
+  scoreExportError,
+  scoreReviewState,
+  selectedEvidenceCitation,
+  selectedEvidenceCitationError,
+  onDismissEvidenceCitation,
+  onDismissRawEvidence,
+  onExportScores,
+  onManualRescore,
+  onOpenEvidenceCitation
+}: ResearcherRunAnalysisProps) {
+  const scoreReviews = scoreReviewState.status === "ready" ? scoreReviewState.scoreReviews : [];
+  const participantCodeBySlotId = new Map(participantSlots.map((slot) => [slot.id, slot.participantCode]));
+
+  return (
+    <section className="study-form workspace-task-panel" aria-labelledby="run-analysis-title">
+      <div className="section-heading">
+        <h2 id="run-analysis-title">Completed run analysis</h2>
+      </div>
       <ScoreReviewList
+        isExportingScores={isExportingScores}
         isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+        isRescoringRunId={isRescoringRunId}
         participantCodeBySlotId={participantCodeBySlotId}
+        rawEvidenceState={rawEvidenceState}
+        rescoreError={rescoreError}
+        scoreExportError={scoreExportError}
         scoreReviewState={scoreReviewState}
         scoreReviews={scoreReviews}
         selectedEvidenceCitation={selectedEvidenceCitation}
         selectedEvidenceCitationError={selectedEvidenceCitationError}
-        rawEvidenceState={rawEvidenceState}
-        rescoreError={rescoreError}
-        scoreExportError={scoreExportError}
-        isExportingScores={isExportingScores}
         onDismissEvidenceCitation={onDismissEvidenceCitation}
         onDismissRawEvidence={onDismissRawEvidence}
         onExportScores={onExportScores}
         onManualRescore={onManualRescore}
         onOpenEvidenceCitation={onOpenEvidenceCitation}
-        isRescoringRunId={isRescoringRunId}
       />
     </section>
   );

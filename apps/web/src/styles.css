@@ -481,6 +481,39 @@ dd {
   width: min(100%, 1080px);
 }
 
+.researcher-workspace-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 24px;
+  border: 1px solid #d7e0da;
+  border-radius: 8px;
+  background: #fbfcfa;
+  padding: 6px;
+}
+
+.workspace-nav-button {
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #485466;
+  padding: 9px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.workspace-nav-button:hover,
+.active-workspace-nav-button {
+  border-color: #bdc9c2;
+  background: #ffffff;
+  color: #172033;
+}
+
+.active-workspace-nav-button {
+  box-shadow: 0 8px 24px rgb(24 33 47 / 8%);
+}
+
 .study-workspace {
   display: grid;
   grid-template-columns: minmax(240px, 0.36fr) minmax(0, 1fr);
@@ -508,6 +541,20 @@ dd {
   gap: 8px;
   align-items: center;
   justify-content: flex-end;
+}
+
+.workspace-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-heading .eyebrow,
+.workspace-heading h2 {
+  margin: 0;
+}
+
+.workspace-task-panel {
+  padding-top: 0;
 }
 
 h2 {
@@ -1434,6 +1481,7 @@ button.version-chip:hover {
 
   .session-list div,
   .topline,
+  .researcher-workspace-nav,
   .study-workspace,
   .settings-grid,
     .study-setup-tabs,
@@ -1468,6 +1516,10 @@ button.version-chip:hover {
     width: 100%;
     border: 1px solid #d7e0da;
     border-radius: 6px;
+    text-align: left;
+  }
+
+  .workspace-nav-button {
     text-align: left;
   }
 }

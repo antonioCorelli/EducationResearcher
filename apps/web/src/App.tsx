@@ -10,7 +10,7 @@ import { Participant } from "./participant";
 import { Researcher } from "./researcher";
 import { createConsentForm, defaultConsentForm, ResearcherConsent } from "./researcher/consent";
 import { ResearcherParticipantSlots } from "./researcher/participantSlots";
-import { ResearcherRuns } from "./researcher/runs";
+import { ResearcherRunAnalysis, ResearcherRunOperations } from "./researcher/runs";
 import { createEmptyObjectiveDraft, createObjectiveDraftsFromVersions, ResearcherScoring } from "./researcher/scoring";
 import { createStudyShellForm, defaultStudyShellForm, ResearcherShell } from "./researcher/shell";
 import { createSurveyItemsFromVersion, defaultSurveyItems, ResearcherSurvey } from "./researcher/survey";
@@ -49,6 +49,7 @@ export interface StudyShell {
 }
 
 export type StudySetupTab = "shell" | "consent" | "survey" | "objectives" | "runs";
+export type ResearcherWorkspace = "builder" | "operations" | "analysis";
 
 export type ConsentMethod = "checkmark" | "electronic_signature";
 
@@ -919,6 +920,7 @@ export function App() {
   const [studyError, setStudyError] = useState("");
   const [isSavingStudy, setIsSavingStudy] = useState(false);
   const [studyTitleFocusRequest, setStudyTitleFocusRequest] = useState(0);
+  const [activeResearcherWorkspace, setActiveResearcherWorkspace] = useState<ResearcherWorkspace>("builder");
   const [activeStudySetupTab, setActiveStudySetupTab] = useState<StudySetupTab>("shell");
   const [participantCode, setParticipantCode] = useState("");
   const [participantSlotCsv, setParticipantSlotCsv] = useState("");
@@ -1176,6 +1178,7 @@ export function App() {
     const consentForm = createConsentForm(undefined);
 
     setSelectedStudyId(null);
+    setActiveResearcherWorkspace("builder");
     setActiveStudySetupTab("shell");
     setStudyTitle(studyShellForm.studyTitle);
     setFreshnessDays(studyShellForm.freshnessDays);
@@ -2339,7 +2342,30 @@ export function App() {
 
     return (
       <Researcher
+        activeResearcherWorkspace={activeResearcherWorkspace}
         activeStudySetupTab={activeStudySetupTab}
+        analysisPanel={
+          <ResearcherRunAnalysis
+            isExportingScores={isExportingScores}
+            isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+            isRescoringRunId={isRescoringRunId}
+            participantSlots={participantSlots}
+            rawEvidenceState={rawEvidenceState}
+            rescoreError={rescoreError}
+            scoreExportError={scoreExportError}
+            scoreReviewState={scoreReviewState}
+            selectedEvidenceCitation={selectedEvidenceCitation}
+            selectedEvidenceCitationError={selectedEvidenceCitationError}
+            onDismissEvidenceCitation={() => {
+              setSelectedEvidenceCitation(null);
+              setSelectedEvidenceCitationError("");
+            }}
+            onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
+            onExportScores={handleExportScores}
+            onManualRescore={handleManualRescore}
+            onOpenEvidenceCitation={handleOpenEvidenceCitation}
+          />
+        }
         consentPanel={
           <ResearcherConsent
             activeStudySetupTab={activeStudySetupTab}
@@ -2509,59 +2535,10 @@ export function App() {
             onUpdateObjectiveGradeLabel={updateObjectiveGradeLabel}
           />
         }
-        runsPanel={
-          <ResearcherRuns
-            activeStudySetupTab={activeStudySetupTab}
-            isCreatingRuns={isCreatingRuns}
-            isExportingScores={isExportingScores}
-            isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
-            isLoadingRawEvidenceRunId={isLoadingRawEvidenceRunId}
-            participantSlots={participantSlots}
-            rawEvidenceState={rawEvidenceState}
-            runError={runError}
-            runDashboardState={runDashboardState}
-            runState={runState}
-            scoreReviewState={scoreReviewState}
-            selectedEvidenceCitation={selectedEvidenceCitation}
-            selectedEvidenceCitationError={selectedEvidenceCitationError}
-            selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
-            selectedStudy={selectedStudy}
-            onCreateRuns={handleCreateRuns}
-            onDismissEvidenceCitation={() => {
-              setSelectedEvidenceCitation(null);
-              setSelectedEvidenceCitationError("");
-            }}
-            onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
-            onExportScores={handleExportScores}
-            onOpenEvidenceCitation={handleOpenEvidenceCitation}
-            onOpenRawEvidence={openRawEvidence}
-            onManualRescore={handleManualRescore}
-            onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
-            isRescoringRunId={isRescoringRunId}
-            rescoreError={rescoreError}
-            scoreExportError={scoreExportError}
-          />
-        }
-        selectedStudyId={selectedStudyId}
-        shellPanel={
+        operationsPanel={
           <>
-            <ResearcherShell
-              activeStudySetupTab={activeStudySetupTab}
-              freshnessDays={freshnessDays}
-              isSavingStudy={isSavingStudy}
-              maxInterviewMinutes={maxInterviewMinutes}
-              selectedStudy={selectedStudy}
-              studyError={studyError}
-              studyTitleFocusRequest={studyTitleFocusRequest}
-              studyTitle={studyTitle}
-              onFreshnessDaysChange={setFreshnessDays}
-              onMaxInterviewMinutesChange={setMaxInterviewMinutes}
-              onNavigateToParticipantDemo={() => navigate('/participant/demo')}
-              onSaveStudy={handleSaveStudy}
-              onStudyTitleChange={setStudyTitle}
-            />
             <ResearcherParticipantSlots
-              activeStudySetupTab={activeStudySetupTab}
+              activeStudySetupTab="shell"
               generatedParticipantSlotCount={generatedParticipantSlotCount}
               isArchivingParticipantSlotId={isArchivingParticipantSlotId}
               isGeneratingParticipantSlots={isGeneratingParticipantSlots}
@@ -2581,7 +2558,40 @@ export function App() {
               onParticipantSlotCsvChange={setParticipantSlotCsv}
               onSaveParticipantSlot={handleSaveParticipantSlot}
             />
+            <ResearcherRunOperations
+              isCreatingRuns={isCreatingRuns}
+              isLoadingRawEvidenceRunId={isLoadingRawEvidenceRunId}
+              participantSlots={participantSlots}
+              rawEvidenceState={rawEvidenceState}
+              runError={runError}
+              runDashboardState={runDashboardState}
+              runState={runState}
+              selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
+              selectedStudy={selectedStudy}
+              onCreateRuns={handleCreateRuns}
+              onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
+              onOpenRawEvidence={openRawEvidence}
+              onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
+            />
           </>
+        }
+        selectedStudyId={selectedStudyId}
+        shellPanel={
+          <ResearcherShell
+            activeStudySetupTab={activeStudySetupTab}
+            freshnessDays={freshnessDays}
+            isSavingStudy={isSavingStudy}
+            maxInterviewMinutes={maxInterviewMinutes}
+            selectedStudy={selectedStudy}
+            studyError={studyError}
+            studyTitleFocusRequest={studyTitleFocusRequest}
+            studyTitle={studyTitle}
+            onFreshnessDaysChange={setFreshnessDays}
+            onMaxInterviewMinutesChange={setMaxInterviewMinutes}
+            onNavigateToParticipantDemo={() => navigate("/participant/demo")}
+            onSaveStudy={handleSaveStudy}
+            onStudyTitleChange={setStudyTitle}
+          />
         }
         studies={studies}
         studiesState={studiesState}
@@ -2612,6 +2622,7 @@ export function App() {
         }
         user={session.user}
         onLoadStudyForm={loadStudyForm}
+        onResearcherWorkspaceChange={setActiveResearcherWorkspace}
         onResetStudyForm={resetStudyForm}
         onSignOut={handleSignOut}
         onStudySetupTabChange={setActiveStudySetupTab}
