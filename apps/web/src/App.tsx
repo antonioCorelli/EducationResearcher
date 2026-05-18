@@ -17,6 +17,7 @@ import { createSurveyItemsFromVersion, defaultSurveyItems, ResearcherSurvey } fr
 
 const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://localhost:4000";
 const accessTokenStorageKey = "educationResearcher.accessToken";
+const researcherProfilesStorageKey = "educationResearcher.researcherProfiles";
 
 export interface SessionUser {
   readonly id: string;
@@ -31,6 +32,11 @@ interface AuthTokens {
   readonly refreshToken?: string;
   readonly expiresIn: number;
   readonly tokenType: string;
+}
+
+interface StoredResearcherProfile {
+  readonly displayName: string;
+  readonly welcomeConfirmedAt: string;
 }
 
 export interface StudyShell {
@@ -454,6 +460,44 @@ type PendingVersionConfirmation =
 
 function getCurrentPath() {
   return window.location.pathname;
+}
+
+function loadStoredResearcherProfiles(): Record<string, StoredResearcherProfile> {
+  const storedProfiles = localStorage.getItem(researcherProfilesStorageKey);
+
+  if (!storedProfiles) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(storedProfiles) as unknown;
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, StoredResearcherProfile] => {
+        const [, profile] = entry;
+
+        return (
+          Boolean(profile) &&
+          typeof profile === "object" &&
+          "displayName" in profile &&
+          "welcomeConfirmedAt" in profile &&
+          typeof profile.displayName === "string" &&
+          typeof profile.welcomeConfirmedAt === "string" &&
+          profile.displayName.trim().length > 0
+        );
+      })
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveStoredResearcherProfiles(profiles: Record<string, StoredResearcherProfile>) {
+  localStorage.setItem(researcherProfilesStorageKey, JSON.stringify(profiles));
 }
 
 function formatChangeValue(value: string) {
@@ -904,6 +948,7 @@ export function App() {
   const [authError, setAuthError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(accessTokenStorageKey));
+  const [researcherProfiles, setResearcherProfiles] = useState(loadStoredResearcherProfiles);
   const [studiesState, setStudiesState] = useState<StudiesState>({ status: "idle" });
   const [participantSlotState, setParticipantSlotState] = useState<ParticipantSlotState>({ status: "idle" });
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
@@ -1169,6 +1214,23 @@ export function App() {
     setSelectedStudyId(null);
     resetStudyForm();
     navigate("/");
+  }
+
+  function handleConfirmWelcomeName(displayName: string) {
+    if (session.status !== "signed-in") {
+      return;
+    }
+
+    const nextProfiles = {
+      ...researcherProfiles,
+      [session.user.id]: {
+        displayName,
+        welcomeConfirmedAt: new Date().toISOString()
+      }
+    };
+
+    saveStoredResearcherProfiles(nextProfiles);
+    setResearcherProfiles(nextProfiles);
   }
 
   function resetStudyForm() {
@@ -2270,6 +2332,11 @@ export function App() {
   }
 
   if (session.status === "signed-in") {
+    const researcherProfile = researcherProfiles[session.user.id];
+    const researcherUser = {
+      ...session.user,
+      displayName: researcherProfile?.displayName ?? session.user.displayName
+    };
     const studies = studiesState.status === "ready" ? studiesState.studies : [];
     const selectedStudy = studies.find((study) => study.id === selectedStudyId);
     const selectedConsentVersion =
@@ -2463,6 +2530,7 @@ export function App() {
 
           </>
         }
+        isWelcomePersonalizationRequired={!researcherProfile}
         scoringPanel={
           <ResearcherScoring
             activeObjectiveVersions={activeObjectiveVersions}
@@ -2562,7 +2630,8 @@ export function App() {
             onUpdateSurveyQuestion={updateSurveyQuestion}
           />
         }
-        user={session.user}
+        user={researcherUser}
+        onConfirmWelcomeName={handleConfirmWelcomeName}
         onLoadStudyForm={loadStudyForm}
         onResearcherWorkspaceChange={setActiveResearcherWorkspace}
         onResetStudyForm={resetStudyForm}

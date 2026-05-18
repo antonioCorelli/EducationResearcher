@@ -14,6 +14,7 @@ function renderResearcher(activeResearcherWorkspace: ResearcherWorkspace) {
       analysisPanel={<div>ANALYSIS PANEL</div>}
       consentPanel={<div>CONSENT PANEL</div>}
       dialogs={null}
+      isWelcomePersonalizationRequired={false}
       operationsPanel={<div>OPERATIONS PANEL</div>}
       scoringPanel={<div>SCORING PANEL</div>}
       selectedStudyId="study_fixture_001"
@@ -35,6 +36,7 @@ function renderResearcher(activeResearcherWorkspace: ResearcherWorkspace) {
       studiesState={{ status: "ready", studies: [] }}
       surveyPanel={<div>SURVEY PANEL</div>}
       user={{ id: "user_fixture_001", email: "researcher@example.test", displayName: "Researcher", role: "researcher" }}
+      onConfirmWelcomeName={noop}
       onLoadStudyForm={noop}
       onResearcherWorkspaceChange={noop}
       onResetStudyForm={noop}
@@ -45,6 +47,41 @@ function renderResearcher(activeResearcherWorkspace: ResearcherWorkspace) {
 }
 
 describe("Researcher", () => {
+  it("shows only the centered welcome name prompt before the first workspace reveal", () => {
+    const markup = renderToStaticMarkup(
+      <Researcher
+        activeResearcherWorkspace="builder"
+        activeStudySetupTab="shell"
+        analysisPanel={<div>ANALYSIS PANEL</div>}
+        consentPanel={<div>CONSENT PANEL</div>}
+        dialogs={null}
+        isWelcomePersonalizationRequired={true}
+        operationsPanel={<div>OPERATIONS PANEL</div>}
+        scoringPanel={<div>SCORING PANEL</div>}
+        selectedStudyId="study_fixture_001"
+        shellPanel={<div>SHELL PANEL</div>}
+        studies={[]}
+        studiesState={{ status: "ready", studies: [] }}
+        surveyPanel={<div>SURVEY PANEL</div>}
+        user={{ id: "user_fixture_001", email: "researcher@example.test", displayName: "Researcher", role: "researcher" }}
+        onConfirmWelcomeName={noop}
+        onLoadStudyForm={noop}
+        onResearcherWorkspaceChange={noop}
+        onResetStudyForm={noop}
+        onSignOut={noop}
+        onStudySetupTabChange={noop}
+      />
+    );
+
+    expect(markup).toContain("Welcome,");
+    expect(markup).toContain("value=\"Researcher\"");
+    expect(markup).toContain("First name, nickname, lab handle");
+    expect(markup).not.toContain("Researcher workspace");
+    expect(markup).not.toContain("Survey Builder");
+    expect(markup).not.toContain("Studies");
+    expect(markup).not.toContain("SHELL PANEL");
+  });
+
   it("shows only the survey builder panels in the builder workspace", () => {
     const markup = renderResearcher("builder");
 
