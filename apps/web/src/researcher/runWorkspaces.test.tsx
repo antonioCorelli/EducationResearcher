@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ResearcherDashboardRun, ResearcherRunDashboardSlot, RunScoreReview } from "../App";
-import { ResearcherRuns, ScoreReviewList } from "./runs";
+import { ScoreReviewList } from "./runAnalysis";
+import { ResearcherRunOperations } from "./runOperations";
 
 const noop = () => undefined;
 const noopSubmit = (event: { preventDefault: () => void }) => event.preventDefault();
@@ -169,31 +170,18 @@ describe("ScoreReviewList", () => {
       }
     ];
     const markup = renderToStaticMarkup(
-      <ResearcherRuns
-        activeStudySetupTab="runs"
+      <ResearcherRunOperations
         isCreatingRuns={false}
-        isExportingScores={false}
-        isLoadingEvidenceCitationId={null}
         isLoadingRawEvidenceRunId={null}
-        isRescoringRunId={null}
         participantSlots={dashboardSlots.map((slot) => slot.participantSlot)}
         rawEvidenceState={{ status: "idle" }}
-        rescoreError=""
-        scoreExportError=""
         runDashboardState={{ status: "ready", slots: dashboardSlots }}
         runError=""
         runState={{ status: "ready", runs: [] }}
-        scoreReviewState={{ status: "ready", scoreReviews: [] }}
-        selectedEvidenceCitation={null}
-        selectedEvidenceCitationError=""
         selectedRunParticipantSlotIds={[]}
         selectedStudy={undefined}
         onCreateRuns={noopSubmit}
-        onDismissEvidenceCitation={noop}
         onDismissRawEvidence={noop}
-        onExportScores={noop}
-        onManualRescore={noop}
-        onOpenEvidenceCitation={noop}
         onOpenRawEvidence={noop}
         onSelectedRunParticipantSlotIdsChange={noop}
       />
