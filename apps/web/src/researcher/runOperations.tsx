@@ -177,67 +177,8 @@ export function ResearcherRunOperations({
       <div className="section-heading">
         <h2 id="run-operations-title">Run operations</h2>
       </div>
-      <div className="participant-add-panel">
-        <form className="participant-slot-create-row" onSubmit={onSaveParticipantSlot}>
-          <label>
-            Participant code
-            <input
-              disabled={!selectedStudy || isSavingParticipantSlot}
-              maxLength={80}
-              name="participant-code"
-              onChange={(event) => onParticipantCodeChange(event.target.value)}
-              placeholder={selectedStudy ? "P001" : "Create or select a study first"}
-              required={Boolean(selectedStudy)}
-              type="text"
-              value={participantCode}
-            />
-          </label>
-          <button className="primary-button" disabled={!selectedStudy || isSavingParticipantSlot} type="submit">
-            {isSavingParticipantSlot ? "Adding participant" : "Add participant"}
-          </button>
-        </form>
-        <details className="participant-slot-bulk-disclosure">
-          <summary>Bulk add participants</summary>
-          <div className="participant-slot-bulk-grid">
-            <form className="participant-slot-bulk-panel" onSubmit={onImportParticipantSlots}>
-              <label>
-                Import codes from CSV
-                <textarea
-                  disabled={!selectedStudy || isImportingParticipantSlots}
-                  name="participant-slot-csv"
-                  onChange={(event) => onParticipantSlotCsvChange(event.target.value)}
-                  placeholder={"participantCode\nP001\nP002"}
-                  value={participantSlotCsv}
-                />
-              </label>
-              <button className="secondary-button" disabled={!selectedStudy || isImportingParticipantSlots} type="submit">
-                {isImportingParticipantSlots ? "Importing" : "Import CSV"}
-              </button>
-            </form>
-            <form className="participant-slot-bulk-panel" onSubmit={onGenerateParticipantSlots}>
-              <label>
-                Generate slots
-                <input
-                  disabled={!selectedStudy || isGeneratingParticipantSlots}
-                  max={200}
-                  min={1}
-                  name="generated-participant-slot-count"
-                  onChange={(event) => onGeneratedParticipantSlotCountChange(Number(event.target.value))}
-                  type="number"
-                  value={generatedParticipantSlotCount}
-                />
-              </label>
-              <button className="secondary-button" disabled={!selectedStudy || isGeneratingParticipantSlots} type="submit">
-                {isGeneratingParticipantSlots ? "Generating" : "Generate"}
-              </button>
-            </form>
-          </div>
-        </details>
-        {participantSlotState.status === "loading" ? <p className="muted-copy">Loading participants</p> : null}
-        {participantSlotState.status === "error" ? <p className="form-error">{participantSlotState.message}</p> : null}
-        {participantSlotError ? <p className="form-error">{participantSlotError}</p> : null}
-        <ParticipantSlotBulkResult participantSlotBulkSummary={participantSlotBulkSummary} />
-      </div>
+      {participantSlotState.status === "loading" ? <p className="muted-copy">Loading participants</p> : null}
+      {participantSlotState.status === "error" ? <p className="form-error">{participantSlotState.message}</p> : null}
       {runState.status === "loading" ? <p className="muted-copy">Loading runs</p> : null}
       {runState.status === "error" ? <p className="form-error">{runState.message}</p> : null}
       {runDashboardState.status === "loading" ? <p className="muted-copy">Loading participant status</p> : null}
@@ -314,6 +255,65 @@ export function ResearcherRunOperations({
         ) : null}
         {runError ? <p className="form-error">{runError}</p> : null}
       </form>
+      <div className="participant-add-panel">
+        <form className="participant-slot-create-row" onSubmit={onSaveParticipantSlot}>
+          <label>
+            Participant code
+            <input
+              disabled={!selectedStudy || isSavingParticipantSlot}
+              maxLength={80}
+              name="participant-code"
+              onChange={(event) => onParticipantCodeChange(event.target.value)}
+              placeholder={selectedStudy ? "P001" : "Create or select a study first"}
+              required={Boolean(selectedStudy)}
+              type="text"
+              value={participantCode}
+            />
+          </label>
+          <button className="primary-button" disabled={!selectedStudy || isSavingParticipantSlot} type="submit">
+            {isSavingParticipantSlot ? "Adding participant" : "Add participant"}
+          </button>
+        </form>
+        <details className="participant-slot-bulk-disclosure">
+          <summary>Bulk add participants</summary>
+          <div className="participant-slot-bulk-grid">
+            <form className="participant-slot-bulk-panel" onSubmit={onImportParticipantSlots}>
+              <label>
+                Import codes from CSV
+                <textarea
+                  disabled={!selectedStudy || isImportingParticipantSlots}
+                  name="participant-slot-csv"
+                  onChange={(event) => onParticipantSlotCsvChange(event.target.value)}
+                  placeholder={"participantCode\nP001\nP002"}
+                  value={participantSlotCsv}
+                />
+              </label>
+              <button className="secondary-button" disabled={!selectedStudy || isImportingParticipantSlots} type="submit">
+                {isImportingParticipantSlots ? "Importing" : "Import CSV"}
+              </button>
+            </form>
+            <form className="participant-slot-bulk-panel" onSubmit={onGenerateParticipantSlots}>
+              <label>
+                Generate slots
+                <input
+                  disabled={!selectedStudy || isGeneratingParticipantSlots}
+                  max={200}
+                  min={1}
+                  name="generated-participant-slot-count"
+                  onChange={(event) => onGeneratedParticipantSlotCountChange(Number(event.target.value))}
+                  type="number"
+                  value={generatedParticipantSlotCount}
+                />
+              </label>
+              <button className="secondary-button" disabled={!selectedStudy || isGeneratingParticipantSlots} type="submit">
+                {isGeneratingParticipantSlots ? "Generating" : "Generate"}
+              </button>
+            </form>
+          </div>
+        </details>
+        {participantSlotError ? <p className="form-error">{participantSlotError}</p> : null}
+        <ParticipantSlotBulkResult participantSlotBulkSummary={participantSlotBulkSummary} />
+      </div>
     </section>
   );
 }

@@ -251,6 +251,39 @@ describe("ScoreReviewList", () => {
     expect(markup).not.toMatch(/openai|diagnostic|provider error|stack trace|disconnect/i);
   });
 
+  it("places participant creation controls below participant operations", () => {
+    const markup = renderToStaticMarkup(
+      <ResearcherRunOperations
+        generatedParticipantSlotCount={10}
+        isCreatingRuns={false}
+        isGeneratingParticipantSlots={false}
+        isImportingParticipantSlots={false}
+        isSavingParticipantSlot={false}
+        participantCode=""
+        participantSlotBulkSummary={null}
+        participantSlotCsv=""
+        participantSlotError=""
+        participantSlotState={{ status: "ready", participantSlots: [] }}
+        participantSlots={[]}
+        runDashboardState={{ status: "ready", slots: [] }}
+        runError=""
+        runState={{ status: "ready", runs: [] }}
+        selectedRunParticipantSlotIds={[]}
+        selectedStudy={configuredStudyShell}
+        onCreateRuns={noopSubmit}
+        onGenerateParticipantSlots={noopSubmit}
+        onGeneratedParticipantSlotCountChange={noop}
+        onImportParticipantSlots={noopSubmit}
+        onParticipantCodeChange={noop}
+        onParticipantSlotCsvChange={noop}
+        onSaveParticipantSlot={noopSubmit}
+        onSelectedRunParticipantSlotIdsChange={noop}
+      />
+    );
+
+    expect(markup.indexOf("participant-operations-panel")).toBeLessThan(markup.indexOf("participant-add-panel"));
+  });
+
   it("sorts participant operations by displayed ID and participant-safe status", () => {
     const participantSlots: ParticipantSlot[] = [
       {

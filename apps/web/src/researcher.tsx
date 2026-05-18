@@ -88,6 +88,14 @@ export function Researcher({
     onConfirmWelcomeName(displayName);
   }
 
+  function loadSelectedStudy(studyId: string) {
+    const study = studies.find((availableStudy) => availableStudy.id === studyId);
+
+    if (study) {
+      onLoadStudyForm(study);
+    }
+  }
+
   return (
     <main className="app-shell researcher-shell">
       <section
@@ -134,6 +142,34 @@ export function Researcher({
                 <span>{user.displayName}</span>
               )}
             </h1>
+            {isWorkspaceReady ? (
+              <div className="study-list-panel">
+                <label className="study-selector-label">
+                  <span>Study</span>
+                  <select
+                    disabled={studiesState.status === "loading" || studies.length === 0}
+                    onChange={(event) => loadSelectedStudy(event.target.value)}
+                    value={selectedStudyId ?? ""}
+                  >
+                    {selectedStudyId ? null : <option value="">Select a study</option>}
+                    {studies.length === 0 ? <option value="">No studies yet</option> : null}
+                    {studies.map((study) => (
+                      <option key={study.id} value={study.id}>
+                        {study.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="secondary-button compact-button" type="button" onClick={onResetStudyForm}>
+                  Create New Study
+                </button>
+                {studiesState.status === "loading" ? <p className="muted-copy study-list-status">Loading studies</p> : null}
+                {studiesState.status === "error" ? <p className="form-error study-list-status">{studiesState.message}</p> : null}
+                {studies.length === 0 && studiesState.status === "ready" ? (
+                  <p className="muted-copy study-list-status">No studies yet</p>
+                ) : null}
+              </div>
+            ) : null}
             {isFirstRunWelcome ? (
               <div className="welcome-name-confirmation">
                 <p className="muted-copy" id="welcome-name-hint">
@@ -171,32 +207,6 @@ export function Researcher({
               ))}
             </nav>
             <div className="study-workspace">
-              <div className="study-list-panel">
-                <div className="section-heading">
-                  <h2>Studies</h2>
-                  <button className="secondary-button compact-button" type="button" onClick={onResetStudyForm}>
-                    Create New Study
-                  </button>
-                </div>
-                {studiesState.status === "loading" ? <p className="muted-copy">Loading studies</p> : null}
-                {studiesState.status === "error" ? <p className="form-error">{studiesState.message}</p> : null}
-                {studies.length === 0 && studiesState.status === "ready" ? <p className="muted-copy">No studies yet</p> : null}
-                <div className="study-list" aria-label="Studies">
-                  {studies.map((study) => (
-                    <button
-                      className={study.id === selectedStudyId ? "study-row selected-study-row" : "study-row"}
-                      key={study.id}
-                      type="button"
-                      onClick={() => onLoadStudyForm(study)}
-                    >
-                      <span>{study.title}</span>
-                      <small>
-                        {study.defaultFreshnessDays} days - {study.defaultMaxInterviewMinutes} min
-                      </small>
-                    </button>
-                  ))}
-                </div>
-              </div>
               <div className="setup-stack">
                 {activeResearcherWorkspace === "builder" ? (
                   <SurveyBuilderWorkspace

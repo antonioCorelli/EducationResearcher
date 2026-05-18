@@ -85,13 +85,24 @@ describe("Researcher", () => {
   it("shows only the survey builder panels in the builder workspace", () => {
     const markup = renderResearcher("builder");
 
+    expect(markup).toContain("study-list-panel");
+    expect(markup).toContain("<select");
     expect(markup).toContain("Study materials");
     expect(markup).toContain("SHELL PANEL");
     expect(markup).toContain("CONSENT PANEL");
     expect(markup).toContain("SURVEY PANEL");
     expect(markup).toContain("SCORING PANEL");
+    expect(markup).not.toContain("study-row");
     expect(markup).not.toContain("OPERATIONS PANEL");
     expect(markup).not.toContain("ANALYSIS PANEL");
+  });
+
+  it("places the study selector in the welcome heading before the workspace tabs", () => {
+    const markup = renderResearcher("builder");
+
+    expect(markup.indexOf("researcher-welcome-heading")).toBeLessThan(markup.indexOf("study-list-panel"));
+    expect(markup.indexOf("study-list-panel")).toBeLessThan(markup.indexOf("researcher-workspace-nav"));
+    expect(markup.indexOf("researcher-workspace-nav")).toBeLessThan(markup.indexOf("study-workspace"));
   });
 
   it("shows only run operations when that workspace is active", () => {
