@@ -1168,10 +1168,10 @@ button.version-chip:hover {
 
 .participant-operations-row {
   display: grid;
-  grid-template-columns: minmax(52px, 0.25fr) minmax(150px, 0.9fr) minmax(240px, 1.4fr) minmax(120px, 0.65fr) minmax(112px, 0.55fr);
+  grid-template-columns: minmax(72px, 0.35fr) minmax(150px, 0.9fr) minmax(240px, 1.4fr) minmax(120px, 0.65fr);
   gap: 12px;
   align-items: center;
-  min-width: 760px;
+  min-width: 680px;
   border-top: 1px solid #e3e9e5;
   padding: 10px 12px;
 }
@@ -1203,10 +1203,33 @@ button.version-chip:hover {
 .participant-run-checkbox {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
 }
 
 .participant-run-checkbox input {
   width: auto;
+}
+
+.participant-run-checkbox input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.table-sort-button {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.table-sort-button:hover,
+.table-sort-button:focus-visible {
+  color: #1f5b49;
+  text-decoration: underline;
 }
 
 .run-dashboard {

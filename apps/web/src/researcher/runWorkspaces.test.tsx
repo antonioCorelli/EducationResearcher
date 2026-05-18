@@ -1,12 +1,26 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { ResearcherDashboardRun, ResearcherRunDashboardSlot, RunScoreReview } from "../App";
+import type { ParticipantSlot, ResearcherDashboardRun, ResearcherRunDashboardSlot, RunScoreReview, StudyShell } from "../App";
 import { ScoreReviewList } from "./runAnalysis";
-import { ResearcherRunOperations } from "./runOperations";
+import { ResearcherRunOperations, sortParticipantOperationSlots } from "./runOperations";
 
 const noop = () => undefined;
 const noopSubmit = (event: { preventDefault: () => void }) => event.preventDefault();
+const configuredStudyShell: StudyShell = {
+  id: "study_fixture_001",
+  title: "Fixture study",
+  defaultFreshnessDays: 14,
+  defaultMaxInterviewMinutes: 45,
+  activeConsentVersionId: "consent_version_001",
+  activeSurveyVersionId: "survey_version_001",
+  activePersonaVersionId: "persona_version_v1_default_001",
+  persona: {
+    label: "V1 default",
+    stylePrompt: "Calm research interviewer.",
+    locked: true
+  }
+};
 
 function createScoreReview(runId: string, flags: RunScoreReview["objectiveScores"][number]["score"]["flags"]): RunScoreReview {
   return {
@@ -172,7 +186,6 @@ describe("ScoreReviewList", () => {
     const markup = renderToStaticMarkup(
       <ResearcherRunOperations
         generatedParticipantSlotCount={10}
-        isArchivingParticipantSlotId={null}
         isCreatingRuns={false}
         isGeneratingParticipantSlots={false}
         isImportingParticipantSlots={false}
@@ -207,8 +220,7 @@ describe("ScoreReviewList", () => {
             }))
         }}
         selectedRunParticipantSlotIds={[]}
-        selectedStudy={undefined}
-        onArchiveParticipantSlot={noop}
+        selectedStudy={configuredStudyShell}
         onCreateRuns={noopSubmit}
         onGenerateParticipantSlots={noopSubmit}
         onGeneratedParticipantSlotCountChange={noop}
@@ -229,12 +241,47 @@ describe("ScoreReviewList", () => {
     expect(markup).toContain("Technical interruption");
     expect(markup).toContain("No run yet");
     expect(markup).toContain("Copy link");
-    expect(markup).toContain("Archive");
+    expect(markup).toContain("Select all participants without runs");
+    expect(markup).toContain("Run already created for P001");
+    expect(markup).not.toContain("Archive");
     expect(markup).not.toContain("Artifacts");
     expect(markup).not.toContain("Scoring");
     expect(markup).not.toContain("survey responses");
     expect(markup).not.toContain("audio asset");
     expect(markup).not.toMatch(/openai|diagnostic|provider error|stack trace|disconnect/i);
+  });
+
+  it("sorts participant operations by displayed ID and participant-safe status", () => {
+    const participantSlots: ParticipantSlot[] = [
+      {
+        id: "slot_empty",
+        studyId: "study_fixture_001",
+        participantCode: "P006",
+        codeSource: "researcher_supplied",
+        status: "active",
+        createdAt: "2026-05-06T12:00:00.000Z",
+        updatedAt: "2026-05-06T12:00:00.000Z"
+      },
+      createDashboardSlot("slot_created", "P010", "created", "Created").participantSlot,
+      createDashboardSlot("slot_scored", "P002", "scored", "Scored").participantSlot,
+      createDashboardSlot("slot_survey", "P003", "survey_completed", "Survey completed").participantSlot
+    ];
+    const statusBySlotId = new Map([
+      ["slot_created", "created" as const],
+      ["slot_scored", "scored" as const],
+      ["slot_survey", "survey_completed" as const]
+    ]);
+
+    expect(
+      sortParticipantOperationSlots(participantSlots, { key: "participantId", direction: "ascending" }, (slot) =>
+        statusBySlotId.get(slot.id)
+      ).map((slot) => slot.participantCode)
+    ).toEqual(["P002", "P003", "P006", "P010"]);
+    expect(
+      sortParticipantOperationSlots(participantSlots, { key: "status" }, (slot) => statusBySlotId.get(slot.id)).map(
+        (slot) => slot.participantCode
+      )
+    ).toEqual(["P002", "P003", "P010", "P006"]);
   });
 
   it("renders confidence, rationale, safe flags, metadata, and citation links", () => {

@@ -930,7 +930,6 @@ export function App() {
   const [isSavingParticipantSlot, setIsSavingParticipantSlot] = useState(false);
   const [isImportingParticipantSlots, setIsImportingParticipantSlots] = useState(false);
   const [isGeneratingParticipantSlots, setIsGeneratingParticipantSlots] = useState(false);
-  const [isArchivingParticipantSlotId, setIsArchivingParticipantSlotId] = useState<string | null>(null);
   const [selectedRunParticipantSlotIds, setSelectedRunParticipantSlotIds] = useState<readonly string[]>([]);
   const [runError, setRunError] = useState("");
   const [isCreatingRuns, setIsCreatingRuns] = useState(false);
@@ -1189,7 +1188,6 @@ export function App() {
     setParticipantSlotBulkSummary(null);
     setParticipantSlotError("");
     setParticipantSlotState({ status: "idle" });
-    setIsArchivingParticipantSlotId(null);
     setRunState({ status: "idle" });
     setSelectedRunParticipantSlotIds([]);
     setRunError("");
@@ -1227,7 +1225,6 @@ export function App() {
     setParticipantSlotCsv("");
     setParticipantSlotBulkSummary(null);
     setParticipantSlotError("");
-    setIsArchivingParticipantSlotId(null);
     setSelectedRunParticipantSlotIds([]);
     setRunError("");
     setIsCreatingRuns(false);
@@ -1531,44 +1528,6 @@ export function App() {
       setParticipantSlotError(error instanceof Error ? error.message : "Unable to generate participant slots.");
     } finally {
       setIsGeneratingParticipantSlots(false);
-    }
-  }
-
-  async function handleArchiveParticipantSlot(participantSlot: ParticipantSlot) {
-    setParticipantSlotError("");
-    setParticipantSlotBulkSummary(null);
-
-    const token = localStorage.getItem(accessTokenStorageKey);
-
-    if (!token || !selectedStudyId) {
-      setParticipantSlotError("Select a study before archiving participant slots.");
-      return;
-    }
-
-    setIsArchivingParticipantSlotId(participantSlot.id);
-
-    try {
-      const response = await fetch(
-        `${serviceBaseUrl}/researcher/studies/${selectedStudyId}/participant-slots/${participantSlot.id}/archive`,
-        {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`
-          }
-        }
-      );
-      const payload = (await response.json()) as { participantSlot?: ParticipantSlot; message?: string };
-
-      if (!response.ok || !payload.participantSlot) {
-        throw new Error(payload.message ?? "Unable to archive participant slot.");
-      }
-
-      await reloadParticipantSlots(token, selectedStudyId);
-      await reloadRuns(token, selectedStudyId);
-    } catch (error) {
-      setParticipantSlotError(error instanceof Error ? error.message : "Unable to archive participant slot.");
-    } finally {
-      setIsArchivingParticipantSlotId(null);
     }
   }
 
@@ -2534,7 +2493,6 @@ export function App() {
         operationsPanel={
           <ResearcherRunOperations
             generatedParticipantSlotCount={generatedParticipantSlotCount}
-            isArchivingParticipantSlotId={isArchivingParticipantSlotId}
             isCreatingRuns={isCreatingRuns}
             isGeneratingParticipantSlots={isGeneratingParticipantSlots}
             isImportingParticipantSlots={isImportingParticipantSlots}
@@ -2550,7 +2508,6 @@ export function App() {
             runState={runState}
             selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
             selectedStudy={selectedStudy}
-            onArchiveParticipantSlot={handleArchiveParticipantSlot}
             onCreateRuns={handleCreateRuns}
             onGenerateParticipantSlots={handleGenerateParticipantSlots}
             onGeneratedParticipantSlotCountChange={setGeneratedParticipantSlotCount}

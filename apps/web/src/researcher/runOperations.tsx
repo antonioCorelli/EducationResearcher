@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 
 import type {
   ParticipantSlot,
@@ -14,7 +14,6 @@ import { formatDateTime, formatRunStatus, getStatusPillClassName } from "./runFo
 
 interface ResearcherRunOperationsProps {
   readonly generatedParticipantSlotCount: number;
-  readonly isArchivingParticipantSlotId: string | null;
   readonly isCreatingRuns: boolean;
   readonly isGeneratingParticipantSlots: boolean;
   readonly isImportingParticipantSlots: boolean;
@@ -30,7 +29,6 @@ interface ResearcherRunOperationsProps {
   readonly runState: RunState;
   readonly selectedRunParticipantSlotIds: readonly string[];
   readonly selectedStudy: StudyShell | undefined;
-  readonly onArchiveParticipantSlot: (participantSlot: ParticipantSlot) => void;
   readonly onCreateRuns: (event: FormEvent<HTMLFormElement>) => void;
   readonly onGenerateParticipantSlots: (event: FormEvent<HTMLFormElement>) => void;
   readonly onGeneratedParticipantSlotCountChange: (count: number) => void;
@@ -41,9 +39,54 @@ interface ResearcherRunOperationsProps {
   readonly onSelectedRunParticipantSlotIdsChange: (participantSlotIds: readonly string[]) => void;
 }
 
+export type ParticipantOperationsSort =
+  | { readonly key: "participantId"; readonly direction: "ascending" | "descending" }
+  | { readonly key: "status" };
+
+const runStatusSortRank: Record<Run["status"], number> = {
+  scored: 0,
+  interview_completed: 1,
+  technical_interruption: 2,
+  partial: 3,
+  stale: 4,
+  interview_in_progress: 5,
+  interview_paused: 6,
+  survey_completed: 7,
+  survey_in_progress: 8,
+  consented: 9,
+  created: 10
+};
+
+export function sortParticipantOperationSlots(
+  participantSlots: readonly ParticipantSlot[],
+  sort: ParticipantOperationsSort | null,
+  getRunStatus: (participantSlot: ParticipantSlot) => Run["status"] | undefined
+) {
+  if (!sort) {
+    return [...participantSlots];
+  }
+
+  return [...participantSlots].sort((left, right) => {
+    if (sort.key === "participantId") {
+      const result = left.participantCode.localeCompare(right.participantCode, undefined, { numeric: true, sensitivity: "base" });
+      return sort.direction === "ascending" ? result : -result;
+    }
+
+    const leftStatus = getRunStatus(left);
+    const rightStatus = getRunStatus(right);
+    const leftRank = leftStatus ? runStatusSortRank[leftStatus] : Number.MAX_SAFE_INTEGER;
+    const rightRank = rightStatus ? runStatusSortRank[rightStatus] : Number.MAX_SAFE_INTEGER;
+
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+
+    return left.participantCode.localeCompare(right.participantCode, undefined, { numeric: true, sensitivity: "base" });
+  });
+}
+
 export function ResearcherRunOperations({
   generatedParticipantSlotCount,
-  isArchivingParticipantSlotId,
   isCreatingRuns,
   isGeneratingParticipantSlots,
   isImportingParticipantSlots,
@@ -59,7 +102,6 @@ export function ResearcherRunOperations({
   runState,
   selectedRunParticipantSlotIds,
   selectedStudy,
-  onArchiveParticipantSlot,
   onCreateRuns,
   onGenerateParticipantSlots,
   onGeneratedParticipantSlotCountChange,
@@ -70,12 +112,45 @@ export function ResearcherRunOperations({
   onSelectedRunParticipantSlotIdsChange
 }: ResearcherRunOperationsProps) {
   const [copiedRunId, setCopiedRunId] = useState<string | null>(null);
+  const [participantOperationsSort, setParticipantOperationsSort] = useState<ParticipantOperationsSort | null>(null);
   const runs = runState.status === "ready" ? runState.runs : [];
   const dashboardSlots = runDashboardState.status === "ready" ? runDashboardState.slots : [];
   const dashboardSlotById = new Map(dashboardSlots.map((slot) => [slot.participantSlot.id, slot]));
   const currentRunBySlotId = new Map(runs.filter((run) => run.currentRunForSlot).map((run) => [run.participantSlotId, run]));
   const runById = new Map(runs.map((run) => [run.id, run]));
-  const isBulkActionRunning = isImportingParticipantSlots || isGeneratingParticipantSlots;
+  const slotIdsWithRuns = new Set(runs.map((run) => run.participantSlotId));
+
+  function getSlotRunStatus(participantSlot: ParticipantSlot) {
+    return dashboardSlotById.get(participantSlot.id)?.latestRun?.status.value ?? currentRunBySlotId.get(participantSlot.id)?.status;
+  }
+
+  function hasCreatedRun(participantSlot: ParticipantSlot) {
+    return Boolean(dashboardSlotById.get(participantSlot.id)?.runs.length || slotIdsWithRuns.has(participantSlot.id));
+  }
+
+  function canSelectParticipantSlot(participantSlot: ParticipantSlot) {
+    return Boolean(selectedStudy) && !isCreatingRuns && participantSlot.status !== "archived" && !hasCreatedRun(participantSlot);
+  }
+
+  const sortedParticipantSlots = useMemo(
+    () => sortParticipantOperationSlots(participantSlots, participantOperationsSort, getSlotRunStatus),
+    [currentRunBySlotId, dashboardSlotById, participantOperationsSort, participantSlots]
+  );
+  const selectableParticipantSlotIds = participantSlots.filter(canSelectParticipantSlot).map((slot) => slot.id);
+  const isEverySelectableParticipantSelected =
+    selectableParticipantSlotIds.length > 0 && selectableParticipantSlotIds.every((slotId) => selectedRunParticipantSlotIds.includes(slotId));
+  const isSelectAllDisabled = selectableParticipantSlotIds.length === 0;
+
+  function toggleAllParticipantSlots() {
+    if (isEverySelectableParticipantSelected) {
+      onSelectedRunParticipantSlotIdsChange(
+        selectedRunParticipantSlotIds.filter((slotId) => !selectableParticipantSlotIds.includes(slotId))
+      );
+      return;
+    }
+
+    onSelectedRunParticipantSlotIdsChange(Array.from(new Set([...selectedRunParticipantSlotIds, ...selectableParticipantSlotIds])));
+  }
 
   function toggleParticipantSlot(participantSlotId: string) {
     if (selectedRunParticipantSlotIds.includes(participantSlotId)) {
@@ -84,6 +159,17 @@ export function ResearcherRunOperations({
     }
 
     onSelectedRunParticipantSlotIdsChange([...selectedRunParticipantSlotIds, participantSlotId]);
+  }
+
+  function sortByParticipantId() {
+    setParticipantOperationsSort((currentSort) => ({
+      key: "participantId",
+      direction: currentSort?.key === "participantId" && currentSort.direction === "ascending" ? "descending" : "ascending"
+    }));
+  }
+
+  function sortByStatus() {
+    setParticipantOperationsSort({ key: "status" });
   }
 
   return (
@@ -173,32 +259,49 @@ export function ResearcherRunOperations({
         {participantSlots.length > 0 ? (
           <div className="participant-operations-table" role="table" aria-label="Participants">
             <div className="participant-operations-row participant-operations-header" role="row">
-              <span role="columnheader">Run</span>
-              <span role="columnheader">Participant ID</span>
-              <span role="columnheader">Status</span>
+              <span role="columnheader">
+                <label className="participant-run-checkbox">
+                  <input
+                    aria-label="Select all participants without runs"
+                    checked={isEverySelectableParticipantSelected}
+                    disabled={isSelectAllDisabled}
+                    onChange={toggleAllParticipantSlots}
+                    type="checkbox"
+                  />
+                  <span>Run</span>
+                </label>
+              </span>
+              <span aria-sort={participantOperationsSort?.key === "participantId" ? participantOperationsSort.direction : "none"} role="columnheader">
+                <button className="table-sort-button" onClick={sortByParticipantId} type="button">
+                  Participant ID
+                </button>
+              </span>
+              <span aria-sort={participantOperationsSort?.key === "status" ? "ascending" : "none"} role="columnheader">
+                <button className="table-sort-button" onClick={sortByStatus} type="button">
+                  Status
+                </button>
+              </span>
               <span role="columnheader">Link</span>
-              <span role="columnheader">Archive</span>
             </div>
-            {participantSlots.map((slot) => {
+            {sortedParticipantSlots.map((slot) => {
               const dashboardSlot = dashboardSlotById.get(slot.id);
               const currentRun = currentRunBySlotId.get(slot.id);
               const latestRun = dashboardSlot?.latestRun;
               const latestRunWithAccess = latestRun ? runById.get(latestRun.id) : undefined;
               const copyableRun = currentRun ?? latestRunWithAccess;
+              const runHasBeenCreated = hasCreatedRun(slot);
 
               return (
                 <ParticipantOperationRow
                   copiedRunId={copiedRunId}
                   currentRun={currentRun}
                   dashboardSlot={dashboardSlot}
-                  isArchiving={isArchivingParticipantSlotId === slot.id}
-                  isArchiveDisabled={slot.status === "archived" || isBulkActionRunning}
-                  isCreateRunDisabled={!selectedStudy || isCreatingRuns || slot.status === "archived"}
+                  isCreateRunDisabled={!canSelectParticipantSlot(slot)}
                   isSelected={selectedRunParticipantSlotIds.includes(slot.id)}
                   key={slot.id}
                   participantSlot={slot}
+                  runHasBeenCreated={runHasBeenCreated}
                   runWithAccess={copyableRun}
-                  onArchiveParticipantSlot={onArchiveParticipantSlot}
                   onCopiedRunIdChange={setCopiedRunId}
                   onToggleParticipantSlot={toggleParticipantSlot}
                 />
@@ -252,26 +355,22 @@ function ParticipantOperationRow({
   copiedRunId,
   currentRun,
   dashboardSlot,
-  isArchiving,
-  isArchiveDisabled,
   isCreateRunDisabled,
   isSelected,
   participantSlot,
+  runHasBeenCreated,
   runWithAccess,
-  onArchiveParticipantSlot,
   onCopiedRunIdChange,
   onToggleParticipantSlot
 }: {
   readonly copiedRunId: string | null;
   readonly currentRun: Run | undefined;
   readonly dashboardSlot: ResearcherRunDashboardSlot | undefined;
-  readonly isArchiving: boolean;
-  readonly isArchiveDisabled: boolean;
   readonly isCreateRunDisabled: boolean;
   readonly isSelected: boolean;
   readonly participantSlot: ParticipantSlot;
+  readonly runHasBeenCreated: boolean;
   readonly runWithAccess: Run | undefined;
-  readonly onArchiveParticipantSlot: (participantSlot: ParticipantSlot) => void;
   readonly onCopiedRunIdChange: (runId: string) => void;
   readonly onToggleParticipantSlot: (participantSlotId: string) => void;
 }) {
@@ -287,7 +386,11 @@ function ParticipantOperationRow({
             onChange={() => onToggleParticipantSlot(participantSlot.id)}
             type="checkbox"
           />
-          <span className="visually-hidden">Select {participantSlot.participantCode} for a new run</span>
+          <span className="visually-hidden">
+            {runHasBeenCreated
+              ? `Run already created for ${participantSlot.participantCode}`
+              : `Select ${participantSlot.participantCode} for a new run`}
+          </span>
         </label>
       </span>
       <span role="cell">
@@ -326,16 +429,6 @@ function ParticipantOperationRow({
         ) : (
           <span className="muted-copy">No link</span>
         )}
-      </span>
-      <span role="cell">
-        <button
-          className="secondary-button compact-button"
-          disabled={isArchiveDisabled || isArchiving}
-          onClick={() => onArchiveParticipantSlot(participantSlot)}
-          type="button"
-        >
-          {isArchiving ? "Archiving" : "Archive"}
-        </button>
       </span>
     </div>
   );
