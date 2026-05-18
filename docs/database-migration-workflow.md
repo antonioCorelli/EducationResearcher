@@ -73,19 +73,38 @@ The local scripts default to:
 - `EDUCATION_RESEARCHER_ENV=local`
 - `AWS_REGION=us-east-1`
 
+When the service points at deployed AWS DynamoDB tables, set `EDUCATION_RESEARCHER_ENV` to the same CDK environment
+context used at deploy time. The default CDK stack uses `dev`, producing table names like
+`education-researcher-dev-study-setup`.
+
 ## CDK Workflow
 
-Synthesize the data stack:
+List or synthesize the deployable stacks:
 
 ```bash
+npm run infra:list
 npm run infra:synth
 ```
+
+CDK writes the cloud assembly to `apps/infra/cdk.out`. The `apps/infra/cdk.out/cdk.out` file is only a schema-version
+marker; the synthesized CloudFormation templates are the `*.template.json` files next to it.
 
 The CDK app accepts an environment context value:
 
 ```bash
 npm run synth --workspace @education-researcher/infra -- -c environment=staging
 ```
+
+Deploy with CDK rather than manually zipping or uploading `cdk.out`:
+
+```bash
+npm run infra:diff
+npm run infra:bootstrap
+npm run infra:deploy
+```
+
+Run `infra:bootstrap` once per AWS account/region before the first CDK deploy. `infra:deploy` currently deploys both
+`EducationResearcherAuth-*` and `EducationResearcherData-*` stacks for the selected environment.
 
 Production tables use `RemovalPolicy.RETAIN`. Non-production tables use `RemovalPolicy.DESTROY` to keep local and staging resets practical.
 

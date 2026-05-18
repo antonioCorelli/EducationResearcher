@@ -1139,8 +1139,12 @@ export function App() {
       setSession({ status: "signed-in", user });
       setPassword("");
       navigate("/researcher");
-    } catch {
-      setAuthError("Email or password is incorrect.");
+    } catch (error) {
+      setAuthError(
+        error instanceof TypeError
+          ? "Unable to reach the service API. Make sure the local service is running."
+          : "Email or password is incorrect."
+      );
       setSession({ status: "signed-out" });
     } finally {
       setIsSubmitting(false);
