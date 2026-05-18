@@ -983,11 +983,48 @@ button.version-chip:hover {
   gap: 12px;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .participant-slot-create-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
+}
+
+.participant-add-panel,
+.participant-operations-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #fbfcfa;
+  padding: 14px;
+}
+
+.participant-slot-bulk-disclosure {
+  display: grid;
+  gap: 12px;
+}
+
+.participant-slot-bulk-disclosure summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #2c5f4a;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.participant-slot-bulk-disclosure[open] summary {
+  margin-bottom: 12px;
 }
 
 .participant-slot-bulk-grid {
@@ -1119,6 +1156,57 @@ button.version-chip:hover {
   overflow: auto;
   border: 1px solid #d7e0da;
   border-radius: 6px;
+}
+
+.participant-operations-table {
+  display: grid;
+  overflow: auto;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.participant-operations-row {
+  display: grid;
+  grid-template-columns: minmax(52px, 0.25fr) minmax(150px, 0.9fr) minmax(240px, 1.4fr) minmax(120px, 0.65fr) minmax(112px, 0.55fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 760px;
+  border-top: 1px solid #e3e9e5;
+  padding: 10px 12px;
+}
+
+.participant-operations-row:first-child {
+  border-top: 0;
+}
+
+.participant-operations-header {
+  background: #f5f8f5;
+  color: #566173;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.participant-operations-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.participant-operations-row small {
+  display: block;
+  margin-top: 4px;
+  color: #677386;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.participant-run-checkbox {
+  display: inline-flex;
+  align-items: center;
+}
+
+.participant-run-checkbox input {
+  width: auto;
 }
 
 .run-dashboard {
@@ -1480,14 +1568,15 @@ button.version-chip:hover {
   }
 
   .session-list div,
-  .topline,
-  .researcher-workspace-nav,
-  .study-workspace,
-  .settings-grid,
+    .topline,
+    .researcher-workspace-nav,
+    .study-workspace,
+    .settings-grid,
     .study-setup-tabs,
     .question-row,
     .participant-slot-create-row,
     .participant-slot-bulk-grid,
+    .participant-operations-panel .section-heading,
     .participant-slot-rejection-row,
     .rubric-grid,
     .voice-wave-grid,

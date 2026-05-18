@@ -145,7 +145,7 @@ function createDashboardSlot(
 }
 
 describe("ScoreReviewList", () => {
-  it("renders a run status dashboard with safe statuses, artifact summaries, and scoring state", () => {
+  it("renders consolidated participant operations with safe statuses and key actions", () => {
     const dashboardSlots: ResearcherRunDashboardSlot[] = [
       createDashboardSlot("slot_completed", "P001", "interview_completed", "Interview completed"),
       createDashboardSlot("slot_scored", "P002", "scored", "Scored", {
@@ -171,34 +171,69 @@ describe("ScoreReviewList", () => {
     ];
     const markup = renderToStaticMarkup(
       <ResearcherRunOperations
+        generatedParticipantSlotCount={10}
+        isArchivingParticipantSlotId={null}
         isCreatingRuns={false}
-        isLoadingRawEvidenceRunId={null}
+        isGeneratingParticipantSlots={false}
+        isImportingParticipantSlots={false}
+        isSavingParticipantSlot={false}
+        participantCode=""
+        participantSlotBulkSummary={null}
+        participantSlotCsv=""
+        participantSlotError=""
+        participantSlotState={{ status: "ready", participantSlots: dashboardSlots.map((slot) => slot.participantSlot) }}
         participantSlots={dashboardSlots.map((slot) => slot.participantSlot)}
-        rawEvidenceState={{ status: "idle" }}
         runDashboardState={{ status: "ready", slots: dashboardSlots }}
         runError=""
-        runState={{ status: "ready", runs: [] }}
+        runState={{
+          status: "ready",
+          runs: dashboardSlots
+            .filter((slot) => slot.latestRun)
+            .map((slot) => ({
+              id: slot.latestRun!.id,
+              studyId: "study_fixture_001",
+              participantSlotId: slot.participantSlot.id,
+              consentVersionId: "consent_version_001",
+              surveyVersionId: "survey_version_001",
+              personaVersionId: "persona_version_v1_default_001",
+              objectiveVersionIds: ["objective_version_001"],
+              freshnessDeadlineAt: slot.latestRun!.freshnessDeadlineAt,
+              maxInterviewMinutes: 45,
+              status: slot.latestRun!.status.value,
+              currentRunForSlot: true,
+              participantAccessUrl: `https://participant.example.test/${slot.latestRun!.id}`,
+              createdAt: slot.latestRun!.createdAt,
+              updatedAt: slot.latestRun!.updatedAt
+            }))
+        }}
         selectedRunParticipantSlotIds={[]}
         selectedStudy={undefined}
+        onArchiveParticipantSlot={noop}
         onCreateRuns={noopSubmit}
-        onDismissRawEvidence={noop}
-        onOpenRawEvidence={noop}
+        onGenerateParticipantSlots={noopSubmit}
+        onGeneratedParticipantSlotCountChange={noop}
+        onImportParticipantSlots={noopSubmit}
+        onParticipantCodeChange={noop}
+        onParticipantSlotCsvChange={noop}
+        onSaveParticipantSlot={noopSubmit}
         onSelectedRunParticipantSlotIdsChange={noop}
       />
     );
 
-    expect(markup).toContain("Run status dashboard");
+    expect(markup).toContain("Participants");
+    expect(markup).toContain("Participant ID");
     expect(markup).toContain("Interview completed");
     expect(markup).toContain("Scored");
     expect(markup).toContain("Stale");
     expect(markup).toContain("Partial");
     expect(markup).toContain("Technical interruption");
-    expect(markup).toContain("2 survey responses");
-    expect(markup).toContain("3 transcript turns");
-    expect(markup).toContain("1 audio asset");
-    expect(markup).toContain("2:00");
-    expect(markup).toContain("Automatic");
-    expect(markup).toContain("No runs");
+    expect(markup).toContain("No run yet");
+    expect(markup).toContain("Copy link");
+    expect(markup).toContain("Archive");
+    expect(markup).not.toContain("Artifacts");
+    expect(markup).not.toContain("Scoring");
+    expect(markup).not.toContain("survey responses");
+    expect(markup).not.toContain("audio asset");
     expect(markup).not.toMatch(/openai|diagnostic|provider error|stack trace|disconnect/i);
   });
 

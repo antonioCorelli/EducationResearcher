@@ -60,7 +60,7 @@ describe("Researcher", () => {
   it("shows only run operations when that workspace is active", () => {
     const markup = renderResearcher("operations");
 
-    expect(markup).toContain("Participants and active runs");
+    expect(markup).toContain("Participants");
     expect(markup).toContain("OPERATIONS PANEL");
     expect(markup).not.toContain("SHELL PANEL");
     expect(markup).not.toContain("ANALYSIS PANEL");

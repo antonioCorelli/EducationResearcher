@@ -9,7 +9,6 @@ import {
 import { Participant } from "./participant";
 import { Researcher } from "./researcher";
 import { createConsentForm, defaultConsentForm, ResearcherConsent } from "./researcher/consent";
-import { ResearcherParticipantSlots } from "./researcher/participantSlots";
 import { ResearcherRunAnalysis } from "./researcher/runAnalysis";
 import { ResearcherRunOperations } from "./researcher/runOperations";
 import { createEmptyObjectiveDraft, createObjectiveDraftsFromVersions, ResearcherScoring } from "./researcher/scoring";
@@ -939,7 +938,6 @@ export function App() {
   const [selectedEvidenceCitationError, setSelectedEvidenceCitationError] = useState("");
   const [isLoadingEvidenceCitationId, setIsLoadingEvidenceCitationId] = useState<string | null>(null);
   const [rawEvidenceState, setRawEvidenceState] = useState<RawEvidenceState>({ status: "idle" });
-  const [isLoadingRawEvidenceRunId, setIsLoadingRawEvidenceRunId] = useState<string | null>(null);
   const [isRescoringRunId, setIsRescoringRunId] = useState<string | null>(null);
   const [rescoreError, setRescoreError] = useState("");
   const [scoreExportError, setScoreExportError] = useState("");
@@ -1645,7 +1643,6 @@ export function App() {
       return;
     }
 
-    setIsLoadingRawEvidenceRunId(runId);
     setRawEvidenceState({ status: "loading" });
 
     try {
@@ -1658,8 +1655,6 @@ export function App() {
       }, 0);
     } catch (error) {
       setRawEvidenceState({ status: "error", message: error instanceof Error ? error.message : "Unable to load raw evidence." });
-    } finally {
-      setIsLoadingRawEvidenceRunId(null);
     }
   }
 
@@ -2537,44 +2532,34 @@ export function App() {
           />
         }
         operationsPanel={
-          <>
-            <ResearcherParticipantSlots
-              activeStudySetupTab="shell"
-              generatedParticipantSlotCount={generatedParticipantSlotCount}
-              isArchivingParticipantSlotId={isArchivingParticipantSlotId}
-              isGeneratingParticipantSlots={isGeneratingParticipantSlots}
-              isImportingParticipantSlots={isImportingParticipantSlots}
-              isSavingParticipantSlot={isSavingParticipantSlot}
-              participantCode={participantCode}
-              participantSlotBulkSummary={participantSlotBulkSummary}
-              participantSlotCsv={participantSlotCsv}
-              participantSlotError={participantSlotError}
-              participantSlotState={participantSlotState}
-              selectedStudy={selectedStudy}
-              onArchiveParticipantSlot={handleArchiveParticipantSlot}
-              onGenerateParticipantSlots={handleGenerateParticipantSlots}
-              onGeneratedParticipantSlotCountChange={setGeneratedParticipantSlotCount}
-              onImportParticipantSlots={handleImportParticipantSlots}
-              onParticipantCodeChange={setParticipantCode}
-              onParticipantSlotCsvChange={setParticipantSlotCsv}
-              onSaveParticipantSlot={handleSaveParticipantSlot}
-            />
-            <ResearcherRunOperations
-              isCreatingRuns={isCreatingRuns}
-              isLoadingRawEvidenceRunId={isLoadingRawEvidenceRunId}
-              participantSlots={participantSlots}
-              rawEvidenceState={rawEvidenceState}
-              runError={runError}
-              runDashboardState={runDashboardState}
-              runState={runState}
-              selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
-              selectedStudy={selectedStudy}
-              onCreateRuns={handleCreateRuns}
-              onDismissRawEvidence={() => setRawEvidenceState({ status: "idle" })}
-              onOpenRawEvidence={openRawEvidence}
-              onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
-            />
-          </>
+          <ResearcherRunOperations
+            generatedParticipantSlotCount={generatedParticipantSlotCount}
+            isArchivingParticipantSlotId={isArchivingParticipantSlotId}
+            isCreatingRuns={isCreatingRuns}
+            isGeneratingParticipantSlots={isGeneratingParticipantSlots}
+            isImportingParticipantSlots={isImportingParticipantSlots}
+            isSavingParticipantSlot={isSavingParticipantSlot}
+            participantCode={participantCode}
+            participantSlotBulkSummary={participantSlotBulkSummary}
+            participantSlotCsv={participantSlotCsv}
+            participantSlotError={participantSlotError}
+            participantSlotState={participantSlotState}
+            participantSlots={participantSlots}
+            runError={runError}
+            runDashboardState={runDashboardState}
+            runState={runState}
+            selectedRunParticipantSlotIds={selectedRunParticipantSlotIds}
+            selectedStudy={selectedStudy}
+            onArchiveParticipantSlot={handleArchiveParticipantSlot}
+            onCreateRuns={handleCreateRuns}
+            onGenerateParticipantSlots={handleGenerateParticipantSlots}
+            onGeneratedParticipantSlotCountChange={setGeneratedParticipantSlotCount}
+            onImportParticipantSlots={handleImportParticipantSlots}
+            onParticipantCodeChange={setParticipantCode}
+            onParticipantSlotCsvChange={setParticipantSlotCsv}
+            onSaveParticipantSlot={handleSaveParticipantSlot}
+            onSelectedRunParticipantSlotIdsChange={setSelectedRunParticipantSlotIds}
+          />
         }
         selectedStudyId={selectedStudyId}
         shellPanel={
