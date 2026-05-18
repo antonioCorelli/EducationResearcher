@@ -349,13 +349,13 @@ describe("participant routes", () => {
     const server = buildServer({ authProvider: createFakeAuthProvider(), logger: false });
     const response = await server.inject({
       method: "GET",
-      url: "/participant/demo"
+      url: "/participant/runs/not-a-valid-token"
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({
-      participantRoute: "public",
-      message: "Participant routes do not require researcher sign-in."
+      error: "Forbidden",
+      message: "This participant link is not available."
     });
 
     await server.close();

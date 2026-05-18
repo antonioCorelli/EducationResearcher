@@ -1871,11 +1871,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
-  server.get("/participant/demo", async () => ({
-    participantRoute: "public",
-    message: "Participant routes do not require researcher sign-in."
-  }));
-
   server.get<{ Params: { accessToken: string } }>("/participant/runs/:accessToken", async (request, reply) => {
     try {
       return await runService.validateParticipantAccess(request.params.accessToken);

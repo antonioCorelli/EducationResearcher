@@ -970,7 +970,7 @@ export function App() {
   const [isRestoreObjectiveDialogOpen, setIsRestoreObjectiveDialogOpen] = useState(false);
   const [pendingVersionConfirmation, setPendingVersionConfirmation] = useState<PendingVersionConfirmation | null>(null);
 
-  const isParticipantRoute = path.startsWith("/participant");
+  const isParticipantRoute = /^\/participant\/runs\/[^/]+$/.test(path);
   const duplicateGradeLabelError = getDuplicateGradeLabelError(objectiveDrafts);
 
   useEffect(() => {
@@ -2255,7 +2255,7 @@ export function App() {
   }
 
   if (isParticipantRoute) {
-    return <Participant onNavigateToResearcherSignIn={() => navigate("/")} />;
+    return <Participant />;
   }
 
   if (session.status === "checking") {
@@ -2531,7 +2531,6 @@ export function App() {
             studyTitle={studyTitle}
             onFreshnessDaysChange={setFreshnessDays}
             onMaxInterviewMinutesChange={setMaxInterviewMinutes}
-            onNavigateToParticipantDemo={() => navigate("/participant/demo")}
             onSaveStudy={handleSaveStudy}
             onStudyTitleChange={setStudyTitle}
           />
@@ -2577,9 +2576,8 @@ export function App() {
     <main className="app-shell">
       <section className="auth-layout" aria-labelledby="signin-title">
         <div className="auth-copy">
-          <p className="eyebrow">EducationResearcher</p>
-          <h1 id="signin-title">Researcher sign-in</h1>
-          <p>Use your researcher account to configure studies and review evidence.</p>
+          <p className="eyebrow">Voxaria Research</p>
+          <h1 id="signin-title">Researcher Sign In</h1>
         </div>
         <form className="login-form" onSubmit={handleSignIn}>
           <label>
@@ -2608,9 +2606,6 @@ export function App() {
           {authError ? <p className="form-error">{authError}</p> : null}
           <button className="primary-button" disabled={isSubmitting} type="submit">
             {isSubmitting ? "Signing in" : "Sign in"}
-          </button>
-          <button className="secondary-button" type="button" onClick={() => navigate("/participant/demo")}>
-            Participant demo
           </button>
         </form>
       </section>

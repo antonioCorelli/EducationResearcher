@@ -46,10 +46,6 @@ interface SurveyVersion {
   readonly ungroupedQuestions: readonly SurveyQuestion[];
 }
 
-interface ParticipantProps {
-  readonly onNavigateToResearcherSignIn: () => void;
-}
-
 type RunStatus =
   | "created"
   | "consented"
@@ -64,7 +60,6 @@ type RunStatus =
   | "scored";
 
 type ParticipantAccessState =
-  | { readonly status: "demo" }
   | { readonly status: "checking" }
   | {
       readonly status: "ready";
@@ -100,7 +95,7 @@ interface RealtimeVoiceSession {
   readonly promptVersion: string;
 }
 
-export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) {
+export function Participant() {
   const [accepted, setAccepted] = useState(false);
   const [signatureText, setSignatureText] = useState("");
   const [consentError, setConsentError] = useState("");
@@ -123,7 +118,9 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
     const accessToken = getParticipantAccessTokenFromPath();
 
-    return accessToken ? { status: "checking" } : { status: "demo" };
+    return accessToken
+      ? { status: "checking" }
+      : { status: "blocked", message: "This participant link is not available." };
   });
 
   useEffect(() => {
@@ -695,18 +692,12 @@ export function Participant({ onNavigateToResearcherSignIn }: ParticipantProps) 
       />
     );
   }
-
   return (
-    <main className="app-shell participant-shell">
-      <section className="workspace-panel" aria-labelledby="participant-title">
-        <p className="eyebrow">Participant access</p>
-        <h1 id="participant-title">Participant demo route</h1>
-        <p className="panel-copy">This route is intentionally public and does not require researcher sign-in.</p>
-        <button className="secondary-button" type="button" onClick={onNavigateToResearcherSignIn}>
-          Researcher sign-in
-        </button>
-      </section>
-    </main>
+    <ParticipantStatusScreen
+      eyebrow="Participant access"
+      title="This link is not available"
+      message="This participant link is not available."
+    />
   );
 }
 

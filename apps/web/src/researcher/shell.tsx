@@ -35,7 +35,6 @@ interface ResearcherShellProps {
   readonly studyTitle: string;
   readonly onFreshnessDaysChange: (freshnessDays: number) => void;
   readonly onMaxInterviewMinutesChange: (maxInterviewMinutes: number) => void;
-  readonly onNavigateToParticipantDemo: () => void;
   readonly onSaveStudy: (event: FormEvent<HTMLFormElement>) => void;
   readonly onStudyTitleChange: (title: string) => void;
 }
@@ -51,7 +50,6 @@ export function ResearcherShell({
   studyTitle,
   onFreshnessDaysChange,
   onMaxInterviewMinutesChange,
-  onNavigateToParticipantDemo,
   onSaveStudy,
   onStudyTitleChange
 }: ResearcherShellProps) {
@@ -123,9 +121,6 @@ export function ResearcherShell({
       <div className="form-actions">
         <button className="primary-button" disabled={isSavingStudy} type="submit">
           {isSavingStudy ? "Saving" : selectedStudy ? "Save changes" : "Create study"}
-        </button>
-        <button className="secondary-button" type="button" onClick={onNavigateToParticipantDemo}>
-          Participant demo
         </button>
       </div>
     </form>
