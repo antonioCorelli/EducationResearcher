@@ -740,6 +740,13 @@ dd {
   justify-content: space-between;
 }
 
+.section-heading-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .score-review-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1064,7 +1071,11 @@ button.version-chip:hover {
   align-items: start;
 }
 
-.grade-example-row textarea {
+textarea {
+  min-height: 180px;
+}
+
+.grade-example-row {
   min-height: 72px;
 }
 

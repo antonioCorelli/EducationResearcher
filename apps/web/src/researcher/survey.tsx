@@ -107,7 +107,8 @@ export function ResearcherSurvey({
         ) : null}
       </div>
       <p className="muted-copy">
-        Configure required long-form prompts. Standalone questions and titled groups can be ordered together.
+        Configure required long-form prompts for participant survey responses. Survey edits create a new version, and
+        existing runs keep the version they were assigned.
       </p>
       <div className="survey-item-list">
         {surveyItems.map((item, itemIndex) =>

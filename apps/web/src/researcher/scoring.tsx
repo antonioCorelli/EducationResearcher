@@ -76,6 +76,11 @@ export function ResearcherScoring({
   onUpdateObjectiveGradeExample,
   onUpdateObjectiveGradeLabel
 }: ResearcherScoringProps) {
+  const enabledObjectiveVersionCount =
+    (objectiveState.status === "ready" ? objectiveState.enabledObjectiveVersions?.length : undefined) ??
+    activeObjectiveVersions.filter((version) => version.isEnabled !== false).length;
+  const objectiveVersionLabel = getObjectiveVersionSummary(activeObjectiveVersions);
+
   return (
     <form
       aria-labelledby="study-setup-tab-objectives"
@@ -87,14 +92,16 @@ export function ResearcherScoring({
     >
       <div className="section-heading">
         <h2>Scoring objectives</h2>
-        {activeObjectiveVersions.length > 0 ? (
-          <span className="version-pill">
-            {(objectiveState.status === "ready" ? objectiveState.enabledObjectiveVersions?.length : undefined) ??
-              activeObjectiveVersions.filter((version) => version.isEnabled !== false).length}{" "}
-            enabled
-          </span>
-        ) : null}
+        <div className="section-heading-badges">
+          <span className="version-pill">{objectiveVersionLabel}</span>
+          {activeObjectiveVersions.length > 0 ? <span className="version-pill">{enabledObjectiveVersionCount} enabled</span> : null}
+        </div>
       </div>
+      <p className="muted-copy">
+        Define the objectives, grade labels, examples, evidence requirements, and optional scoring prompts used by the
+        gap map, interview, and scoring pass. Objective edits create new versions while prior runs keep the versions
+        they used.
+      </p>
       <div className="objective-list">
         {objectiveDrafts.map((objective, objectiveIndex) => {
           const objectiveKey = objective.objectiveKey;
@@ -357,4 +364,19 @@ export function ResearcherScoring({
       </div>
     </form>
   );
+}
+
+function getObjectiveVersionSummary(activeObjectiveVersions: readonly ObjectiveVersion[]) {
+  const activeVersionNumbers = activeObjectiveVersions.map((version) => version.versionNumber);
+
+  if (activeVersionNumbers.length === 0) {
+    return "Draft version";
+  }
+
+  const lowestVersionNumber = Math.min(...activeVersionNumbers);
+  const highestVersionNumber = Math.max(...activeVersionNumbers);
+
+  return lowestVersionNumber === highestVersionNumber
+    ? `Version ${highestVersionNumber}`
+    : `Versions ${lowestVersionNumber}-${highestVersionNumber}`;
 }

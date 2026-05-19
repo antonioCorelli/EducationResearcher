@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import type { StudySetupTab, StudyShell } from "../App";
+import type { StudySetupTab } from "../App";
 
 const studySetupTabs: readonly { readonly id: StudySetupTab; readonly label?: string }[] = [
   { id: "shell", label: "New Study" },
@@ -11,7 +11,6 @@ const studySetupTabs: readonly { readonly id: StudySetupTab; readonly label?: st
 
 interface SurveyBuilderWorkspaceProps {
   readonly activeStudySetupTab: StudySetupTab;
-  readonly selectedStudy: StudyShell | undefined;
   readonly shellPanel: ReactNode;
   readonly consentPanel: ReactNode;
   readonly surveyPanel: ReactNode;
@@ -21,7 +20,6 @@ interface SurveyBuilderWorkspaceProps {
 
 export function SurveyBuilderWorkspace({
   activeStudySetupTab,
-  selectedStudy,
   shellPanel,
   consentPanel,
   surveyPanel,

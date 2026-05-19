@@ -15,6 +15,8 @@ const defaultPersonaStylePrompt =
   "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or gap map internals. Do not tell the participant how they are performing or imply that the interview is an assessment.\n\n" +
   "Keep questions participant-safe and focused on the study topic. If the participant seems uncomfortable, give them room to pause or stop.";
 
+const defaultPersonaVersionLabel = "Persona Version 1";
+
 export function createStudyShellForm(study: StudyShell | undefined) {
   return {
     selectedStudyId: study?.id ?? null,
@@ -54,6 +56,7 @@ export function ResearcherShell({
   onStudyTitleChange
 }: ResearcherShellProps) {
   const studyTitleInputRef = useRef<HTMLInputElement>(null);
+  const personaVersionLabel = selectedStudy ? getPersonaVersionLabel(selectedStudy.activePersonaVersionId) : defaultPersonaVersionLabel;
 
   useEffect(() => {
     if (activeStudySetupTab === "shell") {
@@ -70,6 +73,13 @@ export function ResearcherShell({
       onSubmit={onSaveStudy}
       role="tabpanel"
     >
+      <div className="section-heading">
+        <h2>Study</h2>
+      </div>
+      <p className="muted-copy">
+        Name the study and set run timing defaults. The interviewer persona is locked to the V1 formative research style
+        so participants get a consistent, non-evaluative interview.
+      </p>
       <label>
         Study title
         <input
@@ -125,4 +135,10 @@ export function ResearcherShell({
       </div>
     </form>
   );
+}
+
+function getPersonaVersionLabel(activePersonaVersionId: string) {
+  const versionMatch = activePersonaVersionId.match(/(?:^|_)v(\d+)(?:_|$)/i);
+
+  return versionMatch ? `Persona Version ${versionMatch[1]}` : "Persona Version";
 }

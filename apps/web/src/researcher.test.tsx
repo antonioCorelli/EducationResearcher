@@ -87,7 +87,7 @@ describe("Researcher", () => {
 
     expect(markup).toContain("study-list-panel");
     expect(markup).toContain("<select");
-    expect(markup).toContain("Study materials");
+    expect(markup).toContain("Survey builder");
     expect(markup).toContain("SHELL PANEL");
     expect(markup).toContain("CONSENT PANEL");
     expect(markup).toContain("SURVEY PANEL");
@@ -117,7 +117,7 @@ describe("Researcher", () => {
   it("shows only run operations when that workspace is active", () => {
     const markup = renderResearcher("operations");
 
-    expect(markup).toContain("Participants");
+    expect(markup).toContain("Run operations");
     expect(markup).toContain("OPERATIONS PANEL");
     expect(markup).not.toContain("SHELL PANEL");
     expect(markup).not.toContain("ANALYSIS PANEL");

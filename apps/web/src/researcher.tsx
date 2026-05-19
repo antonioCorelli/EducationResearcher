@@ -54,7 +54,6 @@ export function Researcher({
   onResearcherWorkspaceChange,
   onStudySetupTabChange
 }: ResearcherProps) {
-  const selectedStudy = studies.find((study) => study.id === selectedStudyId);
   const [welcomeName, setWelcomeName] = useState(isWelcomePersonalizationRequired ? "Researcher" : user.displayName);
   const [hasEditedWelcomeName, setHasEditedWelcomeName] = useState(false);
   const [hasStartedWelcomeReveal, setHasStartedWelcomeReveal] = useState(false);
@@ -282,7 +281,6 @@ export function Researcher({
                     activeStudySetupTab={activeStudySetupTab}
                     consentPanel={consentPanel}
                     scoringPanel={scoringPanel}
-                    selectedStudy={selectedStudy}
                     shellPanel={shellPanel}
                     surveyPanel={surveyPanel}
                     onStudySetupTabChange={onStudySetupTabChange}
