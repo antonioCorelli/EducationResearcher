@@ -67,7 +67,8 @@ export function ResearcherConsent({
         ) : null}
       </div>
       <p className="muted-copy">
-        Capture the text and acceptance method shown to participants. Confirm legal or institutional requirements outside this tool.
+        Capture the text and acceptance method shown to participants.
+        Confirm legal or institutional requirements outside this tool.
       </p>
       <fieldset className="method-fieldset" disabled={!selectedStudy}>
         <legend>Consent method</legend>

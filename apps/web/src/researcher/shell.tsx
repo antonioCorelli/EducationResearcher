@@ -97,7 +97,7 @@ export function ResearcherShell({
           />
         </label>
         <label>
-          Interview cap minutes
+          Interview minutes
           <input
             max={180}
             min={1}

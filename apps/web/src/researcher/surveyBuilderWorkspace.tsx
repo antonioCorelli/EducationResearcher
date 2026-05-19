@@ -28,13 +28,12 @@ export function SurveyBuilderWorkspace({
   scoringPanel,
   onStudySetupTabChange
 }: SurveyBuilderWorkspaceProps) {
-  const shellTabLabel = selectedStudy ? ("Study: " + selectedStudy.title).slice(0, 15) : "New Study";
+  const shellTabLabel = "Study";
 
   return (
     <>
       <div className="workspace-heading">
         <p className="eyebrow">Survey builder</p>
-        <h2>Study materials</h2>
       </div>
       <div className="study-setup-tabs" aria-label="Study setup sections" role="tablist">
         {studySetupTabs.map((tab) => (

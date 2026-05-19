@@ -292,7 +292,6 @@ export function Researcher({
                   <>
                     <div className="workspace-heading">
                       <p className="eyebrow">Run operations</p>
-                      <h2>Participants</h2>
                     </div>
                     {operationsPanel}
                   </>
