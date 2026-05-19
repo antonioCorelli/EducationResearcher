@@ -511,6 +511,26 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.researcher-welcome-name-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.researcher-welcome-name-button:hover,
+.researcher-welcome-name-button:focus-visible {
+  color: #1f5b49;
+  text-decoration: underline;
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.30em;
+}
+
 .researcher-welcome-name-input {
   width: min(100%, 11ch);
   min-width: 0;
@@ -519,8 +539,13 @@ dd {
   color: #172033;
   padding: 6px 10px;
   font: inherit;
-  font-weight: 800;
-  line-height: 1.1;
+  font-weight: 600;
+  line-height: 0.0;
+}
+
+.researcher-welcome-name-input::selection {
+  background: rgb(216 162 29 / 28%);
+  color: #172033;
 }
 
 .welcome-name-confirmation {
@@ -543,6 +568,14 @@ dd {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
+}
+
+.welcome-name-edit-confirmation {
+  justify-items: start;
+}
+
+.welcome-name-edit-confirmation .welcome-confirm-button.visible {
+  animation: welcome-confirm-enter 360ms ease both;
 }
 
 .researcher-workspace-content {
@@ -621,6 +654,18 @@ dd {
   }
 }
 
+@keyframes welcome-confirm-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .researcher-workspace-content,
   .researcher-welcome-confirmed .researcher-welcome-stage {
@@ -628,6 +673,7 @@ dd {
   }
 
   .welcome-confirm-button {
+    animation: none;
     transition: none;
   }
 }

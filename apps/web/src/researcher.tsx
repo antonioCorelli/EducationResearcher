@@ -55,13 +55,17 @@ export function Researcher({
   onStudySetupTabChange
 }: ResearcherProps) {
   const selectedStudy = studies.find((study) => study.id === selectedStudyId);
-  const [welcomeName, setWelcomeName] = useState("Researcher");
+  const [welcomeName, setWelcomeName] = useState(isWelcomePersonalizationRequired ? "Researcher" : user.displayName);
   const [hasEditedWelcomeName, setHasEditedWelcomeName] = useState(false);
   const [hasStartedWelcomeReveal, setHasStartedWelcomeReveal] = useState(false);
+  const [isEditingWelcomeName, setIsEditingWelcomeName] = useState(false);
   const welcomeInputRef = useRef<HTMLInputElement>(null);
   const isFirstRunWelcome = isWelcomePersonalizationRequired && !hasStartedWelcomeReveal;
   const isWorkspaceReady = !isWelcomePersonalizationRequired || hasStartedWelcomeReveal;
-  const canConfirmWelcomeName = hasEditedWelcomeName && welcomeName.trim().length > 0;
+  const isEditingConfirmedWelcomeName = isWorkspaceReady && isEditingWelcomeName;
+  const isEditingAnyWelcomeName = isFirstRunWelcome || isEditingConfirmedWelcomeName;
+  const trimmedWelcomeName = welcomeName.trim();
+  const canConfirmWelcomeName = trimmedWelcomeName.length > 0 && (!isFirstRunWelcome || hasEditedWelcomeName);
 
   useEffect(() => {
     if (!isWelcomePersonalizationRequired) {
@@ -71,21 +75,62 @@ export function Researcher({
     setWelcomeName("Researcher");
     setHasEditedWelcomeName(false);
     setHasStartedWelcomeReveal(false);
-    window.requestAnimationFrame(() => {
+    setIsEditingWelcomeName(false);
+  }, [isWelcomePersonalizationRequired, user.id]);
+
+  useEffect(() => {
+    if (!isEditingAnyWelcomeName) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => {
       welcomeInputRef.current?.focus();
       welcomeInputRef.current?.select();
     });
-  }, [isWelcomePersonalizationRequired, user.id]);
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isEditingAnyWelcomeName]);
+
+  useEffect(() => {
+    if (isWelcomePersonalizationRequired || isEditingWelcomeName) {
+      return;
+    }
+
+    setWelcomeName(user.displayName);
+    setHasEditedWelcomeName(false);
+  }, [isEditingWelcomeName, isWelcomePersonalizationRequired, user.displayName]);
+
+  function startEditingWelcomeName() {
+    setWelcomeName(user.displayName);
+    setHasEditedWelcomeName(false);
+    setIsEditingWelcomeName(true);
+  }
+
+  function cancelWelcomeNameEdit() {
+    setWelcomeName(user.displayName);
+    setHasEditedWelcomeName(false);
+    setIsEditingWelcomeName(false);
+  }
 
   function confirmWelcomeName() {
-    const displayName = welcomeName.trim();
+    const displayName = trimmedWelcomeName;
 
     if (!canConfirmWelcomeName || !displayName) {
       return;
     }
 
-    setHasStartedWelcomeReveal(true);
-    onConfirmWelcomeName(displayName);
+    if (isFirstRunWelcome) {
+      setHasStartedWelcomeReveal(true);
+      onConfirmWelcomeName(displayName);
+      return;
+    }
+
+    setIsEditingWelcomeName(false);
+    setHasEditedWelcomeName(false);
+
+    if (displayName !== user.displayName) {
+      onConfirmWelcomeName(displayName);
+    }
   }
 
   function loadSelectedStudy(studyId: string) {
@@ -120,9 +165,9 @@ export function Researcher({
           <div className="researcher-welcome-heading">
             <h1 className="researcher-welcome-title" id="researcher-title">
               <span>Welcome,</span>
-              {isFirstRunWelcome ? (
+              {isEditingAnyWelcomeName ? (
                 <input
-                  aria-describedby="welcome-name-hint"
+                  aria-describedby={isFirstRunWelcome ? "welcome-name-hint" : undefined}
                   aria-label="Preferred welcome name"
                   className="researcher-welcome-name-input"
                   onChange={(event) => {
@@ -134,12 +179,24 @@ export function Researcher({
                       event.preventDefault();
                       confirmWelcomeName();
                     }
+
+                    if (event.key === "Escape" && isEditingConfirmedWelcomeName) {
+                      event.preventDefault();
+                      cancelWelcomeNameEdit();
+                    }
                   }}
                   ref={welcomeInputRef}
                   value={welcomeName}
                 />
               ) : (
-                <span>{user.displayName}</span>
+                <button
+                  aria-label="Edit welcome name"
+                  className="researcher-welcome-name-button"
+                  onClick={startEditingWelcomeName}
+                  type="button"
+                >
+                  <span>{user.displayName}</span>
+                </button>
               )}
             </h1>
             {isWorkspaceReady ? (
@@ -177,6 +234,18 @@ export function Researcher({
                 </p>
                 <button
                   className={canConfirmWelcomeName ? "primary-button welcome-confirm-button visible" : "primary-button welcome-confirm-button"}
+                  disabled={!canConfirmWelcomeName}
+                  onClick={confirmWelcomeName}
+                  type="button"
+                >
+                  Confirm
+                </button>
+              </div>
+            ) : null}
+            {isEditingConfirmedWelcomeName ? (
+              <div className="welcome-name-confirmation welcome-name-edit-confirmation">
+                <button
+                  className="primary-button compact-button welcome-confirm-button visible"
                   disabled={!canConfirmWelcomeName}
                   onClick={confirmWelcomeName}
                   type="button"

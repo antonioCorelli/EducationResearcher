@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "db:create": "tsx src/local-dynamodb.ts create",
+    "db:clear-test-user": "tsx src/clear-test-user.ts",
     "db:local": "docker run --rm -p 8000:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -sharedDb",
     "db:reset": "tsx src/local-dynamodb.ts reset",
     "db:seed": "tsx src/local-dynamodb.ts seed",

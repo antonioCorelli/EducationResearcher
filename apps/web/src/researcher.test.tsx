@@ -105,6 +105,15 @@ describe("Researcher", () => {
     expect(markup.indexOf("researcher-workspace-nav")).toBeLessThan(markup.indexOf("study-workspace"));
   });
 
+  it("renders the confirmed welcome name as editable text", () => {
+    const markup = renderResearcher("builder");
+
+    expect(markup).toContain("researcher-welcome-name-button");
+    expect(markup).toContain("aria-label=\"Edit welcome name\"");
+    expect(markup).toContain("<span>Researcher</span>");
+    expect(markup).not.toContain("welcome-name-edit-confirmation");
+  });
+
   it("shows only run operations when that workspace is active", () => {
     const markup = renderResearcher("operations");
 

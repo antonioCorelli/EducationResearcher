@@ -114,6 +114,17 @@ npm run db:reset
 npm run infra:synth
 ```
 
+Clear a test researcher's database records by email. The command defaults to a dry run and only deletes after the
+confirmation email matches:
+
+```bash
+npm run db:clear-test-user -- researcher@example.test
+npm run db:clear-test-user -- researcher@example.test researcher@example.test
+```
+
+The command defaults to local DynamoDB at `http://127.0.0.1:8000`. Start it with `npm run db:local` first, or pass
+`--environment dev` for deployed DynamoDB after clearing `DYNAMODB_ENDPOINT`.
+
 `npm run infra:synth` writes templates to `apps/infra/cdk.out`. The small file at
 `apps/infra/cdk.out/cdk.out` only records the cloud assembly schema version; the stack templates are the
 `*.template.json` files in the same folder.
