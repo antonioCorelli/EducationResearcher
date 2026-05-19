@@ -59,7 +59,7 @@ export function ResearcherConsent({
       role="tabpanel"
     >
       <div className="section-heading">
-        <h2>Consent information</h2>
+        <h2>Consent</h2>
         {selectedConsentVersion ? (
           <span className={isPreviewingPreviousConsent ? "version-pill preview-version-pill" : "version-pill"}>
             Version {selectedConsentVersion.versionNumber}

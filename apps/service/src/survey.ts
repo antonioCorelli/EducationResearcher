@@ -757,8 +757,8 @@ function parseGroupTitle(value: string, index: number) {
     throw new SurveyValidationError(`Group ${index} title is required.`);
   }
 
-  if (title.length > 120) {
-    throw new SurveyValidationError(`Group ${index} title must be 120 characters or fewer.`);
+  if (title.length > 240) {
+    throw new SurveyValidationError(`Group ${index} title must be 240 characters or fewer.`);
   }
 
   return title;

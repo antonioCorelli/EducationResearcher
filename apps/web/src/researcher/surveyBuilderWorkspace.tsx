@@ -4,9 +4,9 @@ import type { StudySetupTab } from "../App";
 
 const studySetupTabs: readonly { readonly id: StudySetupTab; readonly label?: string }[] = [
   { id: "shell", label: "New Study" },
-  { id: "consent", label: "Consent information" },
-  { id: "survey", label: "Survey information" },
-  { id: "interview", label: "Interview information" }
+  { id: "consent", label: "Consent" },
+  { id: "survey", label: "Survey" },
+  { id: "interview", label: "Interview" }
 ];
 
 interface SurveyBuilderWorkspaceProps {

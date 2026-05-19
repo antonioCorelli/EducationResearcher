@@ -4,9 +4,9 @@ import type { ResearcherWorkspace, SessionUser, StudiesState, StudySetupTab, Stu
 import { SurveyBuilderWorkspace } from "./researcher/surveyBuilderWorkspace";
 
 const researcherWorkspaces: readonly { readonly id: ResearcherWorkspace; readonly label: string }[] = [
-  { id: "builder", label: "Survey Builder" },
-  { id: "operations", label: "Run Operations" },
-  { id: "analysis", label: "Analysis" }
+  { id: "builder", label: "Build" },
+  { id: "operations", label: "Conduct" },
+  { id: "analysis", label: "Analyze" }
 ];
 
 interface ResearcherProps {

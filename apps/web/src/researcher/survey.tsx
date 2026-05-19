@@ -97,7 +97,7 @@ export function ResearcherSurvey({
       role="tabpanel"
     >
       <div className="section-heading">
-        <h2>Survey information</h2>
+        <h2>Survey</h2>
         {selectedSurveyVersion ? (
           <span className={isPreviewingPreviousSurvey ? "version-pill preview-version-pill" : "version-pill"}>
             Version {selectedSurveyVersion.versionNumber}
@@ -195,7 +195,7 @@ export function ResearcherSurvey({
                 Group title
                 <input
                   disabled={!selectedStudy || isPreviewingPreviousSurvey}
-                  maxLength={120}
+                  maxLength={240}
                   onChange={(event) => onUpdateSurveyGroupTitle(itemIndex, event.target.value)}
                   placeholder="Visible group title"
                   type="text"

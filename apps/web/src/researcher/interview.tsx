@@ -38,7 +38,7 @@ export function ResearcherInterview({
       role="tabpanel"
     >
       <div className="section-heading">
-        <h2>Interview information</h2>
+        <h2>Interview</h2>
         <span className="version-pill">Locked {personaVersionLabel}</span>
       </div>
       <p className="muted-copy">
