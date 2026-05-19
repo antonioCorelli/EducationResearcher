@@ -14,6 +14,7 @@ function renderResearcher(activeResearcherWorkspace: ResearcherWorkspace) {
       analysisPanel={<div>ANALYSIS PANEL</div>}
       consentPanel={<div>CONSENT PANEL</div>}
       dialogs={null}
+      interviewPanel={<div>INTERVIEW PANEL</div>}
       isWelcomePersonalizationRequired={false}
       operationsPanel={<div>OPERATIONS PANEL</div>}
       scoringPanel={<div>SCORING PANEL</div>}
@@ -23,6 +24,7 @@ function renderResearcher(activeResearcherWorkspace: ResearcherWorkspace) {
         {
           id: "study_fixture_001",
           title: "Thinking Strategies",
+          description: "Explores how learners explain their reasoning.",
           defaultFreshnessDays: 14,
           defaultMaxInterviewMinutes: 45,
           activePersonaVersionId: "persona_version_v1_default_001",
@@ -55,6 +57,7 @@ describe("Researcher", () => {
         analysisPanel={<div>ANALYSIS PANEL</div>}
         consentPanel={<div>CONSENT PANEL</div>}
         dialogs={null}
+        interviewPanel={<div>INTERVIEW PANEL</div>}
         isWelcomePersonalizationRequired={true}
         operationsPanel={<div>OPERATIONS PANEL</div>}
         scoringPanel={<div>SCORING PANEL</div>}
@@ -91,6 +94,7 @@ describe("Researcher", () => {
     expect(markup).toContain("SHELL PANEL");
     expect(markup).toContain("CONSENT PANEL");
     expect(markup).toContain("SURVEY PANEL");
+    expect(markup).toContain("INTERVIEW PANEL");
     expect(markup).toContain("SCORING PANEL");
     expect(markup).not.toContain("study-row");
     expect(markup).not.toContain("OPERATIONS PANEL");

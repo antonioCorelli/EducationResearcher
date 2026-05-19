@@ -174,6 +174,7 @@ function parseStudyShellInput(body: unknown) {
 
   return {
     ...("title" in record ? { title: record.title } : {}),
+    ...("description" in record ? { description: record.description } : {}),
     ...("defaultFreshnessDays" in record ? { defaultFreshnessDays: record.defaultFreshnessDays } : {}),
     ...("defaultMaxInterviewMinutes" in record
       ? { defaultMaxInterviewMinutes: record.defaultMaxInterviewMinutes }
@@ -191,6 +192,7 @@ function coerceCreateStudyShellInput(body: unknown): CreateStudyShellInput {
 
     return {
       title: input.title,
+      description: coerceOptionalText(input.description, "Study description"),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
       defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
     };
@@ -209,12 +211,25 @@ function coerceUpdateStudyShellInput(body: unknown): UpdateStudyShellInput {
 
     return {
       ...(typeof input.title === "string" ? { title: input.title } : {}),
+      ...("description" in input ? { description: coerceOptionalText(input.description, "Study description") } : {}),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
       defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
     };
   } catch (error) {
     throw toStudyBodyError(error);
   }
+}
+
+function coerceOptionalText(value: unknown, label: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be text.`);
+  }
+
+  return value;
 }
 
 function coerceSaveConsentInput(body: unknown): SaveConsentInput {

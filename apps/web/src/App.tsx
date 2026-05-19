@@ -9,6 +9,7 @@ import {
 import { Participant } from "./participant";
 import { Researcher } from "./researcher";
 import { createConsentForm, defaultConsentForm, ResearcherConsent } from "./researcher/consent";
+import { ResearcherInterview } from "./researcher/interview";
 import { ResearcherRunAnalysis } from "./researcher/runAnalysis";
 import { ResearcherRunOperations } from "./researcher/runOperations";
 import { createEmptyObjectiveDraft, createObjectiveDraftsFromVersions, ResearcherScoring } from "./researcher/scoring";
@@ -42,6 +43,7 @@ interface StoredResearcherProfile {
 export interface StudyShell {
   readonly id: string;
   readonly title: string;
+  readonly description?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -54,7 +56,7 @@ export interface StudyShell {
   };
 }
 
-export type StudySetupTab = "shell" | "consent" | "survey" | "objectives" | "runs";
+export type StudySetupTab = "shell" | "consent" | "survey" | "interview" | "objectives" | "runs";
 export type ResearcherWorkspace = "builder" | "operations" | "analysis";
 
 export type ConsentMethod = "checkmark" | "electronic_signature";
@@ -960,6 +962,7 @@ export function App() {
   const [objectiveState, setObjectiveState] = useState<ObjectiveState>({ status: "idle" });
   const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
   const [studyTitle, setStudyTitle] = useState<string>(defaultStudyShellForm.studyTitle);
+  const [studyDescription, setStudyDescription] = useState<string>(defaultStudyShellForm.studyDescription);
   const [freshnessDays, setFreshnessDays] = useState<number>(defaultStudyShellForm.freshnessDays);
   const [maxInterviewMinutes, setMaxInterviewMinutes] = useState<number>(defaultStudyShellForm.maxInterviewMinutes);
   const [studyError, setStudyError] = useState("");
@@ -1241,6 +1244,7 @@ export function App() {
     setActiveResearcherWorkspace("builder");
     setActiveStudySetupTab("shell");
     setStudyTitle(studyShellForm.studyTitle);
+    setStudyDescription(studyShellForm.studyDescription);
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
@@ -1280,6 +1284,7 @@ export function App() {
 
     setSelectedStudyId(studyShellForm.selectedStudyId);
     setStudyTitle(studyShellForm.studyTitle);
+    setStudyDescription(studyShellForm.studyDescription);
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
@@ -1371,6 +1376,7 @@ export function App() {
           },
           body: JSON.stringify({
             title: studyTitle,
+            description: studyDescription,
             defaultFreshnessDays: freshnessDays,
             defaultMaxInterviewMinutes: maxInterviewMinutes
           })
@@ -2531,6 +2537,17 @@ export function App() {
           </>
         }
         isWelcomePersonalizationRequired={!researcherProfile}
+        interviewPanel={
+          <ResearcherInterview
+            activeStudySetupTab={activeStudySetupTab}
+            isSavingStudy={isSavingStudy}
+            maxInterviewMinutes={maxInterviewMinutes}
+            selectedStudy={selectedStudy}
+            studyError={studyError}
+            onMaxInterviewMinutesChange={setMaxInterviewMinutes}
+            onSaveStudy={handleSaveStudy}
+          />
+        }
         scoringPanel={
           <ResearcherScoring
             activeObjectiveVersions={activeObjectiveVersions}
@@ -2592,14 +2609,14 @@ export function App() {
             activeStudySetupTab={activeStudySetupTab}
             freshnessDays={freshnessDays}
             isSavingStudy={isSavingStudy}
-            maxInterviewMinutes={maxInterviewMinutes}
             selectedStudy={selectedStudy}
             studyError={studyError}
+            studyDescription={studyDescription}
             studyTitleFocusRequest={studyTitleFocusRequest}
             studyTitle={studyTitle}
             onFreshnessDaysChange={setFreshnessDays}
-            onMaxInterviewMinutesChange={setMaxInterviewMinutes}
             onSaveStudy={handleSaveStudy}
+            onStudyDescriptionChange={setStudyDescription}
             onStudyTitleChange={setStudyTitle}
           />
         }

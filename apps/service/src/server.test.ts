@@ -1260,7 +1260,8 @@ describe("researcher study shell routes", () => {
         authorization: `Bearer ${tokens.accessToken}`
       },
       payload: {
-        title: "  New Formative Study  "
+        title: "  New Formative Study  ",
+        description: "  Optional context for this formative study.  "
       }
     });
 
@@ -1269,6 +1270,7 @@ describe("researcher study shell routes", () => {
       study: {
         ownerUserId: researcher.id,
         title: "New Formative Study",
+        description: "Optional context for this formative study.",
         defaultFreshnessDays: 14,
         defaultMaxInterviewMinutes: 45,
         activePersonaVersionId: "persona_version_v1_default_001",
@@ -1304,7 +1306,7 @@ describe("researcher study shell routes", () => {
     await server.close();
   });
 
-  it("edits title, freshness days, and max interview minutes", async () => {
+  it("edits title, description, freshness days, and max interview minutes", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
     const operationsStore = new InMemoryOperationalEventStore();
     const server = buildServer({
@@ -1321,6 +1323,7 @@ describe("researcher study shell routes", () => {
       },
       payload: {
         title: "Updated Study",
+        description: " Updated study context for participants and researchers. ",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30
       }
@@ -1331,6 +1334,7 @@ describe("researcher study shell routes", () => {
       study: {
         id: "study_fixture_001",
         title: "Updated Study",
+        description: "Updated study context for participants and researchers.",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30,
         activePersonaVersionId: "persona_version_v1_default_001",
@@ -1353,6 +1357,40 @@ describe("researcher study shell routes", () => {
         }
       })
     ]);
+
+    await server.close();
+  });
+
+  it("clears an optional study description when it is saved as blank", async () => {
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        description: "Existing study context."
+      })
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "PATCH",
+      url: "/researcher/studies/study_fixture_001",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        description: "   "
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().study.description).toBeUndefined();
+    await expect(store.getById("study_fixture_001")).resolves.toMatchObject({
+      title: "Fixture Study",
+      defaultFreshnessDays: 14,
+      defaultMaxInterviewMinutes: 45
+    });
+    expect((await store.getById("study_fixture_001"))?.description).toBeUndefined();
 
     await server.close();
   });
@@ -5273,6 +5311,7 @@ describe("researcher create survey end-to-end workflows", () => {
       headers,
       payload: {
         title: "  Mixed Methods Reflection Survey  ",
+        description: "  A classroom reflection study with survey and interview evidence.  ",
         defaultFreshnessDays: 30,
         defaultMaxInterviewMinutes: 60
       }
@@ -5408,6 +5447,7 @@ describe("researcher create survey end-to-end workflows", () => {
       study: {
         id: studyId,
         title: "Mixed Methods Reflection Survey",
+        description: "A classroom reflection study with survey and interview evidence.",
         defaultFreshnessDays: 30,
         defaultMaxInterviewMinutes: 60,
         activeConsentVersionId: consentResponse.json().consentVersion.id,

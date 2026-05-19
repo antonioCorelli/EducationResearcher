@@ -57,6 +57,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       id: "study_formative_001",
       ownerUserId: "user_researcher_001",
       title: "Fixture Formative Study",
+      description: "Fixture study for formative education research workflows.",
       defaultFreshnessDays: 14,
       defaultMaxInterviewMinutes: 45,
       activeConsentVersionId: "consent_version_001",

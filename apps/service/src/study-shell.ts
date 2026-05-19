@@ -29,6 +29,7 @@ export interface StudyShell {
   readonly id: string;
   readonly ownerUserId: string;
   readonly title: string;
+  readonly description?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -48,12 +49,14 @@ export interface StudyShell {
 
 export interface CreateStudyShellInput {
   readonly title: string;
+  readonly description?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
 }
 
 export interface UpdateStudyShellInput {
   readonly title?: string;
+  readonly description?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
 }
@@ -74,6 +77,7 @@ interface StudyShellItem {
   readonly id: string;
   readonly ownerUserId: string;
   readonly title: string;
+  readonly description?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -120,6 +124,7 @@ export class StudyShellService {
       id: this.createStudyId(),
       ownerUserId: actor.id,
       title: parseTitle(input.title),
+      description: parseOptionalDescription(input.description),
       defaultFreshnessDays: parseIntegerSetting(
         input.defaultFreshnessDays,
         "freshness days",
@@ -148,6 +153,7 @@ export class StudyShellService {
     const updatedStudy: StudyShell = {
       ...study,
       title: input.title === undefined ? study.title : parseTitle(input.title),
+      description: input.description === undefined ? study.description : parseOptionalDescription(input.description),
       defaultFreshnessDays:
         input.defaultFreshnessDays === undefined
           ? study.defaultFreshnessDays
@@ -376,6 +382,28 @@ function parseTitle(value: string) {
   return title;
 }
 
+function parseOptionalDescription(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new StudyShellValidationError("Study description must be text.");
+  }
+
+  const description = value.trim();
+
+  if (!description) {
+    return undefined;
+  }
+
+  if (description.length > 2000) {
+    throw new StudyShellValidationError("Study description must be 2000 characters or fewer.");
+  }
+
+  return description;
+}
+
 function parseIntegerSetting(
   value: number | undefined,
   label: string,
@@ -419,6 +447,7 @@ function toStudyShellItem(study: StudyShell): StudyShellItem {
     id: study.id,
     ownerUserId: study.ownerUserId,
     title: study.title,
+    ...(study.description ? { description: study.description } : {}),
     defaultFreshnessDays: study.defaultFreshnessDays,
     defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes,
     ...(study.activeConsentVersionId ? { activeConsentVersionId: study.activeConsentVersionId } : {}),
@@ -435,6 +464,7 @@ function toStudyShell(item: StudyShellItem): StudyShell {
     id: item.id,
     ownerUserId: item.ownerUserId,
     title: item.title,
+    description: item.description,
     defaultFreshnessDays: item.defaultFreshnessDays,
     defaultMaxInterviewMinutes: item.defaultMaxInterviewMinutes,
     activeConsentVersionId: item.activeConsentVersionId,

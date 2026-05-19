@@ -19,6 +19,7 @@ interface ResearcherProps {
   readonly shellPanel: ReactNode;
   readonly consentPanel: ReactNode;
   readonly surveyPanel: ReactNode;
+  readonly interviewPanel: ReactNode;
   readonly scoringPanel: ReactNode;
   readonly operationsPanel: ReactNode;
   readonly analysisPanel: ReactNode;
@@ -42,6 +43,7 @@ export function Researcher({
   shellPanel,
   consentPanel,
   surveyPanel,
+  interviewPanel,
   scoringPanel,
   operationsPanel,
   analysisPanel,
@@ -280,6 +282,7 @@ export function Researcher({
                   <SurveyBuilderWorkspace
                     activeStudySetupTab={activeStudySetupTab}
                     consentPanel={consentPanel}
+                    interviewPanel={interviewPanel}
                     scoringPanel={scoringPanel}
                     shellPanel={shellPanel}
                     surveyPanel={surveyPanel}

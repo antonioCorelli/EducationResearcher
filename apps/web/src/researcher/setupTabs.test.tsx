@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ObjectiveVersion, StudyShell, SurveyVersion } from "../App";
+import { ResearcherInterview } from "./interview";
 import { createEmptyObjectiveDraft, ResearcherScoring } from "./scoring";
 import { ResearcherShell } from "./shell";
 import { createSurveyItemsFromVersion, ResearcherSurvey } from "./survey";
@@ -11,6 +12,7 @@ const noop = () => undefined;
 const fixtureStudy: StudyShell = {
   id: "study_fixture_001",
   title: "Thinking Strategies",
+  description: "Explores how learners explain their reasoning.",
   defaultFreshnessDays: 14,
   defaultMaxInterviewMinutes: 45,
   activePersonaVersionId: "persona_version_v1_default_001",
@@ -67,21 +69,44 @@ describe("researcher setup tab information", () => {
         activeStudySetupTab="shell"
         freshnessDays={14}
         isSavingStudy={false}
-        maxInterviewMinutes={45}
         selectedStudy={fixtureStudy}
         studyError=""
+        studyDescription="Explores how learners explain their reasoning."
         studyTitle="Thinking Strategies"
         studyTitleFocusRequest={0}
         onFreshnessDaysChange={noop}
-        onMaxInterviewMinutesChange={noop}
         onSaveStudy={noop}
+        onStudyDescriptionChange={noop}
         onStudyTitleChange={noop}
       />
     );
 
-    expect(markup).toContain("Persona Version 1");
-    expect(markup).toContain("Name the study and set run timing defaults.");
-    expect(markup).toContain("consistent, non-evaluative interview");
+    expect(markup).toContain("Name the study and set the freshness window");
+    expect(markup).toContain("Study description");
+    expect(markup).toContain("Optional: summarize the study context");
+    expect(markup).toContain("Freshness days");
+    expect(markup).not.toContain("Interviewer persona");
+    expect(markup).not.toContain("Interview minutes");
+  });
+
+  it("shows locked interview settings in the interview information tab", () => {
+    const markup = renderToStaticMarkup(
+      <ResearcherInterview
+        activeStudySetupTab="interview"
+        isSavingStudy={false}
+        maxInterviewMinutes={45}
+        selectedStudy={fixtureStudy}
+        studyError=""
+        onMaxInterviewMinutesChange={noop}
+        onSaveStudy={noop}
+      />
+    );
+
+    expect(markup).toContain("Interview information");
+    expect(markup).toContain("Interview minutes");
+    expect(markup).toContain("Interviewer persona");
+    expect(markup).toContain("Locked Persona Version 1");
+    expect(markup).toContain("V1 default research interviewer");
   });
 
   it("shows the survey version and explains versioned survey edits", () => {
