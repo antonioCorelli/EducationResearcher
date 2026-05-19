@@ -5,6 +5,7 @@ import type { StudyShell, StudySetupTab } from "../App";
 export const defaultStudyShellForm = {
   studyTitle: "",
   studyDescription: "",
+  interviewerGoals: "",
   freshnessDays: 14,
   maxInterviewMinutes: 45
 } as const;
@@ -23,6 +24,7 @@ export function createStudyShellForm(study: StudyShell | undefined) {
     selectedStudyId: study?.id ?? null,
     studyTitle: study?.title ?? defaultStudyShellForm.studyTitle,
     studyDescription: study?.description ?? defaultStudyShellForm.studyDescription,
+    interviewerGoals: study?.interviewerGoals ?? defaultStudyShellForm.interviewerGoals,
     freshnessDays: study?.defaultFreshnessDays ?? defaultStudyShellForm.freshnessDays,
     maxInterviewMinutes: study?.defaultMaxInterviewMinutes ?? defaultStudyShellForm.maxInterviewMinutes
   };

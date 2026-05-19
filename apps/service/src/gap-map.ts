@@ -46,6 +46,7 @@ export interface GapMapGenerationInput {
   readonly surveyVersion: SurveyVersion;
   readonly surveyResponses: readonly SurveyResponse[];
   readonly objectiveVersions: readonly ObjectiveVersion[];
+  readonly interviewerGoals?: string;
 }
 
 export interface GapMapGeneratorOutput {
@@ -98,10 +99,15 @@ export class FakeGapMapAiProvider implements StructuredAiProvider<GapMapGenerati
         priority: "high",
         recommendedProbe: `You mentioned a possible tension in "${question.prompt}". Can you clarify what changed or conflicts?`
       }));
-    const missingEvidence = input.objectiveVersions.map(
-      (objective) => `Need interview evidence for "${objective.title}": ${objective.evidenceRequirements}`
-    );
+    const interviewerGoals = input.interviewerGoals?.trim();
+    const missingEvidence = [
+      ...(interviewerGoals ? [`Need interview evidence that helps accomplish these interviewer goals: ${interviewerGoals}`] : []),
+      ...input.objectiveVersions.map(
+        (objective) => `Need interview evidence for "${objective.title}": ${objective.evidenceRequirements}`
+      )
+    ];
     const recommendedProbes = [
+      ...(interviewerGoals ? [`What details would best help the interviewer accomplish these goals: ${interviewerGoals}`] : []),
       ...contradictions.map((contradiction) => contradiction.recommendedProbe),
       ...input.objectiveVersions.map(
         (objective) => `Can you share a specific example that would help explain your ${objective.title.toLowerCase()}?`

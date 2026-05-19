@@ -175,6 +175,7 @@ function parseStudyShellInput(body: unknown) {
   return {
     ...("title" in record ? { title: record.title } : {}),
     ...("description" in record ? { description: record.description } : {}),
+    ...("interviewerGoals" in record ? { interviewerGoals: record.interviewerGoals } : {}),
     ...("defaultFreshnessDays" in record ? { defaultFreshnessDays: record.defaultFreshnessDays } : {}),
     ...("defaultMaxInterviewMinutes" in record
       ? { defaultMaxInterviewMinutes: record.defaultMaxInterviewMinutes }
@@ -193,6 +194,7 @@ function coerceCreateStudyShellInput(body: unknown): CreateStudyShellInput {
     return {
       title: input.title,
       description: coerceOptionalText(input.description, "Study description"),
+      interviewerGoals: coerceOptionalText(input.interviewerGoals, "Interviewer goals"),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
       defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
     };
@@ -212,6 +214,9 @@ function coerceUpdateStudyShellInput(body: unknown): UpdateStudyShellInput {
     return {
       ...(typeof input.title === "string" ? { title: input.title } : {}),
       ...("description" in input ? { description: coerceOptionalText(input.description, "Study description") } : {}),
+      ...("interviewerGoals" in input
+        ? { interviewerGoals: coerceOptionalText(input.interviewerGoals, "Interviewer goals") }
+        : {}),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
       defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
     };

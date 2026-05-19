@@ -283,7 +283,6 @@ export function Researcher({
                     activeStudySetupTab={activeStudySetupTab}
                     consentPanel={consentPanel}
                     interviewPanel={interviewPanel}
-                    scoringPanel={scoringPanel}
                     shellPanel={shellPanel}
                     surveyPanel={surveyPanel}
                     onStudySetupTabChange={onStudySetupTabChange}
@@ -301,8 +300,9 @@ export function Researcher({
                   <>
                     <div className="workspace-heading">
                       <p className="eyebrow">Analysis</p>
-                      <h2>Completed run review</h2>
+                      <h2>Scoring objectives and completed run review</h2>
                     </div>
+                    {scoringPanel}
                     {analysisPanel}
                   </>
                 ) : null}

@@ -72,6 +72,7 @@ export interface Run {
   readonly surveyVersionId: string;
   readonly personaVersionId: string;
   readonly objectiveVersionIds: readonly string[];
+  readonly interviewerGoals?: string;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
   readonly status: RunStatus;
@@ -311,6 +312,7 @@ interface RunItem {
   readonly surveyVersionId: string;
   readonly personaVersionId: string;
   readonly objectiveVersionIds?: readonly string[];
+  readonly interviewerGoals?: string;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
   readonly status: RunStatus;
@@ -594,6 +596,7 @@ export class RunService {
         surveyVersionId: study.activeSurveyVersionId,
         personaVersionId: study.activePersonaVersionId,
         objectiveVersionIds: activeObjectiveVersionIds,
+        interviewerGoals: study.interviewerGoals,
         freshnessDeadlineAt: addDays(this.now(), study.defaultFreshnessDays).toISOString(),
         maxInterviewMinutes: study.defaultMaxInterviewMinutes,
         status: "created",
@@ -1216,7 +1219,8 @@ export class RunService {
           run,
           surveyVersion,
           surveyResponses,
-          objectiveVersions
+          objectiveVersions,
+          interviewerGoals: run.interviewerGoals
         })
       );
 
@@ -2741,6 +2745,7 @@ function toRunItem(run: Run): RunItem {
     surveyVersionId: run.surveyVersionId,
     personaVersionId: run.personaVersionId,
     objectiveVersionIds: run.objectiveVersionIds,
+    ...(run.interviewerGoals ? { interviewerGoals: run.interviewerGoals } : {}),
     freshnessDeadlineAt: run.freshnessDeadlineAt,
     maxInterviewMinutes: run.maxInterviewMinutes,
     status: run.status,
@@ -2763,6 +2768,7 @@ function toRun(item: RunItem): Run {
     surveyVersionId: item.surveyVersionId,
     personaVersionId: item.personaVersionId,
     objectiveVersionIds: item.objectiveVersionIds ?? [],
+    interviewerGoals: item.interviewerGoals,
     freshnessDeadlineAt: item.freshnessDeadlineAt,
     maxInterviewMinutes: item.maxInterviewMinutes,
     status: item.status,

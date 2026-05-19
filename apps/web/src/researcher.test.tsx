@@ -95,7 +95,8 @@ describe("Researcher", () => {
     expect(markup).toContain("CONSENT PANEL");
     expect(markup).toContain("SURVEY PANEL");
     expect(markup).toContain("INTERVIEW PANEL");
-    expect(markup).toContain("SCORING PANEL");
+    expect(markup).not.toContain("SCORING PANEL");
+    expect(markup).not.toContain("Scoring objectives</button>");
     expect(markup).not.toContain("study-row");
     expect(markup).not.toContain("OPERATIONS PANEL");
     expect(markup).not.toContain("ANALYSIS PANEL");
@@ -130,7 +131,8 @@ describe("Researcher", () => {
   it("shows only completed run analysis when that workspace is active", () => {
     const markup = renderResearcher("analysis");
 
-    expect(markup).toContain("Completed run review");
+    expect(markup).toContain("Scoring objectives and completed run review");
+    expect(markup).toContain("SCORING PANEL");
     expect(markup).toContain("ANALYSIS PANEL");
     expect(markup).not.toContain("SHELL PANEL");
     expect(markup).not.toContain("OPERATIONS PANEL");

@@ -517,6 +517,47 @@ describe("gap map generation", () => {
     expect(await runStore.listGapMapsByRun("run_fixture_001")).toEqual([result.gapMap]);
   });
 
+  it("passes snapshot interviewer goals into gap map generation", async () => {
+    const runStore = new InMemoryRunStore([
+      createFixtureRun({
+        status: "consented",
+        interviewerGoals: "Clarify learner confidence and gather concrete examples."
+      })
+    ]);
+    const capturedInputs: string[] = [];
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      gapMapGenerator: {
+        async generate(input) {
+          capturedInputs.push(input.interviewerGoals ?? "");
+
+          return {
+            modelName: "fake-gap-map",
+            modelVersion: "local-1",
+            serviceRequestId: "fake-gap-map-request",
+            promptVersion: "gap-map-v1",
+            alreadyAnswered: ["Survey response provides initial evidence."],
+            ambiguities: [],
+            contradictions: [],
+            missingEvidence: ["Need an example."],
+            recommendedProbes: ["Can you share an example?"]
+          };
+        }
+      }
+    });
+
+    await service.submitParticipantSurvey(rawToken, {
+      responses: [
+        {
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed the diagram first."
+        }
+      ]
+    });
+
+    expect(capturedInputs).toEqual(["Clarify learner confidence and gather concrete examples."]);
+  });
+
   it("persists a failed gap map artifact when AI output is invalid without losing survey data", async () => {
     const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
     const { rawToken, service } = createParticipantRunService({

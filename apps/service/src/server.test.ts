@@ -79,6 +79,7 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
     id: "study_fixture_001",
     ownerUserId: researcher.id,
     title: "Fixture Study",
+    interviewerGoals: "Clarify learner reasoning and prompt for concrete examples.",
     defaultFreshnessDays: 14,
     defaultMaxInterviewMinutes: 45,
     activeConsentVersionId: undefined,
@@ -1261,7 +1262,8 @@ describe("researcher study shell routes", () => {
       },
       payload: {
         title: "  New Formative Study  ",
-        description: "  Optional context for this formative study.  "
+        description: "  Optional context for this formative study.  ",
+        interviewerGoals: "  Clarify misconceptions and elicit concrete examples.  "
       }
     });
 
@@ -1271,6 +1273,7 @@ describe("researcher study shell routes", () => {
         ownerUserId: researcher.id,
         title: "New Formative Study",
         description: "Optional context for this formative study.",
+        interviewerGoals: "Clarify misconceptions and elicit concrete examples.",
         defaultFreshnessDays: 14,
         defaultMaxInterviewMinutes: 45,
         activePersonaVersionId: "persona_version_v1_default_001",
@@ -1306,7 +1309,7 @@ describe("researcher study shell routes", () => {
     await server.close();
   });
 
-  it("edits title, description, freshness days, and max interview minutes", async () => {
+  it("edits title, description, interviewer goals, freshness days, and max interview minutes", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
     const operationsStore = new InMemoryOperationalEventStore();
     const server = buildServer({
@@ -1324,6 +1327,7 @@ describe("researcher study shell routes", () => {
       payload: {
         title: "Updated Study",
         description: " Updated study context for participants and researchers. ",
+        interviewerGoals: " Clarify key reasoning gaps and prompt for specific experiences. ",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30
       }
@@ -1335,6 +1339,7 @@ describe("researcher study shell routes", () => {
         id: "study_fixture_001",
         title: "Updated Study",
         description: "Updated study context for participants and researchers.",
+        interviewerGoals: "Clarify key reasoning gaps and prompt for specific experiences.",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30,
         activePersonaVersionId: "persona_version_v1_default_001",
@@ -1391,6 +1396,35 @@ describe("researcher study shell routes", () => {
       defaultMaxInterviewMinutes: 45
     });
     expect((await store.getById("study_fixture_001"))?.description).toBeUndefined();
+
+    await server.close();
+  });
+
+  it("clears optional interviewer goals when they are saved as blank", async () => {
+    const store = new InMemoryStudyShellStore([
+      createFixtureStudy({
+        interviewerGoals: "Existing interviewer goals."
+      })
+    ]);
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      studyShellStore: store
+    });
+    const response = await server.inject({
+      method: "PATCH",
+      url: "/researcher/studies/study_fixture_001",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      },
+      payload: {
+        interviewerGoals: "   "
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().study.interviewerGoals).toBeUndefined();
+    expect((await store.getById("study_fixture_001"))?.interviewerGoals).toBeUndefined();
 
     await server.close();
   });
@@ -1993,6 +2027,7 @@ describe("researcher run routes", () => {
           surveyVersionId: "survey_version_active",
           personaVersionId: "persona_version_v1_default_001",
           objectiveVersionIds: ["objective_version_002", "objective_version_001"],
+          interviewerGoals: "Clarify learner reasoning and prompt for concrete examples.",
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
           maxInterviewMinutes: 45,
           status: "created",

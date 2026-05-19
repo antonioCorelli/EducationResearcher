@@ -6,8 +6,7 @@ const studySetupTabs: readonly { readonly id: StudySetupTab; readonly label?: st
   { id: "shell", label: "New Study" },
   { id: "consent", label: "Consent information" },
   { id: "survey", label: "Survey information" },
-  { id: "interview", label: "Interview information" },
-  { id: "objectives", label: "Scoring objectives" }
+  { id: "interview", label: "Interview information" }
 ];
 
 interface SurveyBuilderWorkspaceProps {
@@ -16,7 +15,6 @@ interface SurveyBuilderWorkspaceProps {
   readonly consentPanel: ReactNode;
   readonly surveyPanel: ReactNode;
   readonly interviewPanel: ReactNode;
-  readonly scoringPanel: ReactNode;
   readonly onStudySetupTabChange: (tab: StudySetupTab) => void;
 }
 
@@ -26,7 +24,6 @@ export function SurveyBuilderWorkspace({
   consentPanel,
   surveyPanel,
   interviewPanel,
-  scoringPanel,
   onStudySetupTabChange
 }: SurveyBuilderWorkspaceProps) {
   const shellTabLabel = "Study";
@@ -56,7 +53,6 @@ export function SurveyBuilderWorkspace({
       {consentPanel}
       {surveyPanel}
       {interviewPanel}
-      {scoringPanel}
     </>
   );
 }

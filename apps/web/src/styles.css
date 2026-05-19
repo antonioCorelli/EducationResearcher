@@ -794,6 +794,12 @@ h3 {
   margin: 0;
 }
 
+.field-hint {
+  margin-top: -8px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .rubric-help {
   margin: 0;
   color: #7c2d12;

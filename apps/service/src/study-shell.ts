@@ -30,6 +30,7 @@ export interface StudyShell {
   readonly ownerUserId: string;
   readonly title: string;
   readonly description?: string;
+  readonly interviewerGoals?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -50,6 +51,7 @@ export interface StudyShell {
 export interface CreateStudyShellInput {
   readonly title: string;
   readonly description?: string;
+  readonly interviewerGoals?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
 }
@@ -57,6 +59,7 @@ export interface CreateStudyShellInput {
 export interface UpdateStudyShellInput {
   readonly title?: string;
   readonly description?: string;
+  readonly interviewerGoals?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
 }
@@ -78,6 +81,7 @@ interface StudyShellItem {
   readonly ownerUserId: string;
   readonly title: string;
   readonly description?: string;
+  readonly interviewerGoals?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -125,6 +129,7 @@ export class StudyShellService {
       ownerUserId: actor.id,
       title: parseTitle(input.title),
       description: parseOptionalDescription(input.description),
+      interviewerGoals: parseOptionalInterviewerGoals(input.interviewerGoals),
       defaultFreshnessDays: parseIntegerSetting(
         input.defaultFreshnessDays,
         "freshness days",
@@ -154,6 +159,10 @@ export class StudyShellService {
       ...study,
       title: input.title === undefined ? study.title : parseTitle(input.title),
       description: input.description === undefined ? study.description : parseOptionalDescription(input.description),
+      interviewerGoals:
+        input.interviewerGoals === undefined
+          ? study.interviewerGoals
+          : parseOptionalInterviewerGoals(input.interviewerGoals),
       defaultFreshnessDays:
         input.defaultFreshnessDays === undefined
           ? study.defaultFreshnessDays
@@ -404,6 +413,28 @@ function parseOptionalDescription(value: string | undefined) {
   return description;
 }
 
+function parseOptionalInterviewerGoals(value: string | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    throw new StudyShellValidationError("Interviewer goals must be text.");
+  }
+
+  const interviewerGoals = value.trim();
+
+  if (!interviewerGoals) {
+    return undefined;
+  }
+
+  if (interviewerGoals.length > 4000) {
+    throw new StudyShellValidationError("Interviewer goals must be 4000 characters or fewer.");
+  }
+
+  return interviewerGoals;
+}
+
 function parseIntegerSetting(
   value: number | undefined,
   label: string,
@@ -448,6 +479,7 @@ function toStudyShellItem(study: StudyShell): StudyShellItem {
     ownerUserId: study.ownerUserId,
     title: study.title,
     ...(study.description ? { description: study.description } : {}),
+    ...(study.interviewerGoals ? { interviewerGoals: study.interviewerGoals } : {}),
     defaultFreshnessDays: study.defaultFreshnessDays,
     defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes,
     ...(study.activeConsentVersionId ? { activeConsentVersionId: study.activeConsentVersionId } : {}),
@@ -465,6 +497,7 @@ function toStudyShell(item: StudyShellItem): StudyShell {
     ownerUserId: item.ownerUserId,
     title: item.title,
     description: item.description,
+    interviewerGoals: item.interviewerGoals,
     defaultFreshnessDays: item.defaultFreshnessDays,
     defaultMaxInterviewMinutes: item.defaultMaxInterviewMinutes,
     activeConsentVersionId: item.activeConsentVersionId,
