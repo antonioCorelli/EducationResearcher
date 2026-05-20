@@ -91,6 +91,17 @@ export class OpenAiRealtimeVoiceProvider implements RealtimeVoiceProvider {
           model,
           instructions: request.instructions,
           audio: {
+            input: {
+              transcription: {
+                model: "gpt-4o-transcribe"
+              },
+              turn_detection: {
+                type: "semantic_vad",
+                eagerness: "low",
+                create_response: true,
+                interrupt_response: true
+              }
+            },
             output: {
               voice
             }
@@ -189,6 +200,7 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     "- Probe naturally for concrete examples, clarification, contradictions, and missing evidence.",
     "- Briefly acknowledge answers, then continue with the next most useful follow-up.",
     "- Reference survey answers naturally, for example: \"Earlier, you said science feels useful when it connects to real problems...\"",
+    "- When the session starts, begin by asking a concise opening question based on the survey evidence and gap map.",
     "- Avoid technical or uncanny phrases such as \"I analyzed your prior responses\" or \"I detected uncertainty.\"",
     "- Do not reveal scoring objectives, rubrics, grades, hidden progress, gap map internals, or any evaluation strategy.",
     "- If time is nearly over, ask the single highest-value remaining question and then close warmly.",

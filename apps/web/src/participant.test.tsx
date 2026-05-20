@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ParticipantInterviewScreen } from "./participant";
+import { ParticipantInterviewScreen, shouldNoticeStudentPause } from "./participant";
 
 const noop = () => undefined;
 
@@ -44,6 +44,8 @@ describe("ParticipantInterviewScreen", () => {
       <ParticipantInterviewScreen
         aiQuestion="What felt uncertain or worth thinking about more?"
         error=""
+        initialResponseMode="push_to_talk"
+        initialUiState="ai_speaking"
         isActionPending={false}
         isRecording={false}
         maxInterviewMinutes={45}
@@ -68,6 +70,40 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toContain("Repeat question");
     expect(markup).toContain("Say that another way");
     expect(markup).not.toMatch(/participant caption|full transcript|rubric|score|gap map|objective progress/i);
+  });
+
+  it("uses a buttonless realtime voice surface for natural conversation", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="What felt uncertain or worth thinking about more?"
+        error=""
+        isActionPending={false}
+        isRecording
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="connected"
+        realtimeVoiceActivity="ai_speaking"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Voice conversation");
+    expect(markup).toContain("OpenAI is speaking");
+    expect(markup).toContain("OpenAI");
+    expect(markup).toContain("You");
+    expect(markup).not.toContain("Current question");
+    expect(markup).not.toContain("Repeat question");
+    expect(markup).not.toContain("Start talking");
+    expect(markup).not.toContain("Done");
+    expect(markup).not.toContain("End interview");
   });
 
   it("hides the current question section through microphone check and response mode setup", () => {
@@ -165,6 +201,28 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("Skip question");
   });
 
+  it("does not notice a pause while natural speech is still active", () => {
+    expect(
+      shouldNoticeStudentPause({
+        isActive: true,
+        microphoneLevel: 0.08,
+        quietMode: false,
+        responseMode: "natural",
+        uiState: "student_speaking"
+      })
+    ).toBe(false);
+
+    expect(
+      shouldNoticeStudentPause({
+        isActive: true,
+        microphoneLevel: 0,
+        quietMode: false,
+        responseMode: "natural",
+        uiState: "student_speaking"
+      })
+    ).toBe(true);
+  });
+
   it("supports typing-only quiet mode", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
@@ -228,6 +286,7 @@ describe("ParticipantInterviewScreen", () => {
       <ParticipantInterviewScreen
         aiQuestion="Could you share a concrete example?"
         error=""
+        initialResponseMode="push_to_talk"
         initialUiState="transcript_review"
         isActionPending={false}
         isRecording={false}

@@ -90,6 +90,7 @@ type InterviewUiState =
   | "break_prompt"
   | "completed";
 type RealtimeConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
+type RealtimeVoiceActivity = "idle" | "ai_speaking" | "participant_speaking";
 type TechnicalFailureCategory =
   | "microphone_unavailable"
   | "voice_provider_unavailable"
@@ -97,6 +98,9 @@ type TechnicalFailureCategory =
   | "transcription_unavailable"
   | "model_api_unavailable"
   | "unknown";
+
+const speechPauseVoiceLevelThreshold = 0.025;
+const speechPauseSilenceMs = 6500;
 
 interface RealtimeVoiceSession {
   readonly provider: "fake" | "openai";
@@ -124,6 +128,7 @@ export function Participant() {
   const [realtimeConnectionState, setRealtimeConnectionState] = useState<RealtimeConnectionState>("idle");
   const [realtimeServiceRequestId, setRealtimeServiceRequestId] = useState<string>();
   const [realtimeRetryCount, setRealtimeRetryCount] = useState(0);
+  const [realtimeVoiceActivity, setRealtimeVoiceActivity] = useState<RealtimeVoiceActivity>("idle");
   const [latestParticipantTranscript, setLatestParticipantTranscript] = useState("");
   const peerConnectionRef = useRef<RTCPeerConnection | undefined>(undefined);
   const dataChannelRef = useRef<RTCDataChannel | undefined>(undefined);
@@ -298,13 +303,12 @@ export function Participant() {
       }
 
       const connection = await connectOpenAiRealtimeVoice(realtimeSession, (turn) => {
+        pendingInterviewTurnsRef.current.push(turn);
+
         if (turn.speaker === "participant") {
           setLatestParticipantTranscript(turn.text);
-          return;
         }
-
-        pendingInterviewTurnsRef.current.push(turn);
-      });
+      }, setRealtimeVoiceActivity);
       peerConnectionRef.current = connection.peerConnection;
       dataChannelRef.current = connection.dataChannel;
       mediaStreamRef.current = connection.mediaStream;
@@ -440,6 +444,7 @@ export function Participant() {
     peerConnectionRef.current = undefined;
     mediaStreamRef.current = undefined;
     remoteAudioRef.current = undefined;
+    setRealtimeVoiceActivity("idle");
     setRealtimeConnectionState((currentState) => (currentState === "idle" ? currentState : state));
   }
 
@@ -694,6 +699,7 @@ export function Participant() {
           maxInterviewMinutes={accessState.run.maxInterviewMinutes}
           mode={interviewMode}
           realtimeConnectionState={realtimeConnectionState}
+          realtimeVoiceActivity={realtimeVoiceActivity}
           onComplete={() => void submitInterviewAction("complete")}
           onConfirmAnswer={confirmInterviewAnswer}
           onPause={() => void submitInterviewAction("pause")}
@@ -742,6 +748,7 @@ export function ParticipantInterviewScreen({
   maxInterviewMinutes,
   mode,
   realtimeConnectionState,
+  realtimeVoiceActivity = "idle",
   onComplete,
   onConfirmAnswer,
   onPause,
@@ -763,6 +770,7 @@ export function ParticipantInterviewScreen({
   readonly maxInterviewMinutes: number;
   readonly mode: InterviewMode;
   readonly realtimeConnectionState: RealtimeConnectionState;
+  readonly realtimeVoiceActivity?: RealtimeVoiceActivity;
   readonly onComplete: () => void;
   readonly onConfirmAnswer: (answer: { readonly aiQuestion: string; readonly responseText: string }) => void;
   readonly onPause: () => void;
@@ -790,20 +798,33 @@ export function ParticipantInterviewScreen({
   const [speechNonce, setSpeechNonce] = useState(0);
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [previousAnswers, setPreviousAnswers] = useState<readonly { readonly question: string; readonly answer: string }[]>([]);
+  const isNaturalRealtimeConversation = isActive && responseMode === "natural" && realtimeConnectionState === "connected";
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
   const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing" && !quietMode;
   const shouldCaptureMicCheckSpeech = mode === "ready" && uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard");
   const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech || shouldCaptureMicCheckSpeech);
   const microphoneLevel = useMicrophoneLevel(
-    (uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard")) || shouldCaptureSpeech
+    (uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard")) ||
+      shouldCaptureSpeech ||
+      isNaturalRealtimeConversation
   );
-  const participantVoiceState = getParticipantVoiceState(uiState, responseMode, quietMode, isActive);
+  const participantVoiceState = isNaturalRealtimeConversation
+    ? getNaturalConversationTitle(realtimeVoiceActivity)
+    : getParticipantVoiceState(uiState, responseMode, quietMode, isActive);
   const currentSection = interviewSections[Math.min(Math.floor(answerCount / 2), interviewSections.length - 1)]!;
-  const shouldShowInterviewControls = mode === "active" && uiState !== "completed";
-  const shouldShowCurrentQuestion = mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState);
+  const shouldShowInterviewControls = mode === "active" && uiState !== "completed" && !isNaturalRealtimeConversation;
+  const shouldShowCurrentQuestion =
+    !isNaturalRealtimeConversation && (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
     : "interview-layout interview-layout-centered";
+  const shouldWatchForStudentPause = shouldNoticeStudentPause({
+    isActive,
+    microphoneLevel,
+    quietMode,
+    responseMode,
+    uiState
+  });
 
   useEffect(() => {
     setDisplayQuestion(aiQuestion);
@@ -861,15 +882,16 @@ export function ParticipantInterviewScreen({
     const shouldRecord =
       !quietMode &&
       realtimeConnectionState !== "failed" &&
-      ((responseMode === "natural" && (uiState === "student_turn" || uiState === "student_speaking")) ||
+      ((responseMode === "natural" &&
+        (isNaturalRealtimeConversation || uiState === "student_turn" || uiState === "student_speaking")) ||
         (responseMode === "push_to_talk" && uiState === "student_speaking") ||
         (uiState === "mic_check" && micCheckStatus === "checking"));
 
     onRecordingChange(shouldRecord);
-  }, [isActive, micCheckStatus, onRecordingChange, quietMode, realtimeConnectionState, responseMode, uiState]);
+  }, [isActive, isNaturalRealtimeConversation, micCheckStatus, onRecordingChange, quietMode, realtimeConnectionState, responseMode, uiState]);
 
   useEffect(() => {
-    if (!isActive || uiState !== "ai_speaking") {
+    if (!isActive || uiState !== "ai_speaking" || responseMode === "natural") {
       return;
     }
 
@@ -877,19 +899,19 @@ export function ParticipantInterviewScreen({
     const timeout = window.setTimeout(() => setUiState("student_turn"), 1400);
 
     return () => window.clearTimeout(timeout);
-  }, [isActive, quietMode, uiState, displayQuestion, speechNonce]);
+  }, [isActive, quietMode, responseMode, uiState, displayQuestion, speechNonce]);
 
   useEffect(() => {
-    if (!isActive || uiState !== "student_speaking" || responseMode !== "natural") {
+    if (!shouldWatchForStudentPause) {
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      setUiState("student_paused");
-    }, 4200);
+      setUiState((currentState) => (currentState === "student_speaking" ? "student_paused" : currentState));
+    }, speechPauseSilenceMs);
 
     return () => window.clearTimeout(timeout);
-  }, [isActive, responseMode, uiState]);
+  }, [shouldWatchForStudentPause, speechTranscript]);
 
   useEffect(() => {
     if (uiState !== "ai_thinking") {
@@ -1008,6 +1030,25 @@ export function ParticipantInterviewScreen({
   }
 
   function renderMainPanel() {
+    if (isNaturalRealtimeConversation) {
+      const participantIsSpeaking = realtimeVoiceActivity === "participant_speaking" || microphoneLevel > speechPauseVoiceLevelThreshold;
+
+      return (
+        <InterviewStageCard eyebrow="Voice conversation" title={getNaturalConversationTitle(realtimeVoiceActivity)}>
+          <div className="voice-wave-grid natural-conversation-waves">
+            <div className="voice-wave-panel">
+              <VoiceWave isActive={realtimeVoiceActivity === "ai_speaking"} label="OpenAI voice activity" level={0.72} />
+              <span>OpenAI</span>
+            </div>
+            <div className="voice-wave-panel">
+              <VoiceWave isActive={participantIsSpeaking} label="Your voice activity" level={microphoneLevel} />
+              <span>You</span>
+            </div>
+          </div>
+        </InterviewStageCard>
+      );
+    }
+
     if (mode === "ready" && uiState === "onboarding") {
       return (
         <InterviewStageCard eyebrow="Voice interview" title="A few follow-up questions">
@@ -1688,6 +1729,40 @@ function getParticipantVoiceState(
   return "Voice input off";
 }
 
+function getNaturalConversationTitle(realtimeVoiceActivity: RealtimeVoiceActivity) {
+  if (realtimeVoiceActivity === "ai_speaking") {
+    return "OpenAI is speaking";
+  }
+
+  if (realtimeVoiceActivity === "participant_speaking") {
+    return "Listening";
+  }
+
+  return "Connected";
+}
+
+export function shouldNoticeStudentPause({
+  isActive,
+  microphoneLevel,
+  quietMode,
+  responseMode,
+  uiState
+}: {
+  readonly isActive: boolean;
+  readonly microphoneLevel: number;
+  readonly quietMode: boolean;
+  readonly responseMode: InterviewResponseMode;
+  readonly uiState: InterviewUiState;
+}) {
+  return (
+    isActive &&
+    uiState === "student_speaking" &&
+    responseMode === "natural" &&
+    !quietMode &&
+    microphoneLevel <= speechPauseVoiceLevelThreshold
+  );
+}
+
 function getRephrasedQuestion(question: string) {
   if (/example/i.test(question)) {
     return "What is one specific moment or situation that shows what you mean?";
@@ -1897,7 +1972,8 @@ async function reportAudioConnectionState(
 
 async function connectOpenAiRealtimeVoice(
   realtimeSession: RealtimeVoiceSession,
-  onTranscriptTurn: (turn: PendingInterviewTurn) => void
+  onTranscriptTurn: (turn: PendingInterviewTurn) => void,
+  onVoiceActivity: (activity: RealtimeVoiceActivity) => void
 ) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Microphone access is not available in this browser.");
@@ -1919,8 +1995,18 @@ async function connectOpenAiRealtimeVoice(
   }
 
   const dataChannel = peerConnection.createDataChannel("oai-events");
+  dataChannel.addEventListener("open", () => {
+    sendRealtimeEvent(dataChannel, { type: "response.create" });
+  });
   dataChannel.addEventListener("message", (event) => {
-    const turn = parseRealtimeTranscriptTurn(event.data);
+    const realtimeEvent = parseRealtimeServerEvent(event.data);
+    const activity = getRealtimeVoiceActivity(realtimeEvent);
+
+    if (activity) {
+      onVoiceActivity(activity);
+    }
+
+    const turn = parseRealtimeTranscriptTurn(realtimeEvent);
 
     if (turn) {
       onTranscriptTurn(turn);
@@ -1959,7 +2045,13 @@ async function connectOpenAiRealtimeVoice(
   };
 }
 
-function parseRealtimeTranscriptTurn(value: unknown): PendingInterviewTurn | undefined {
+function sendRealtimeEvent(dataChannel: RTCDataChannel, event: Record<string, unknown>) {
+  if (dataChannel.readyState === "open") {
+    dataChannel.send(JSON.stringify(event));
+  }
+}
+
+function parseRealtimeServerEvent(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
@@ -1969,6 +2061,14 @@ function parseRealtimeTranscriptTurn(value: unknown): PendingInterviewTurn | und
   try {
     event = JSON.parse(value) as Record<string, unknown>;
   } catch {
+    return undefined;
+  }
+
+  return event;
+}
+
+function parseRealtimeTranscriptTurn(event: Record<string, unknown> | undefined): PendingInterviewTurn | undefined {
+  if (!event) {
     return undefined;
   }
 
@@ -1985,11 +2085,40 @@ function parseRealtimeTranscriptTurn(value: unknown): PendingInterviewTurn | und
     };
   }
 
-  if (event.type === "response.audio_transcript.done") {
+  if (event.type === "response.output_audio_transcript.done" || event.type === "response.audio_transcript.done") {
     return {
       speaker: "ai",
       text: transcript
     };
+  }
+
+  return undefined;
+}
+
+function getRealtimeVoiceActivity(event: Record<string, unknown> | undefined): RealtimeVoiceActivity | undefined {
+  if (!event) {
+    return undefined;
+  }
+
+  if (event.type === "input_audio_buffer.speech_started") {
+    return "participant_speaking";
+  }
+
+  if (event.type === "input_audio_buffer.speech_stopped") {
+    return "idle";
+  }
+
+  if (event.type === "response.created" || event.type === "response.output_audio.delta") {
+    return "ai_speaking";
+  }
+
+  if (
+    event.type === "response.output_audio.done" ||
+    event.type === "response.done" ||
+    event.type === "response.cancelled" ||
+    event.type === "error"
+  ) {
+    return "idle";
   }
 
   return undefined;

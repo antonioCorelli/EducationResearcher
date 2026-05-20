@@ -433,13 +433,44 @@ textarea {
   height: var(--voice-bar-height, 18px);
   border-radius: 999px;
   background: #bdc9c2;
+  transform-origin: center;
   transition:
     background 160ms ease,
     height 160ms ease;
 }
 
 .active-voice-wave span {
+  animation: voice-wave-pulse 860ms ease-in-out infinite;
   background: #2f6f5a;
+}
+
+.active-voice-wave span:nth-child(2) {
+  animation-delay: 100ms;
+}
+
+.active-voice-wave span:nth-child(3) {
+  animation-delay: 190ms;
+}
+
+.active-voice-wave span:nth-child(4) {
+  animation-delay: 280ms;
+}
+
+.active-voice-wave span:nth-child(5) {
+  animation-delay: 360ms;
+}
+
+.voice-wave-panel {
+  display: grid;
+  gap: 8px;
+  color: #485466;
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.natural-conversation-waves {
+  width: min(100%, 620px);
 }
 
 .participant-voice-state {
@@ -545,6 +576,17 @@ summary:focus-visible {
   50% {
     opacity: 1;
     transform: scale(1.18);
+  }
+}
+
+@keyframes voice-wave-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.78);
+  }
+
+  50% {
+    transform: scaleY(1.08);
   }
 }
 

@@ -170,6 +170,26 @@ describe("realtime voice provider", () => {
       authorization: "Bearer test-api-key",
       "content-type": "application/json"
     });
+    expect(JSON.parse(String(requests[0]?.init.body))).toMatchObject({
+      session: {
+        audio: {
+          input: {
+            transcription: {
+              model: "gpt-4o-transcribe"
+            },
+            turn_detection: {
+              type: "semantic_vad",
+              eagerness: "low",
+              create_response: true,
+              interrupt_response: true
+            }
+          },
+          output: {
+            voice: "marin"
+          }
+        }
+      }
+    });
     expect(JSON.stringify(session)).not.toContain("test-api-key");
   });
 });
