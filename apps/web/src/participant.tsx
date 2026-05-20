@@ -798,6 +798,7 @@ export function ParticipantInterviewScreen({
   const [speechNonce, setSpeechNonce] = useState(0);
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [previousAnswers, setPreviousAnswers] = useState<readonly { readonly question: string; readonly answer: string }[]>([]);
+  
   const isNaturalRealtimeConversation = isActive && responseMode === "natural" && realtimeConnectionState === "connected";
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
   const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing" && !quietMode;
@@ -811,7 +812,6 @@ export function ParticipantInterviewScreen({
   const participantVoiceState = isNaturalRealtimeConversation
     ? getNaturalConversationTitle(realtimeVoiceActivity)
     : getParticipantVoiceState(uiState, responseMode, quietMode, isActive);
-  const currentSection = interviewSections[Math.min(Math.floor(answerCount / 2), interviewSections.length - 1)]!;
   const shouldShowInterviewControls = mode === "active" && uiState !== "completed" && !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
     !isNaturalRealtimeConversation && (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
@@ -882,10 +882,12 @@ export function ParticipantInterviewScreen({
     const shouldRecord =
       !quietMode &&
       realtimeConnectionState !== "failed" &&
-      ((responseMode === "natural" &&
-        (isNaturalRealtimeConversation || uiState === "student_turn" || uiState === "student_speaking")) ||
-        (responseMode === "push_to_talk" && uiState === "student_speaking") ||
-        (uiState === "mic_check" && micCheckStatus === "checking"));
+      (responseMode === "natural" &&
+        (isNaturalRealtimeConversation ||
+          uiState === "student_turn" ||
+          uiState === "student_speaking")) ||
+      (responseMode === "push_to_talk" && uiState === "student_speaking") ||
+      (uiState === "mic_check" && micCheckStatus === "checking");
 
     onRecordingChange(shouldRecord);
   }, [isActive, isNaturalRealtimeConversation, micCheckStatus, onRecordingChange, quietMode, realtimeConnectionState, responseMode, uiState]);
@@ -1044,6 +1046,9 @@ export function ParticipantInterviewScreen({
               <VoiceWave isActive={participantIsSpeaking} label="Your voice activity" level={microphoneLevel} />
               <span>You</span>
             </div>
+            <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
+              Pause
+            </button>
           </div>
         </InterviewStageCard>
       );
@@ -1071,6 +1076,7 @@ export function ParticipantInterviewScreen({
           <p>Say: "My microphone is ready."</p>
           <div className="mic-check-meter" aria-label="Microphone test level">
             <VoiceWave isActive={micCheckStatus === "checking" || micCheckStatus === "heard"} label="Microphone check" level={microphoneLevel} />
+            <br />
             <strong>{micCheckStatus === "heard" ? "We can hear you" : micCheckStatus === "checking" ? "Listening" : "Microphone off"}</strong>
           </div>
           <p className="mic-check-transcript" aria-live="polite">
@@ -1351,15 +1357,9 @@ export function ParticipantInterviewScreen({
   return (
     <main className="app-shell participant-shell participant-interview-shell">
       <section className="participant-interview-surface" aria-labelledby="participant-title">
-        <div className="participant-progress-bar" aria-label={currentSection.label}>
-          {interviewSections.map((section) => (
-            <span className={section === currentSection ? "active-progress-section" : ""} key={section.label} />
-          ))}
-        </div>
         <div className="participant-interview-topline">
           <div>
-            <p className="eyebrow">{currentSection.label}</p>
-            <h1 id="participant-title">Guided interview</h1>
+            <p className="eyebrow">AI Guided Interview</p>
           </div>
           <span>{maxInterviewMinutes} min max</span>
         </div>
@@ -1434,13 +1434,6 @@ export function ParticipantInterviewScreen({
 }
 
 const maximumRecoverableRetryCount = 2;
-
-const interviewSections = [
-  { label: "Part 1 of 4: Your experiences" },
-  { label: "Part 2 of 4: How you think about evidence" },
-  { label: "Part 3 of 4: Science in society" },
-  { label: "Part 4 of 4: Final reflections" }
-] as const;
 
 const interviewResponseModes: readonly {
   readonly value: InterviewResponseMode;
