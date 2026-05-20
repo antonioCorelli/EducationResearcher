@@ -32,6 +32,11 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toContain("no right or wrong answers");
     expect(markup).toContain("pause, skip, redo, or type");
     expect(markup).toContain("This is not graded");
+    expect(markup).toContain("interview-layout-centered");
+    expect(markup).not.toContain("Current question");
+    expect(markup).not.toContain("Microphone off");
+    expect(markup).not.toContain("Connected");
+    expect(markup).not.toContain("Quiet mode");
   });
 
   it("clearly distinguishes AI speaking from microphone listening state", () => {
@@ -57,11 +62,43 @@ describe("ParticipantInterviewScreen", () => {
     );
 
     expect(markup).toContain("What felt uncertain or worth thinking about more?");
+    expect(markup).toContain("Current question");
+    expect(markup).toContain("interview-layout-with-question");
     expect(markup).toContain("AI speaking");
-    expect(markup).toContain("Microphone off");
     expect(markup).toContain("Repeat question");
     expect(markup).toContain("Say that another way");
     expect(markup).not.toMatch(/participant caption|full transcript|rubric|score|gap map|objective progress/i);
+  });
+
+  it("hides the current question section through microphone check and response mode setup", () => {
+    const baseProps = {
+      aiQuestion: "Could you share a concrete example?",
+      error: "",
+      isActionPending: false,
+      isRecording: false,
+      maxInterviewMinutes: 45,
+      mode: "ready" as const,
+      realtimeConnectionState: "idle" as const,
+      onComplete: noop,
+      onConfirmAnswer: noop,
+      onPause: noop,
+      onRecordingChange: noop,
+      onResume: noop,
+      onRetry: noop,
+      onStart: noop,
+      onStopAfterFailure: noop,
+      retryCount: 0
+    };
+
+    const micCheckMarkup = renderToStaticMarkup(<ParticipantInterviewScreen {...baseProps} initialUiState="mic_check" />);
+    const modeSelectionMarkup = renderToStaticMarkup(<ParticipantInterviewScreen {...baseProps} initialUiState="mode_selection" />);
+
+    expect(micCheckMarkup).toContain("Microphone check");
+    expect(micCheckMarkup).toContain("interview-layout-centered");
+    expect(micCheckMarkup).not.toContain("Current question");
+    expect(modeSelectionMarkup).toContain("Response mode");
+    expect(modeSelectionMarkup).toContain("interview-layout-centered");
+    expect(modeSelectionMarkup).not.toContain("Current question");
   });
 
   it("supports a push-to-talk student turn with manual completion controls", () => {

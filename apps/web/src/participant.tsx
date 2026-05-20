@@ -796,10 +796,12 @@ export function ParticipantInterviewScreen({
     (uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard")) || shouldCaptureSpeech
   );
   const participantVoiceState = getParticipantVoiceState(uiState, responseMode, quietMode, isActive);
-  const connectionLabel = getConnectionLabel(realtimeConnectionState);
   const currentSection = interviewSections[Math.min(Math.floor(answerCount / 2), interviewSections.length - 1)]!;
-  const micState = getMicrophoneState(uiState, responseMode, quietMode, isRecording, isActive, realtimeConnectionState);
   const shouldShowInterviewControls = mode === "active" && uiState !== "completed";
+  const shouldShowCurrentQuestion = mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState);
+  const interviewLayoutClassName = shouldShowCurrentQuestion
+    ? "interview-layout interview-layout-with-question"
+    : "interview-layout interview-layout-centered";
 
   useEffect(() => {
     setDisplayQuestion(aiQuestion);
@@ -1309,29 +1311,22 @@ export function ParticipantInterviewScreen({
           <span>{maxInterviewMinutes} min max</span>
         </div>
 
-        <div className="participant-trust-row" aria-live="polite">
-          <span className={`mic-status-pill ${micState.tone}`}>Microphone {micState.label}</span>
-          <span className="connection-state-label">{connectionLabel}</span>
-          <label className="quiet-mode-toggle compact-quiet-toggle">
-            <input checked={quietMode} onChange={(event) => handleQuietModeChange(event.target.checked)} type="checkbox" />
-            <span>Quiet mode</span>
-          </label>
-        </div>
-
         <div className="participant-reassurance" role="note">
           This is not graded. The goal is to explain your thinking.
         </div>
 
-        <div className="interview-layout">
-          <section className="ai-question-card" aria-label="Current AI question" aria-live="polite">
-            <div className="card-heading-row">
-              <p className="eyebrow">Current question</p>
-              <button className="secondary-button compact-button" onClick={handleRepeatQuestion} type="button">
-                Repeat
-              </button>
-            </div>
-            <p>{displayQuestion}</p>
-          </section>
+        <div className={interviewLayoutClassName}>
+          {shouldShowCurrentQuestion ? (
+            <section className="ai-question-card" aria-label="Current AI question" aria-live="polite">
+              <div className="card-heading-row">
+                <p className="eyebrow">Current question</p>
+                <button className="secondary-button compact-button" onClick={handleRepeatQuestion} type="button">
+                  Repeat
+                </button>
+              </div>
+              <p>{displayQuestion}</p>
+            </section>
+          ) : null}
 
           <section className="student-response-card" aria-live="polite">
             {interruptionNotice ? <p className="interruption-notice">{interruptionNotice}</p> : null}
@@ -1680,33 +1675,6 @@ function getParticipantVoiceState(
   return "Voice input off";
 }
 
-function getMicrophoneState(
-  uiState: InterviewUiState,
-  responseMode: InterviewResponseMode,
-  quietMode: boolean,
-  isRecording: boolean,
-  isActive: boolean,
-  connectionState: RealtimeConnectionState
-) {
-  if (quietMode || responseMode === "typing" || !isActive) {
-    return { label: "off", tone: "mic-off" };
-  }
-
-  if (connectionState === "failed") {
-    return { label: "paused", tone: "mic-paused" };
-  }
-
-  if (uiState === "ai_thinking" || uiState === "transcript_review") {
-    return { label: "processing", tone: "mic-processing" };
-  }
-
-  if (isRecording) {
-    return { label: "listening", tone: "mic-listening" };
-  }
-
-  return { label: "off", tone: "mic-off" };
-}
-
 function getRephrasedQuestion(question: string) {
   if (/example/i.test(question)) {
     return "What is one specific moment or situation that shows what you mean?";
@@ -1754,26 +1722,6 @@ function getVoiceWaveHeights(level: number) {
   const maximumHeights = [34, 58, 70, 52, 38];
 
   return minimumHeights.map((height, index) => Math.round(height + (maximumHeights[index]! - height) * clampedLevel));
-}
-
-function getConnectionLabel(state: RealtimeConnectionState) {
-  if (state === "connected") {
-    return "Connected";
-  }
-
-  if (state === "connecting") {
-    return "Connecting";
-  }
-
-  if (state === "failed") {
-    return "Connection issue";
-  }
-
-  if (state === "disconnected") {
-    return "Disconnected";
-  }
-
-  return "Voice ready";
 }
 
 function ParticipantStatusScreen({

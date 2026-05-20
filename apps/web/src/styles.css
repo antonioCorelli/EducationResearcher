@@ -166,17 +166,6 @@ textarea {
   font-weight: 800;
 }
 
-.participant-trust-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  justify-content: center;
-  width: min(100%, 920px);
-  margin: 0 auto;
-}
-
-.mic-status-pill,
 .participant-reassurance {
   border: 1px solid #d7e0da;
   border-radius: 999px;
@@ -185,19 +174,6 @@ textarea {
   padding: 5px 10px;
   font-size: 0.82rem;
   font-weight: 800;
-}
-
-.mic-listening {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  color: #166534;
-}
-
-.mic-paused,
-.mic-processing {
-  border-color: #fed7aa;
-  background: #fff7ed;
-  color: #9a3412;
 }
 
 .participant-reassurance {
@@ -214,6 +190,19 @@ textarea {
   align-items: stretch;
   width: min(100%, 920px);
   margin: 0 auto;
+}
+
+.interview-layout-centered {
+  grid-template-columns: minmax(320px, 515px);
+  justify-content: center;
+}
+
+.interview-layout-with-question .ai-question-card {
+  animation: question-card-enter 240ms ease-out both;
+}
+
+.interview-layout-with-question .student-response-card {
+  animation: response-card-settle 240ms ease-out both;
 }
 
 .ai-question-card,
@@ -360,10 +349,6 @@ textarea {
   font-weight: 800;
 }
 
-.compact-quiet-toggle {
-  min-height: 34px;
-}
-
 .mic-check-meter {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -461,15 +446,6 @@ textarea {
   font-weight: 800;
 }
 
-.connection-state-label {
-  border: 1px solid #d7e0da;
-  border-radius: 999px;
-  background: #fbfcfa;
-  color: #566173;
-  padding: 3px 9px;
-  font-size: 0.78rem;
-}
-
 .participant-recovery-panel {
   display: grid;
   gap: 0.35rem;
@@ -562,6 +538,28 @@ summary:focus-visible {
   50% {
     opacity: 1;
     transform: scale(1.18);
+  }
+}
+
+@keyframes question-card-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes response-card-settle {
+  from {
+    transform: translateX(18px);
+  }
+
+  to {
+    transform: translateX(0);
   }
 }
 
@@ -936,6 +934,8 @@ dd {
 @media (prefers-reduced-motion: reduce) {
   .researcher-workspace-content,
   .researcher-welcome-confirmed .researcher-welcome-stage,
+  .interview-layout-with-question .ai-question-card,
+  .interview-layout-with-question .student-response-card,
   .abstract-speaking-indicator span,
   .calm-loading span {
     animation: none;
