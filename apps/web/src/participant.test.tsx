@@ -6,7 +6,35 @@ import { ParticipantInterviewScreen } from "./participant";
 const noop = () => undefined;
 
 describe("ParticipantInterviewScreen", () => {
-  it("renders only sparse participant interview information", () => {
+  it("starts with a low-friction onboarding flow before the interview begins", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Earlier, you said science feels useful when it connects to real problems. Can you tell me about a time when science felt useful to you?"
+        error=""
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="ready"
+        realtimeConnectionState="idle"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("A few follow-up questions");
+    expect(markup).toContain("no right or wrong answers");
+    expect(markup).toContain("pause, skip, redo, or type");
+    expect(markup).toContain("This is not graded");
+  });
+
+  it("clearly distinguishes AI speaking from microphone listening state", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="What felt uncertain or worth thinking about more?"
@@ -17,8 +45,9 @@ describe("ParticipantInterviewScreen", () => {
         mode="active"
         realtimeConnectionState="connected"
         onComplete={noop}
+        onConfirmAnswer={noop}
         onPause={noop}
-        onRecordToggle={noop}
+        onRecordingChange={noop}
         onResume={noop}
         onRetry={noop}
         onStart={noop}
@@ -28,24 +57,29 @@ describe("ParticipantInterviewScreen", () => {
     );
 
     expect(markup).toContain("What felt uncertain or worth thinking about more?");
-    expect(markup).toContain("Record");
-    expect(markup).toContain("Voice input ready");
+    expect(markup).toContain("AI speaking");
+    expect(markup).toContain("Microphone off");
+    expect(markup).toContain("Repeat question");
+    expect(markup).toContain("Say that another way");
     expect(markup).not.toMatch(/participant caption|full transcript|rubric|score|gap map|objective progress/i);
   });
 
-  it("changes the record control to stop recording while active input is captured", () => {
+  it("supports a push-to-talk student turn with manual completion controls", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="Could you share a concrete example?"
         error=""
+        initialResponseMode="push_to_talk"
+        initialUiState="student_turn"
         isActionPending={false}
-        isRecording
+        isRecording={false}
         maxInterviewMinutes={45}
         mode="active"
         realtimeConnectionState="connected"
         onComplete={noop}
+        onConfirmAnswer={noop}
         onPause={noop}
-        onRecordToggle={noop}
+        onRecordingChange={noop}
         onResume={noop}
         onRetry={noop}
         onStart={noop}
@@ -54,8 +88,103 @@ describe("ParticipantInterviewScreen", () => {
       />
     );
 
-    expect(markup).toContain("Stop recording");
-    expect(markup).toContain("Voice input recording");
+    expect(markup).toContain("Your turn");
+    expect(markup).toContain("Press record when you are ready");
+    expect(markup).toContain("Start talking");
+    expect(markup).not.toMatch(/I(&#x27;|')m done/);
+    expect(markup).not.toContain("Skip");
+    expect(markup).toContain("End interview");
+    expect(markup).not.toContain("Pause interview");
+    expect(markup).not.toContain("Skip question");
+  });
+
+  it("supports typing-only quiet mode", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialQuietMode
+        initialResponseMode="typing"
+        initialUiState="student_turn"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="connected"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Quiet mode");
+    expect(markup).toContain("Type your answer");
+    expect(markup).toContain("Your microphone is off");
+  });
+
+  it("lets push-to-talk participants return to recording after choosing typing", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialResponseMode="typing"
+        initialUiState="student_turn"
+        isActionPending={false}
+        isRecording={false}
+        latestSpokenTranscript=""
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="connected"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Record instead");
+  });
+
+  it("shows transcript confirmation before continuing after spoken answers", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialUiState="transcript_review"
+        isActionPending={false}
+        isRecording={false}
+        latestSpokenTranscript="Hello, how are you doing today?"
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="connected"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toMatch(/Here(&#x27;|')s what we heard/);
+    expect(markup).toContain("Hello, how are you doing today?");
+    expect(markup).toContain("Transcript preview");
+    expect(markup).toContain("Edit by typing");
+    expect(markup).toContain("Redo");
   });
 
   it("shows participant-safe retry and resume options after recoverable technical failures", () => {
@@ -69,8 +198,9 @@ describe("ParticipantInterviewScreen", () => {
         mode="active"
         realtimeConnectionState="failed"
         onComplete={noop}
+        onConfirmAnswer={noop}
         onPause={noop}
-        onRecordToggle={noop}
+        onRecordingChange={noop}
         onResume={noop}
         onRetry={noop}
         onStart={noop}

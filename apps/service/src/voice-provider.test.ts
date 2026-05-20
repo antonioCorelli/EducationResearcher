@@ -121,6 +121,9 @@ describe("realtime voice provider", () => {
     expect(instructions).toContain("Can you share a concrete example?");
     expect(instructions).toContain("Remaining interview time: 1800 seconds");
     expect(instructions).toContain("Ask exactly one question at a time.");
+    expect(instructions).toContain("Keep spoken responses short");
+    expect(instructions).toContain("Reference survey answers naturally");
+    expect(instructions).toContain("Do not sound like you are grading");
     expect(instructions).toContain("Do not reveal scoring objectives");
   });
 
