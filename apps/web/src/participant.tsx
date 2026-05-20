@@ -782,6 +782,7 @@ export function ParticipantInterviewScreen({
   );
   const [quietMode, setQuietMode] = useState(Boolean(initialQuietMode));
   const [micCheckStatus, setMicCheckStatus] = useState<"idle" | "checking" | "heard">("idle");
+  const [micCheckTranscript, setMicCheckTranscript] = useState("");
   const [answerCount, setAnswerCount] = useState(0);
   const [transcriptDraft, setTranscriptDraft] = useState(latestSpokenTranscript ?? "");
   const [typedDraft, setTypedDraft] = useState("");
@@ -791,7 +792,8 @@ export function ParticipantInterviewScreen({
   const [previousAnswers, setPreviousAnswers] = useState<readonly { readonly question: string; readonly answer: string }[]>([]);
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
   const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing" && !quietMode;
-  const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech);
+  const shouldCaptureMicCheckSpeech = mode === "ready" && uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard");
+  const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech || shouldCaptureMicCheckSpeech);
   const microphoneLevel = useMicrophoneLevel(
     (uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard")) || shouldCaptureSpeech
   );
@@ -814,10 +816,15 @@ export function ParticipantInterviewScreen({
   }, [latestSpokenTranscript]);
 
   useEffect(() => {
-    if (speechTranscript.trim()) {
+    if (shouldCaptureMicCheckSpeech && speechTranscript.trim()) {
+      setMicCheckTranscript(speechTranscript.trim());
+      return;
+    }
+
+    if (shouldCaptureSpeech && speechTranscript.trim()) {
       setTranscriptDraft(speechTranscript.trim());
     }
-  }, [speechTranscript]);
+  }, [shouldCaptureMicCheckSpeech, shouldCaptureSpeech, speechTranscript]);
 
   useEffect(() => {
     if (uiState === "mic_check" && micCheckStatus === "checking" && microphoneLevel > 0.05) {
@@ -897,6 +904,7 @@ export function ParticipantInterviewScreen({
   }, [answerCount, uiState]);
 
   function startMicCheck() {
+    setMicCheckTranscript("");
     setMicCheckStatus("checking");
     window.setTimeout(() => setMicCheckStatus("heard"), 850);
   }
@@ -1024,12 +1032,16 @@ export function ParticipantInterviewScreen({
             <VoiceWave isActive={micCheckStatus === "checking" || micCheckStatus === "heard"} label="Microphone check" level={microphoneLevel} />
             <strong>{micCheckStatus === "heard" ? "We can hear you" : micCheckStatus === "checking" ? "Listening" : "Microphone off"}</strong>
           </div>
-          {micCheckStatus === "heard" ? <p className="transcript-preview-line">Preview: My microphone is ready.</p> : null}
+          <p className="mic-check-transcript" aria-live="polite">
+            {micCheckTranscript || (micCheckStatus === "checking" ? "Listening for your test sentence." : "\u00a0")}
+          </p>
           <div className="participant-interview-card-actions">
-            <button className="secondary-button" onClick={startMicCheck} type="button">
-              {micCheckStatus === "idle" ? "Start mic check" : "Try again"}
-            </button>
-            <button className="primary-button" onClick={() => setUiState("mode_selection")} type="button">
+            {micCheckStatus === "heard" ? null : (
+              <button className="secondary-button" disabled={micCheckStatus === "checking"} onClick={startMicCheck} type="button">
+                Start mic check
+              </button>
+            )}
+            <button className="primary-button" disabled={micCheckStatus !== "heard"} onClick={() => setUiState("mode_selection")} type="button">
               Continue
             </button>
           </div>
@@ -1559,6 +1571,7 @@ function useBrowserSpeechTranscript(isActive: boolean) {
 
   useEffect(() => {
     if (!isActive) {
+      setTranscript("");
       return;
     }
 

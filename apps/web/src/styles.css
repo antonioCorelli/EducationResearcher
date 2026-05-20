@@ -336,6 +336,13 @@ textarea {
   color: #566173;
 }
 
+.mic-check-transcript {
+  min-height: 1.6em;
+  margin: 0;
+  color: #172033;
+  font-weight: 700;
+}
+
 .quiet-mode-toggle {
   display: inline-flex;
   width: fit-content;

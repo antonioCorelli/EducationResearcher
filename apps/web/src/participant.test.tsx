@@ -101,6 +101,36 @@ describe("ParticipantInterviewScreen", () => {
     expect(modeSelectionMarkup).not.toContain("Current question");
   });
 
+  it("requires the microphone check before continuing and does not offer retry copy", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialUiState="mic_check"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="ready"
+        realtimeConnectionState="idle"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Start mic check");
+    expect(markup).toContain("Continue");
+    expect(markup).toContain("disabled");
+    expect(markup).toContain("mic-check-transcript");
+    expect(markup).not.toContain("Try again");
+  });
+
   it("supports a push-to-talk student turn with manual completion controls", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
