@@ -1,7 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ParticipantInterviewScreen, shouldNoticeStudentPause } from "./participant";
+import {
+  ParticipantInterviewScreen,
+  parseRealtimeAiTranscriptUpdate,
+  shouldNoticeStudentPause,
+  shouldPausePushToTalkForAiSpeech
+} from "./participant";
 
 const noop = () => undefined;
 
@@ -75,7 +80,7 @@ describe("ParticipantInterviewScreen", () => {
   it("uses a buttonless realtime voice surface for natural conversation", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
-        aiQuestion="What felt uncertain or worth thinking about more?"
+        aiQuestion="What part of your survey answer would you like to explain more?"
         error=""
         isActionPending={false}
         isRecording
@@ -97,13 +102,40 @@ describe("ParticipantInterviewScreen", () => {
 
     expect(markup).toContain("Voice conversation");
     expect(markup).toContain("OpenAI is speaking");
+    expect(markup).toContain("Current question");
+    expect(markup).toContain("What part of your survey answer would you like to explain more?");
     expect(markup).toContain("OpenAI");
     expect(markup).toContain("You");
-    expect(markup).not.toContain("Current question");
     expect(markup).not.toContain("Repeat question");
+    expect(markup).not.toContain("Repeat</button>");
     expect(markup).not.toContain("Start talking");
     expect(markup).not.toContain("Done");
     expect(markup).not.toContain("End interview");
+  });
+
+  it("parses realtime AI audio transcript deltas without exposing participant transcripts", () => {
+    expect(
+      parseRealtimeAiTranscriptUpdate({
+        type: "response.output_audio_transcript.delta",
+        item_id: "item_ai_001",
+        delta: "Can you"
+      })
+    ).toEqual({ type: "delta", itemId: "item_ai_001", text: "Can you" });
+
+    expect(
+      parseRealtimeAiTranscriptUpdate({
+        type: "response.output_audio_transcript.done",
+        item_id: "item_ai_001",
+        transcript: "Can you say more about that?"
+      })
+    ).toEqual({ type: "done", itemId: "item_ai_001", text: "Can you say more about that?" });
+
+    expect(
+      parseRealtimeAiTranscriptUpdate({
+        type: "conversation.item.input_audio_transcription.completed",
+        transcript: "This is the participant answer."
+      })
+    ).toBeUndefined();
   });
 
   it("hides the current question section through microphone check and response mode setup", () => {
@@ -193,7 +225,7 @@ describe("ParticipantInterviewScreen", () => {
 
     expect(markup).toContain("Your turn");
     expect(markup).toContain("Press record when you are ready");
-    expect(markup).toContain("Start talking");
+    expect(markup).toContain("Start Talking");
     expect(markup).not.toMatch(/I(&#x27;|')m done/);
     expect(markup).not.toContain("Skip");
     expect(markup).toContain("End interview");
@@ -221,6 +253,35 @@ describe("ParticipantInterviewScreen", () => {
         uiState: "student_speaking"
       })
     ).toBe(true);
+  });
+
+  it("pauses push-to-talk voice input when the AI starts speaking", () => {
+    expect(
+      shouldPausePushToTalkForAiSpeech({
+        isActive: true,
+        realtimeVoiceActivity: "ai_speaking",
+        responseMode: "push_to_talk",
+        uiState: "student_speaking"
+      })
+    ).toBe(true);
+
+    expect(
+      shouldPausePushToTalkForAiSpeech({
+        isActive: true,
+        realtimeVoiceActivity: "ai_speaking",
+        responseMode: "natural",
+        uiState: "student_speaking"
+      })
+    ).toBe(false);
+
+    expect(
+      shouldPausePushToTalkForAiSpeech({
+        isActive: true,
+        realtimeVoiceActivity: "participant_speaking",
+        responseMode: "push_to_talk",
+        uiState: "student_speaking"
+      })
+    ).toBe(false);
   });
 
   it("supports typing-only quiet mode", () => {

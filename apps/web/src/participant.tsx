@@ -124,7 +124,7 @@ export function Participant() {
   const [isRecording, setIsRecording] = useState(false);
   const [interviewError, setInterviewError] = useState("");
   const [isSubmittingInterviewAction, setIsSubmittingInterviewAction] = useState(false);
-  const [simulatedAiQuestionIndex, setSimulatedAiQuestionIndex] = useState(0);
+  const [latestAiQuestionTranscript, setLatestAiQuestionTranscript] = useState("");
   const [realtimeConnectionState, setRealtimeConnectionState] = useState<RealtimeConnectionState>("idle");
   const [realtimeServiceRequestId, setRealtimeServiceRequestId] = useState<string>();
   const [realtimeRetryCount, setRealtimeRetryCount] = useState(0);
@@ -237,7 +237,7 @@ export function Participant() {
       setIsRecording(false);
 
       if (action === "start" || action === "resume") {
-        setSimulatedAiQuestionIndex(0);
+        setLatestAiQuestionTranscript("");
         setRealtimeRetryCount(0);
         setLatestParticipantTranscript("");
         await connectRealtimeVoice(accessToken, 0);
@@ -275,7 +275,6 @@ export function Participant() {
         text: answer.responseText
       }
     );
-    setSimulatedAiQuestionIndex((currentIndex) => Math.min(currentIndex + 1, simulatedAiQuestions.length - 1));
   }
 
   async function connectRealtimeVoice(accessToken: string, retryCount = realtimeRetryCount) {
@@ -302,13 +301,18 @@ export function Participant() {
         return;
       }
 
-      const connection = await connectOpenAiRealtimeVoice(realtimeSession, (turn) => {
-        pendingInterviewTurnsRef.current.push(turn);
+      const connection = await connectOpenAiRealtimeVoice(
+        realtimeSession,
+        (turn) => {
+          pendingInterviewTurnsRef.current.push(turn);
 
-        if (turn.speaker === "participant") {
-          setLatestParticipantTranscript(turn.text);
-        }
-      }, setRealtimeVoiceActivity);
+          if (turn.speaker === "participant") {
+            setLatestParticipantTranscript(turn.text);
+          }
+        },
+        setRealtimeVoiceActivity,
+        setLatestAiQuestionTranscript
+      );
       peerConnectionRef.current = connection.peerConnection;
       dataChannelRef.current = connection.dataChannel;
       mediaStreamRef.current = connection.mediaStream;
@@ -691,7 +695,7 @@ export function Participant() {
 
       return (
         <ParticipantInterviewScreen
-          aiQuestion={simulatedAiQuestions[simulatedAiQuestionIndex] ?? simulatedAiQuestions[0]}
+          aiQuestion={latestAiQuestionTranscript}
           error={interviewError}
           isActionPending={isSubmittingInterviewAction}
           isRecording={isRecording}
@@ -794,7 +798,7 @@ export function ParticipantInterviewScreen({
   const [answerCount, setAnswerCount] = useState(0);
   const [transcriptDraft, setTranscriptDraft] = useState(latestSpokenTranscript ?? "");
   const [typedDraft, setTypedDraft] = useState("");
-  const [displayQuestion, setDisplayQuestion] = useState(aiQuestion);
+  const [displayQuestion, setDisplayQuestion] = useState(getDisplayQuestionText(aiQuestion));
   const [speechNonce, setSpeechNonce] = useState(0);
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [previousAnswers, setPreviousAnswers] = useState<readonly { readonly question: string; readonly answer: string }[]>([]);
@@ -814,7 +818,7 @@ export function ParticipantInterviewScreen({
     : getParticipantVoiceState(uiState, responseMode, quietMode, isActive);
   const shouldShowInterviewControls = mode === "active" && uiState !== "completed" && !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
-    !isNaturalRealtimeConversation && (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
+    mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState);
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
     : "interview-layout interview-layout-centered";
@@ -825,9 +829,15 @@ export function ParticipantInterviewScreen({
     responseMode,
     uiState
   });
+  const isPushToTalkAiSpeaking = shouldPausePushToTalkForAiSpeech({
+    isActive,
+    realtimeVoiceActivity,
+    responseMode,
+    uiState
+  });
 
   useEffect(() => {
-    setDisplayQuestion(aiQuestion);
+    setDisplayQuestion(getDisplayQuestionText(aiQuestion));
   }, [aiQuestion]);
 
   useEffect(() => {
@@ -886,11 +896,29 @@ export function ParticipantInterviewScreen({
         (isNaturalRealtimeConversation ||
           uiState === "student_turn" ||
           uiState === "student_speaking")) ||
-      (responseMode === "push_to_talk" && uiState === "student_speaking") ||
+      (responseMode === "push_to_talk" && uiState === "student_speaking" && !isPushToTalkAiSpeaking) ||
       (uiState === "mic_check" && micCheckStatus === "checking");
 
     onRecordingChange(shouldRecord);
-  }, [isActive, isNaturalRealtimeConversation, micCheckStatus, onRecordingChange, quietMode, realtimeConnectionState, responseMode, uiState]);
+  }, [
+    isActive,
+    isNaturalRealtimeConversation,
+    isPushToTalkAiSpeaking,
+    micCheckStatus,
+    onRecordingChange,
+    quietMode,
+    realtimeConnectionState,
+    responseMode,
+    uiState
+  ]);
+
+  useEffect(() => {
+    if (!isPushToTalkAiSpeaking) {
+      return;
+    }
+
+    setUiState("student_turn");
+  }, [isPushToTalkAiSpeaking]);
 
   useEffect(() => {
     if (!isActive || uiState !== "ai_speaking" || responseMode === "natural") {
@@ -971,6 +999,11 @@ export function ParticipantInterviewScreen({
     setInterruptionNotice("");
     setTranscriptDraft("");
     setTypedDraft("");
+
+    if (responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking") {
+      setUiState("student_turn");
+      return;
+    }
 
     if (responseMode === "typing" || quietMode) {
       setUiState("student_turn");
@@ -1303,8 +1336,13 @@ export function ParticipantInterviewScreen({
           <p>{responseMode === "push_to_talk" ? "Press record when you are ready to answer." : "Start when you are ready. We will wait briefly if you pause."}</p>
           <VoiceWave isActive={responseMode === "natural" && !quietMode} label="Your input meter" level={microphoneLevel} />
           <div className="participant-interview-card-actions">
-            <button className="primary-button" onClick={handleStartAnswer} type="button">
-              Start talking
+            <button
+              className="primary-button"
+              disabled={responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking"}
+              onClick={handleStartAnswer}
+              type="button"
+            >
+              Start Talking
             </button>
             {responseMode !== "push_to_talk" ? (
               <button className="secondary-button" onClick={handleFinishSpeaking} type="button">
@@ -1373,9 +1411,11 @@ export function ParticipantInterviewScreen({
             <section className="ai-question-card" aria-label="Current AI question" aria-live="polite">
               <div className="card-heading-row">
                 <p className="eyebrow">Current question</p>
-                <button className="secondary-button compact-button" onClick={handleRepeatQuestion} type="button">
-                  Repeat
-                </button>
+                {isNaturalRealtimeConversation ? null : (
+                  <button className="secondary-button compact-button" onClick={handleRepeatQuestion} type="button">
+                    Repeat
+                  </button>
+                )}
               </div>
               <p>{displayQuestion}</p>
             </section>
@@ -1722,6 +1762,10 @@ function getParticipantVoiceState(
   return "Voice input off";
 }
 
+function getDisplayQuestionText(aiQuestion: string) {
+  return aiQuestion.trim() || "Waiting for the AI question...";
+}
+
 function getNaturalConversationTitle(realtimeVoiceActivity: RealtimeVoiceActivity) {
   if (realtimeVoiceActivity === "ai_speaking") {
     return "OpenAI is speaking";
@@ -1754,6 +1798,20 @@ export function shouldNoticeStudentPause({
     !quietMode &&
     microphoneLevel <= speechPauseVoiceLevelThreshold
   );
+}
+
+export function shouldPausePushToTalkForAiSpeech({
+  isActive,
+  realtimeVoiceActivity,
+  responseMode,
+  uiState
+}: {
+  readonly isActive: boolean;
+  readonly realtimeVoiceActivity: RealtimeVoiceActivity;
+  readonly responseMode: InterviewResponseMode;
+  readonly uiState: InterviewUiState;
+}) {
+  return isActive && responseMode === "push_to_talk" && uiState === "student_speaking" && realtimeVoiceActivity === "ai_speaking";
 }
 
 function getRephrasedQuestion(question: string) {
@@ -1824,12 +1882,6 @@ function ParticipantStatusScreen({
     </main>
   );
 }
-
-const simulatedAiQuestions = [
-  "To begin, tell me more about the main idea from your survey response.",
-  "Thank you. Could you share a concrete example that helps explain that?",
-  "What felt uncertain or worth thinking about more?"
-] as const;
 
 function getInterviewMode(status: "survey_completed" | "interview_in_progress" | "interview_paused"): InterviewMode {
   if (status === "interview_in_progress") {
@@ -1966,7 +2018,8 @@ async function reportAudioConnectionState(
 async function connectOpenAiRealtimeVoice(
   realtimeSession: RealtimeVoiceSession,
   onTranscriptTurn: (turn: PendingInterviewTurn) => void,
-  onVoiceActivity: (activity: RealtimeVoiceActivity) => void
+  onVoiceActivity: (activity: RealtimeVoiceActivity) => void,
+  onAiQuestionTranscriptChange: (transcript: string) => void
 ) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Microphone access is not available in this browser.");
@@ -1988,6 +2041,8 @@ async function connectOpenAiRealtimeVoice(
   }
 
   const dataChannel = peerConnection.createDataChannel("oai-events");
+  let activeAiTranscriptItemId: string | undefined;
+  let activeAiTranscript = "";
   dataChannel.addEventListener("open", () => {
     sendRealtimeEvent(dataChannel, { type: "response.create" });
   });
@@ -1997,6 +2052,30 @@ async function connectOpenAiRealtimeVoice(
 
     if (activity) {
       onVoiceActivity(activity);
+    }
+
+    const aiTranscriptUpdate = parseRealtimeAiTranscriptUpdate(realtimeEvent);
+
+    if (aiTranscriptUpdate?.type === "started") {
+      activeAiTranscriptItemId = undefined;
+      activeAiTranscript = "";
+      onAiQuestionTranscriptChange("");
+    }
+
+    if (aiTranscriptUpdate?.type === "delta") {
+      if (aiTranscriptUpdate.itemId && aiTranscriptUpdate.itemId !== activeAiTranscriptItemId) {
+        activeAiTranscriptItemId = aiTranscriptUpdate.itemId;
+        activeAiTranscript = "";
+      }
+
+      activeAiTranscript = `${activeAiTranscript}${aiTranscriptUpdate.text}`;
+      onAiQuestionTranscriptChange(activeAiTranscript.trimStart());
+    }
+
+    if (aiTranscriptUpdate?.type === "done") {
+      activeAiTranscriptItemId = aiTranscriptUpdate.itemId;
+      activeAiTranscript = aiTranscriptUpdate.text;
+      onAiQuestionTranscriptChange(activeAiTranscript.trim());
     }
 
     const turn = parseRealtimeTranscriptTurn(realtimeEvent);
@@ -2060,12 +2139,44 @@ function parseRealtimeServerEvent(value: unknown): Record<string, unknown> | und
   return event;
 }
 
+export function parseRealtimeAiTranscriptUpdate(
+  event: Record<string, unknown> | undefined
+):
+  | { readonly type: "started"; readonly itemId?: string }
+  | { readonly type: "delta"; readonly itemId?: string; readonly text: string }
+  | { readonly type: "done"; readonly itemId?: string; readonly text: string }
+  | undefined {
+  if (!event) {
+    return undefined;
+  }
+
+  const itemId = typeof event.item_id === "string" ? event.item_id : undefined;
+
+  if (event.type === "response.created") {
+    return { type: "started", itemId };
+  }
+
+  if (event.type === "response.output_audio_transcript.delta" || event.type === "response.audio_transcript.delta") {
+    const delta = typeof event.delta === "string" ? event.delta : "";
+
+    return delta ? { type: "delta", itemId, text: delta } : undefined;
+  }
+
+  if (event.type === "response.output_audio_transcript.done" || event.type === "response.audio_transcript.done") {
+    const text = getRealtimeTranscriptText(event);
+
+    return text ? { type: "done", itemId, text } : undefined;
+  }
+
+  return undefined;
+}
+
 function parseRealtimeTranscriptTurn(event: Record<string, unknown> | undefined): PendingInterviewTurn | undefined {
   if (!event) {
     return undefined;
   }
 
-  const transcript = typeof event.transcript === "string" ? event.transcript.trim() : "";
+  const transcript = getRealtimeTranscriptText(event);
 
   if (!transcript) {
     return undefined;
@@ -2086,6 +2197,12 @@ function parseRealtimeTranscriptTurn(event: Record<string, unknown> | undefined)
   }
 
   return undefined;
+}
+
+function getRealtimeTranscriptText(event: Record<string, unknown>) {
+  const transcript = typeof event.transcript === "string" ? event.transcript : typeof event.text === "string" ? event.text : "";
+
+  return transcript.trim();
 }
 
 function getRealtimeVoiceActivity(event: Record<string, unknown> | undefined): RealtimeVoiceActivity | undefined {
