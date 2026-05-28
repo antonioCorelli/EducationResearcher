@@ -1091,12 +1091,24 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Voice interview" title="A few follow-up questions">
           <p>
-            This interview follows up on your survey. There are no right or wrong answers, and this is not graded. The goal is to explain your thinking.
+            This interview is a follow-up to your survey. It is not a test, it is not graded, and there are no right or wrong answers.
           </p>
-          <p>You can pause, skip, redo, or type at any time.</p>
+          <p>
+            We are interested in your honest thoughts and experiences. Your perspective can help us better understand how students learn and how education can be improved.
+          </p>
+          <p>
+            The interview may take up to {maxInterviewMinutes} minutes. You will need to stay connected to the internet during the interview.
+          </p>
+          <p>
+            You are always in control: you can pause, skip a question, or stop the interview at any time.
+          </p>
+          <p>
+            Thank you for taking part. Your voice matters, and we appreciate your contribution to this research.
+          </p>
+
           <div className="participant-interview-card-actions">
             <button className="primary-button" onClick={() => setUiState("mic_check")} type="button">
-              Continue
+              Test Microphone
             </button>
           </div>
         </InterviewStageCard>
@@ -1105,7 +1117,7 @@ export function ParticipantInterviewScreen({
 
     if (mode === "ready" && uiState === "mic_check") {
       return (
-        <InterviewStageCard eyebrow="Microphone check" title="Try a short test sentence">
+        <InterviewStageCard eyebrow="Voice Test" title="Try a short test sentence">
           <p>Say: "My microphone is ready."</p>
           <div className="mic-check-meter" aria-label="Microphone test level">
             <VoiceWave isActive={micCheckStatus === "checking" || micCheckStatus === "heard"} label="Microphone check" level={microphoneLevel} />
@@ -1116,11 +1128,9 @@ export function ParticipantInterviewScreen({
             {micCheckTranscript || (micCheckStatus === "checking" ? "Listening for your test sentence." : "\u00a0")}
           </p>
           <div className="participant-interview-card-actions">
-            {micCheckStatus === "heard" ? null : (
-              <button className="secondary-button" disabled={micCheckStatus === "checking"} onClick={startMicCheck} type="button">
-                Start mic check
-              </button>
-            )}
+            <button className="secondary-button" disabled={micCheckStatus === "checking" || micCheckStatus === "heard"} onClick={startMicCheck} type="button">
+              Start mic check
+            </button>
             <button className="primary-button" disabled={micCheckStatus !== "heard"} onClick={() => setUiState("mode_selection")} type="button">
               Continue
             </button>
