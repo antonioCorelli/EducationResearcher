@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  ParticipantSurveyScreen,
   ParticipantInterviewScreen,
   parseRealtimeAiTranscriptUpdate,
   shouldNoticeStudentPause,
@@ -9,6 +10,64 @@ import {
 } from "./participant";
 
 const noop = () => undefined;
+
+const surveyLayoutItems = [
+  {
+    type: "question",
+    sortOrder: 1,
+    question: {
+      id: "survey_question_001",
+      prompt: "What helped you learn this topic?",
+      required: true,
+      questionType: "long_text",
+      sortOrder: 1
+    }
+  }
+] as const;
+
+describe("ParticipantSurveyScreen", () => {
+  it("asks participants to confirm before locking survey answers and moving to the interview", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantSurveyScreen
+        isConfirmationOpen
+        isSubmittingSurvey={false}
+        layoutItems={surveyLayoutItems}
+        surveyError=""
+        surveyResponses={{ survey_question_001: "Working through examples helped." }}
+        onCancelSubmit={noop}
+        onChangeResponse={noop}
+        onConfirmSubmit={noop}
+        onSubmit={noop}
+      />
+    );
+
+    expect(markup).toContain("Continue to the interview?");
+    expect(markup).toContain("can no longer be edited");
+    expect(markup).toContain("Continue to interview");
+    expect(markup).toContain("Keep editing");
+    expect(markup).toContain("role=\"dialog\"");
+  });
+
+  it("keeps the confirmation dialog hidden while participants are still editing", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantSurveyScreen
+        isConfirmationOpen={false}
+        isSubmittingSurvey={false}
+        layoutItems={surveyLayoutItems}
+        surveyError=""
+        surveyResponses={{ survey_question_001: "Working through examples helped." }}
+        onCancelSubmit={noop}
+        onChangeResponse={noop}
+        onConfirmSubmit={noop}
+        onSubmit={noop}
+      />
+    );
+
+    expect(markup).toContain("Submit survey");
+    expect(markup).not.toContain("can no longer be edited");
+    expect(markup).not.toContain("role=\"dialog\"");
+  });
+});
 
 describe("ParticipantInterviewScreen", () => {
   it("starts with a low-friction onboarding flow before the interview begins", () => {

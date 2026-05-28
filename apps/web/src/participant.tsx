@@ -121,6 +121,7 @@ export function Participant() {
   const [surveyResponses, setSurveyResponses] = useState<Record<string, string>>({});
   const [surveyError, setSurveyError] = useState("");
   const [isSubmittingSurvey, setIsSubmittingSurvey] = useState(false);
+  const [isSurveyConfirmationOpen, setIsSurveyConfirmationOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [interviewError, setInterviewError] = useState("");
   const [isSubmittingInterviewAction, setIsSubmittingInterviewAction] = useState(false);
@@ -511,13 +512,11 @@ export function Participant() {
     }
   }
 
-  async function submitSurvey(event: FormEvent<HTMLFormElement>) {
+  function requestSurveySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSurveyError("");
 
-    const accessToken = getParticipantAccessTokenFromPath();
-
-    if (!accessToken || accessState.status !== "ready" || !accessState.surveyVersion) {
+    if (accessState.status !== "ready" || !accessState.surveyVersion) {
       setSurveyError("This participant link is not available.");
       return;
     }
@@ -529,6 +528,22 @@ export function Participant() {
       setSurveyError("Please answer every survey question before continuing.");
       return;
     }
+
+    setIsSurveyConfirmationOpen(true);
+  }
+
+  async function submitSurvey() {
+    setSurveyError("");
+
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    if (!accessToken || accessState.status !== "ready" || !accessState.surveyVersion) {
+      setSurveyError("This participant link is not available.");
+      setIsSurveyConfirmationOpen(false);
+      return;
+    }
+
+    const questions = getSurveyQuestions(accessState.surveyVersion);
 
     setIsSubmittingSurvey(true);
 
@@ -554,9 +569,11 @@ export function Participant() {
         throw new Error(payload.message ?? "Unable to submit survey.");
       }
 
+      setIsSurveyConfirmationOpen(false);
       setAccessState({ status: "ready", run: payload.run });
     } catch (error) {
       setSurveyError(error instanceof Error ? error.message : "Unable to submit survey.");
+      setIsSurveyConfirmationOpen(false);
     } finally {
       setIsSubmittingSurvey(false);
     }
@@ -629,60 +646,23 @@ export function Participant() {
       (accessState.run.status === "consented" || accessState.run.status === "survey_in_progress") &&
       accessState.surveyVersion
     ) {
-      const layoutItems = getSurveyLayoutItems(accessState.surveyVersion);
-
       return (
-        <main className="app-shell participant-shell">
-          <section className="workspace-panel participant-survey-panel" aria-labelledby="participant-title">
-            <p className="eyebrow">Participant survey</p>
-            <h1 id="participant-title">Study survey</h1>
-            <form className="participant-survey-form" onSubmit={submitSurvey}>
-              <div className="participant-survey-items">
-                {layoutItems.map((item) =>
-                  item.type === "question" ? (
-                    <SurveyQuestionField
-                      disabled={isSubmittingSurvey}
-                      key={item.question.id}
-                      question={item.question}
-                      value={surveyResponses[item.question.id] ?? ""}
-                      onChange={(value) =>
-                        setSurveyResponses((currentResponses) => ({
-                          ...currentResponses,
-                          [item.question.id]: value
-                        }))
-                      }
-                    />
-                  ) : (
-                    <fieldset className="participant-survey-group" key={item.group.id}>
-                      <legend>{item.group.title}</legend>
-                      {item.group.questions
-                        .slice()
-                        .sort((left, right) => left.sortOrder - right.sortOrder)
-                        .map((question) => (
-                          <SurveyQuestionField
-                            disabled={isSubmittingSurvey}
-                            key={question.id}
-                            question={question}
-                            value={surveyResponses[question.id] ?? ""}
-                            onChange={(value) =>
-                              setSurveyResponses((currentResponses) => ({
-                                ...currentResponses,
-                                [question.id]: value
-                              }))
-                            }
-                          />
-                        ))}
-                    </fieldset>
-                  )
-                )}
-              </div>
-              {surveyError ? <p className="form-error">{surveyError}</p> : null}
-              <button className="primary-button" disabled={isSubmittingSurvey} type="submit">
-                {isSubmittingSurvey ? "Submitting survey" : "Submit survey"}
-              </button>
-            </form>
-          </section>
-        </main>
+        <ParticipantSurveyScreen
+          isConfirmationOpen={isSurveyConfirmationOpen}
+          isSubmittingSurvey={isSubmittingSurvey}
+          layoutItems={getSurveyLayoutItems(accessState.surveyVersion)}
+          surveyError={surveyError}
+          surveyResponses={surveyResponses}
+          onCancelSubmit={() => setIsSurveyConfirmationOpen(false)}
+          onChangeResponse={(questionId, value) =>
+            setSurveyResponses((currentResponses) => ({
+              ...currentResponses,
+              [questionId]: value
+            }))
+          }
+          onConfirmSubmit={() => void submitSurvey()}
+          onSubmit={requestSurveySubmit}
+        />
       );
     }
 
@@ -1194,7 +1174,7 @@ export function ParticipantInterviewScreen({
 
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={() => navigateToInterviewCard({ nextUiState: "mic_check" })} type="button">
-              Test Microphone
+              Let's Begin
             </button>
           </InterviewCardActions>
         </InterviewStageCard>
@@ -1203,20 +1183,18 @@ export function ParticipantInterviewScreen({
 
     if (mode === "ready" && uiState === "mic_check") {
       return (
-        <InterviewStageCard eyebrow="Voice Test" title="Try a short test sentence">
-          <p>Say: "My microphone is ready."</p>
+        <InterviewStageCard eyebrow="Voice Test" title="Testing your voice input">
+          <p>Please Say: "My microphone is ready."</p>
+          <button className="mic-check-button" disabled={micCheckStatus === "checking" || micCheckStatus === "heard"} onClick={startMicCheck} type="button">
+            Start mic check
+          </button>
           <div className="mic-check-meter" aria-label="Microphone test level">
             <VoiceWave isActive={micCheckStatus === "checking" || micCheckStatus === "heard"} label="Microphone check" level={microphoneLevel} />
-            <br />
-            <strong>{micCheckStatus === "heard" ? "We can hear you" : micCheckStatus === "checking" ? "Listening" : "Microphone off"}</strong>
           </div>
           <p className="mic-check-transcript" aria-live="polite">
             {micCheckTranscript || (micCheckStatus === "checking" ? "Listening for your test sentence." : "\u00a0")}
           </p>
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
-            <button className="secondary-button" disabled={micCheckStatus === "checking" || micCheckStatus === "heard"} onClick={startMicCheck} type="button">
-              Start mic check
-            </button>
             <button className="primary-button" disabled={micCheckStatus !== "heard"} onClick={() => navigateToInterviewCard({ nextUiState: "mode_selection" })} type="button">
               Continue
             </button>
@@ -2141,6 +2119,91 @@ function getParticipantTerminalScreen(status: RunStatus) {
   }
 
   return undefined;
+}
+
+export function ParticipantSurveyScreen({
+  isConfirmationOpen,
+  isSubmittingSurvey,
+  layoutItems,
+  onCancelSubmit,
+  onChangeResponse,
+  onConfirmSubmit,
+  onSubmit,
+  surveyError,
+  surveyResponses
+}: {
+  readonly isConfirmationOpen: boolean;
+  readonly isSubmittingSurvey: boolean;
+  readonly layoutItems: readonly SurveyLayoutItem[];
+  readonly onCancelSubmit: () => void;
+  readonly onChangeResponse: (questionId: string, value: string) => void;
+  readonly onConfirmSubmit: () => void;
+  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  readonly surveyError: string;
+  readonly surveyResponses: Record<string, string>;
+}) {
+  return (
+    <main className="app-shell participant-shell">
+      <section className="workspace-panel participant-survey-panel" aria-labelledby="participant-title">
+        <p className="eyebrow">Participant survey</p>
+        <h1 id="participant-title">Study survey</h1>
+        <form className="participant-survey-form" onSubmit={onSubmit}>
+          <div className="participant-survey-items">
+            {layoutItems.map((item) =>
+              item.type === "question" ? (
+                <SurveyQuestionField
+                  disabled={isSubmittingSurvey}
+                  key={item.question.id}
+                  question={item.question}
+                  value={surveyResponses[item.question.id] ?? ""}
+                  onChange={(value) => onChangeResponse(item.question.id, value)}
+                />
+              ) : (
+                <fieldset className="participant-survey-group" key={item.group.id}>
+                  <legend>{item.group.title}</legend>
+                  {item.group.questions
+                    .slice()
+                    .sort((left, right) => left.sortOrder - right.sortOrder)
+                    .map((question) => (
+                      <SurveyQuestionField
+                        disabled={isSubmittingSurvey}
+                        key={question.id}
+                        question={question}
+                        value={surveyResponses[question.id] ?? ""}
+                        onChange={(value) => onChangeResponse(question.id, value)}
+                      />
+                    ))}
+                </fieldset>
+              )
+            )}
+          </div>
+          {surveyError ? <p className="form-error">{surveyError}</p> : null}
+          <button className="primary-button" disabled={isSubmittingSurvey} type="submit">
+            {isSubmittingSurvey ? "Submitting survey" : "Submit survey"}
+          </button>
+        </form>
+      </section>
+      {isConfirmationOpen ? (
+        <div className="dialog-backdrop" role="presentation">
+          <div aria-labelledby="submit-survey-title" aria-modal="true" className="confirm-dialog" role="dialog">
+            <h2 id="submit-survey-title">Continue to the interview?</h2>
+            <p>
+              Once you continue, your survey answers will be submitted and can no longer be edited. You will move on to the
+              interview next.
+            </p>
+            <div className="form-actions">
+              <button className="primary-button" disabled={isSubmittingSurvey} onClick={onConfirmSubmit} type="button">
+                {isSubmittingSurvey ? "Submitting survey" : "Continue to interview"}
+              </button>
+              <button className="secondary-button" disabled={isSubmittingSurvey} onClick={onCancelSubmit} type="button">
+                Keep editing
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </main>
+  );
 }
 
 function SurveyQuestionField({

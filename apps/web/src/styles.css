@@ -703,6 +703,7 @@ textarea:focus {
 
 .primary-button,
 .secondary-button,
+.mic-check-button,
 .danger-button {
   min-height: 44px;
   border-radius: 6px;
@@ -726,6 +727,13 @@ textarea:focus {
   border: 1px solid #bdc9c2;
   background: #ffffff;
   color: #172033;
+}
+
+.mic-check-button {
+  border: 1px solid #bdc9c2;
+  background: #ffffff;
+  color: #172033;
+  width: fit-content;
 }
 
 .danger-button {
