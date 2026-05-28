@@ -798,6 +798,7 @@ export function ParticipantInterviewScreen({
   const shouldShowInterviewControls = mode === "active" && uiState !== "completed" && !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
     mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState);
+  const shouldShowRepeatQuestion = shouldShowRepeatQuestionControl({ isNaturalRealtimeConversation, uiState });
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
     : "interview-layout interview-layout-centered";
@@ -1023,8 +1024,14 @@ export function ParticipantInterviewScreen({
   }
 
   function handleRepeatQuestion() {
+    const nextUiState = getRepeatQuestionUiState(uiState);
+
+    if (nextUiState === uiState) {
+      return;
+    }
+
     setSpeechNonce((value) => value + 1);
-    setUiState("ai_speaking");
+    setUiState(nextUiState);
   }
 
   function handleRephraseQuestion() {
@@ -1450,11 +1457,11 @@ export function ParticipantInterviewScreen({
             <section className="ai-question-card" aria-label="Current AI question" aria-live="polite">
               <div className="card-heading-row">
                 <p className="eyebrow">Current question</p>
-                {isNaturalRealtimeConversation ? null : (
+                {shouldShowRepeatQuestion ? (
                   <button className="secondary-button compact-button" onClick={handleRepeatQuestion} type="button">
                     Repeat
                   </button>
-                )}
+                ) : null}
               </div>
               <p>{displayQuestion}</p>
             </section>
@@ -1685,6 +1692,20 @@ function getInitialInterviewUiState(mode: InterviewMode): InterviewUiState {
   }
 
   return "onboarding";
+}
+
+export function shouldShowRepeatQuestionControl({
+  isNaturalRealtimeConversation,
+  uiState
+}: {
+  readonly isNaturalRealtimeConversation: boolean;
+  readonly uiState: InterviewUiState;
+}) {
+  return !isNaturalRealtimeConversation && uiState !== "paused";
+}
+
+export function getRepeatQuestionUiState(uiState: InterviewUiState): InterviewUiState {
+  return uiState === "paused" ? "paused" : "ai_speaking";
 }
 
 function useElapsedSeconds(isActive: boolean) {
