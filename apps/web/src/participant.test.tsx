@@ -199,9 +199,43 @@ describe("ParticipantInterviewScreen", () => {
 
     expect(markup).toContain("Interview paused");
     expect(markup).toContain("Resume interview");
+    expect(markup).not.toContain("Current question");
+    expect(markup).not.toContain("What part of your survey answer would you like to explain more?");
     expect(markup).not.toContain("Repeat question");
     expect(markup).not.toContain("Repeat</button>");
     expect(markup).not.toContain("I stopped - go ahead");
+  });
+
+  it("shows the paused screen immediately while a natural pause action is pending", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="What part of your survey answer would you like to explain more?"
+        error=""
+        initialResponseMode="natural"
+        initialUiState="paused"
+        isActionPending
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="connected"
+        realtimeVoiceActivity="participant_speaking"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Interview paused");
+    expect(markup).toContain("Resuming");
+    expect(markup).not.toContain("Voice conversation");
+    expect(markup).not.toContain("Current question");
+    expect(markup).not.toContain("What part of your survey answer would you like to explain more?");
   });
 
   it("does not let repeat move a paused interview into AI speaking state", () => {

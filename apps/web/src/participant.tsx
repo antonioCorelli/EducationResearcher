@@ -782,7 +782,8 @@ export function ParticipantInterviewScreen({
   const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
   const interviewHistoryIndexRef = useRef(0);
   
-  const isNaturalRealtimeConversation = isActive && responseMode === "natural" && realtimeConnectionState === "connected";
+  const isNaturalRealtimeConversation =
+    isActive && uiState !== "paused" && responseMode === "natural" && realtimeConnectionState === "connected";
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
   const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing";
   const shouldCaptureMicCheckSpeech = mode === "ready" && uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard");
@@ -795,9 +796,10 @@ export function ParticipantInterviewScreen({
   const participantVoiceState = isNaturalRealtimeConversation
     ? getNaturalConversationTitle(realtimeVoiceActivity)
     : getParticipantVoiceState(uiState, responseMode, isActive);
-  const shouldShowInterviewControls = mode === "active" && uiState !== "completed" && !isNaturalRealtimeConversation;
+  const shouldShowInterviewControls =
+    mode === "active" && uiState !== "completed" && uiState !== "paused" && !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
-    mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState);
+    uiState !== "paused" && (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
   const shouldShowRepeatQuestion = shouldShowRepeatQuestionControl({ isNaturalRealtimeConversation, uiState });
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
