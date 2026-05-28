@@ -517,35 +517,6 @@ textarea {
   min-width: 168px;
 }
 
-.previous-response-list {
-  width: min(100%, 920px);
-  margin: 0 auto;
-  border-top: 1px solid #d7e0da;
-  padding-top: 12px;
-}
-
-.previous-response-list summary {
-  width: fit-content;
-  color: #485466;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.previous-response-list article {
-  display: grid;
-  gap: 4px;
-  margin-top: 10px;
-  border: 1px solid #d7e0da;
-  border-radius: 6px;
-  background: #fbfcfa;
-  padding: 10px 12px;
-}
-
-.previous-response-list p {
-  margin: 0;
-  color: #485466;
-}
-
 button:focus-visible,
 summary:focus-visible {
   box-shadow: 0 0 0 3px rgb(47 111 90 / 22%);

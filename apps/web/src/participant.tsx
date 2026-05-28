@@ -813,7 +813,6 @@ export function ParticipantInterviewScreen({
   const [displayQuestion, setDisplayQuestion] = useState(getDisplayQuestionText(aiQuestion));
   const [speechNonce, setSpeechNonce] = useState(0);
   const [interruptionNotice, setInterruptionNotice] = useState("");
-  const [previousAnswers, setPreviousAnswers] = useState<readonly { readonly question: string; readonly answer: string }[]>([]);
   const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
   const interviewHistoryIndexRef = useRef(0);
   
@@ -1143,7 +1142,6 @@ export function ParticipantInterviewScreen({
       onConfirmAnswer({ aiQuestion: displayQuestion, responseText: confirmedAnswer });
     }
 
-    setPreviousAnswers((answers) => [...answers, { question: displayQuestion, answer: confirmedAnswer }]);
     setAnswerCount((count) => count + 1);
     setTranscriptDraft("");
     setTypedDraft("");
@@ -1420,15 +1418,15 @@ export function ParticipantInterviewScreen({
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Stop Talking
             </button>
-            <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
-              Pause
-            </button>
             <button
               className="secondary-button"
               onClick={switchToTyping}
               type="button"
             >
               Type instead
+            </button>
+            <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
+              Pause
             </button>
             {responseMode !== "push_to_talk" ? (
               <button className="secondary-button" onClick={handleSkipQuestion} type="button">
@@ -1459,15 +1457,15 @@ export function ParticipantInterviewScreen({
                 I'm done
               </button>
             ) : null}
-            <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
-              Pause
-            </button>
             <button
               className="secondary-button"
               onClick={switchToTyping}
               type="button"
             >
               Type instead
+            </button>
+            <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
+              Pause
             </button>
             {responseMode !== "push_to_talk" ? (
               <button className="secondary-button" onClick={handleSkipQuestion} type="button">
@@ -1567,17 +1565,6 @@ export function ParticipantInterviewScreen({
           </div>
         ) : null}
 
-        {previousAnswers.length > 0 ? (
-          <details className="previous-response-list">
-            <summary>Previous responses</summary>
-            {previousAnswers.map((answer, index) => (
-              <article key={`${answer.question}-${index}`}>
-                <strong>{answer.question}</strong>
-                <p>{answer.answer}</p>
-              </article>
-            ))}
-          </details>
-        ) : null}
       </section>
     </main>
   );
