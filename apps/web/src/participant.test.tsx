@@ -553,19 +553,19 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toContain("Record instead");
   });
 
-  it("shows transcript confirmation before continuing after spoken answers", () => {
+  it("shows transcript confirmation before continuing after natural spoken answers", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="Could you share a concrete example?"
         error=""
-        initialResponseMode="push_to_talk"
+        initialResponseMode="natural"
         initialUiState="transcript_review"
         isActionPending={false}
         isRecording={false}
         latestSpokenTranscript="Hello, how are you doing today?"
         maxInterviewMinutes={45}
         mode="active"
-        realtimeConnectionState="connected"
+        realtimeConnectionState="disconnected"
         onComplete={noop}
         onConfirmAnswer={noop}
         onPause={noop}

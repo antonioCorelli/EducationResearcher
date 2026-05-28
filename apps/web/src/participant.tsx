@@ -1103,11 +1103,15 @@ export function ParticipantInterviewScreen({
   }
 
   function handleFinishSpeaking() {
+    const spokenAnswer = getBestTranscriptDraft(transcriptDraft, speechTranscript, latestSpokenTranscript);
+
     if (responseMode === "push_to_talk") {
       onFinishPushToTalkAnswer();
+      submitConfirmedAnswer(spokenAnswer || "Spoken answer submitted.", { persistManualTurn: false });
+      return;
     }
 
-    setTranscriptDraft(getBestTranscriptDraft(transcriptDraft, speechTranscript, latestSpokenTranscript));
+    setTranscriptDraft(spokenAnswer);
     navigateToInterviewCard({ nextUiState: "transcript_review" });
   }
 
@@ -1128,8 +1132,17 @@ export function ParticipantInterviewScreen({
       return;
     }
 
-    const confirmedAnswer = normalizedAnswer.slice(0, 20000);
-    onConfirmAnswer({ aiQuestion: displayQuestion, responseText: confirmedAnswer });
+    submitConfirmedAnswer(normalizedAnswer.slice(0, 20000), { persistManualTurn: true });
+  }
+
+  function submitConfirmedAnswer(
+    confirmedAnswer: string,
+    { persistManualTurn }: { readonly persistManualTurn: boolean }
+  ) {
+    if (persistManualTurn) {
+      onConfirmAnswer({ aiQuestion: displayQuestion, responseText: confirmedAnswer });
+    }
+
     setPreviousAnswers((answers) => [...answers, { question: displayQuestion, answer: confirmedAnswer }]);
     setAnswerCount((count) => count + 1);
     setTranscriptDraft("");
