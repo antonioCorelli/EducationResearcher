@@ -802,6 +802,8 @@ export function ParticipantInterviewScreen({
   const [speechNonce, setSpeechNonce] = useState(0);
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [previousAnswers, setPreviousAnswers] = useState<readonly { readonly question: string; readonly answer: string }[]>([]);
+  const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
+  const interviewHistoryIndexRef = useRef(0);
   
   const isNaturalRealtimeConversation = isActive && responseMode === "natural" && realtimeConnectionState === "connected";
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
@@ -839,6 +841,48 @@ export function ParticipantInterviewScreen({
   useEffect(() => {
     setDisplayQuestion(getDisplayQuestionText(aiQuestion));
   }, [aiQuestion]);
+
+  useEffect(() => {
+    const currentEntry = getInterviewHistoryEntry(window.history.state);
+    const entry =
+      currentEntry?.mode === mode
+        ? currentEntry
+        : createInterviewHistoryEntry({
+            mode,
+            quietMode,
+            responseMode,
+            uiState,
+            index: 0
+          });
+
+    interviewHistoryIndexRef.current = entry.index;
+    setCanReturnToPreviousCard(entry.index > 0);
+    replaceInterviewHistoryEntry(entry);
+
+    if (entry.uiState !== uiState) {
+      setQuietMode(entry.quietMode);
+      setResponseMode(entry.responseMode);
+      setUiState(entry.uiState);
+    }
+
+    function handleBrowserBack(event: PopStateEvent) {
+      const historyEntry = getInterviewHistoryEntry(event.state);
+
+      if (!historyEntry || historyEntry.mode !== mode) {
+        return;
+      }
+
+      interviewHistoryIndexRef.current = historyEntry.index;
+      setCanReturnToPreviousCard(historyEntry.index > 0);
+      setQuietMode(historyEntry.quietMode);
+      setResponseMode(historyEntry.responseMode);
+      setUiState(historyEntry.uiState);
+    }
+
+    window.addEventListener("popstate", handleBrowserBack);
+
+    return () => window.removeEventListener("popstate", handleBrowserBack);
+  }, [mode]);
 
   useEffect(() => {
     if (latestSpokenTranscript?.trim()) {
@@ -961,6 +1005,45 @@ export function ParticipantInterviewScreen({
     window.setTimeout(() => setMicCheckStatus("heard"), 850);
   }
 
+  function navigateToInterviewCard({
+    nextQuietMode = quietMode,
+    nextResponseMode = responseMode,
+    nextUiState,
+    replace = false
+  }: {
+    readonly nextQuietMode?: boolean;
+    readonly nextResponseMode?: InterviewResponseMode;
+    readonly nextUiState: InterviewUiState;
+    readonly replace?: boolean;
+  }) {
+    const nextIndex = replace ? interviewHistoryIndexRef.current : interviewHistoryIndexRef.current + 1;
+    const nextEntry = createInterviewHistoryEntry({
+      mode,
+      quietMode: nextQuietMode,
+      responseMode: nextResponseMode,
+      uiState: nextUiState,
+      index: nextIndex
+    });
+
+    interviewHistoryIndexRef.current = nextEntry.index;
+    setCanReturnToPreviousCard(nextEntry.index > 0);
+    setQuietMode(nextQuietMode);
+    setResponseMode(nextResponseMode);
+    setUiState(nextUiState);
+
+    if (replace) {
+      replaceInterviewHistoryEntry(nextEntry);
+    } else {
+      pushInterviewHistoryEntry(nextEntry);
+    }
+  }
+
+  function returnToPreviousInterviewCard() {
+    if (canReturnToPreviousCard) {
+      window.history.back();
+    }
+  }
+
   function handleQuietModeChange(enabled: boolean) {
     setQuietMode(enabled);
 
@@ -969,7 +1052,9 @@ export function ParticipantInterviewScreen({
         setLastVoiceResponseMode(responseMode);
       }
       setResponseMode("typing");
-      setUiState((currentState) => (currentState === "student_speaking" || currentState === "student_paused" ? "student_turn" : currentState));
+      setUiState((currentState) =>
+        currentState === "student_speaking" || currentState === "student_paused" ? "student_turn" : currentState
+      );
     }
   }
 
@@ -981,7 +1066,7 @@ export function ParticipantInterviewScreen({
   function handleInterruptAi() {
     cancelInterviewSpeech();
     setInterruptionNotice("I stopped - go ahead.");
-    setUiState("student_turn");
+    navigateToInterviewCard({ nextUiState: "student_turn" });
   }
 
   function handleRepeatQuestion() {
@@ -1001,21 +1086,21 @@ export function ParticipantInterviewScreen({
     setTypedDraft("");
 
     if (responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking") {
-      setUiState("student_turn");
+      navigateToInterviewCard({ nextUiState: "student_turn" });
       return;
     }
 
     if (responseMode === "typing" || quietMode) {
-      setUiState("student_turn");
+      navigateToInterviewCard({ nextUiState: "student_turn" });
       return;
     }
 
-    setUiState("student_speaking");
+    navigateToInterviewCard({ nextUiState: "student_speaking" });
   }
 
   function handleFinishSpeaking() {
     setTranscriptDraft(getBestTranscriptDraft(transcriptDraft, speechTranscript, latestSpokenTranscript));
-    setUiState("transcript_review");
+    navigateToInterviewCard({ nextUiState: "transcript_review" });
   }
 
   function handleRedoAnswer() {
@@ -1054,14 +1139,15 @@ export function ParticipantInterviewScreen({
     if (responseMode !== "typing") {
       setLastVoiceResponseMode(responseMode);
     }
-    setResponseMode("typing");
-    setUiState("student_turn");
+    navigateToInterviewCard({ nextResponseMode: "typing", nextUiState: "student_turn" });
   }
 
   function switchToRecording() {
-    setQuietMode(false);
-    setResponseMode(lastVoiceResponseMode);
-    setUiState("student_turn");
+    navigateToInterviewCard({
+      nextQuietMode: false,
+      nextResponseMode: lastVoiceResponseMode,
+      nextUiState: "student_turn"
+    });
   }
 
   function renderMainPanel() {
@@ -1100,17 +1186,17 @@ export function ParticipantInterviewScreen({
             The interview may take up to {maxInterviewMinutes} minutes. You will need to stay connected to the internet during the interview.
           </p>
           <p>
-            You are always in control: you can pause, skip a question, or stop the interview at any time.
+            You are always in control: you can pause, skip, redo, or type your answers at any time.
           </p>
           <p>
             Thank you for taking part. Your voice matters, and we appreciate your contribution to this research.
           </p>
 
-          <div className="participant-interview-card-actions">
-            <button className="primary-button" onClick={() => setUiState("mic_check")} type="button">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+            <button className="primary-button" onClick={() => navigateToInterviewCard({ nextUiState: "mic_check" })} type="button">
               Test Microphone
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1127,14 +1213,14 @@ export function ParticipantInterviewScreen({
           <p className="mic-check-transcript" aria-live="polite">
             {micCheckTranscript || (micCheckStatus === "checking" ? "Listening for your test sentence." : "\u00a0")}
           </p>
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="secondary-button" disabled={micCheckStatus === "checking" || micCheckStatus === "heard"} onClick={startMicCheck} type="button">
               Start mic check
             </button>
-            <button className="primary-button" disabled={micCheckStatus !== "heard"} onClick={() => setUiState("mode_selection")} type="button">
+            <button className="primary-button" disabled={micCheckStatus !== "heard"} onClick={() => navigateToInterviewCard({ nextUiState: "mode_selection" })} type="button">
               Continue
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1164,11 +1250,11 @@ export function ParticipantInterviewScreen({
             <span>Quiet mode</span>
           </label>
           <p className="privacy-note">Your microphone is only on during your answer.</p>
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={handleStartInterview} type="button">
               {isActionPending ? "Starting" : "Start interview"}
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1177,14 +1263,14 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Paused" title="Interview paused">
           <p>Take your time. Your microphone is paused.</p>
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={onResume} type="button">
               {isActionPending ? "Resuming" : "Resume interview"}
             </button>
             <button className="secondary-button" disabled={isActionPending} onClick={onComplete} type="button">
               End interview
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1206,14 +1292,14 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Optional break" title="Would you like a short break?">
           <p>You are doing fine. You can pause for a moment or keep going.</p>
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
               Take a break
             </button>
-            <button className="primary-button" onClick={() => setUiState("ai_speaking")} type="button">
+            <button className="primary-button" onClick={() => navigateToInterviewCard({ nextUiState: "ai_speaking" })} type="button">
               Keep going
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1222,11 +1308,11 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Your turn" title="Want to add anything?">
           <p>We noticed a pause. You can continue, add more, redo, or type instead.</p>
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Continue
             </button>
-            <button className="secondary-button" onClick={() => setUiState("student_speaking")} type="button">
+            <button className="secondary-button" onClick={() => navigateToInterviewCard({ nextUiState: "student_speaking" })} type="button">
               Add more
             </button>
             <button className="secondary-button" onClick={handleRedoAnswer} type="button">
@@ -1239,7 +1325,7 @@ export function ParticipantInterviewScreen({
             >
               Type instead
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1254,7 +1340,7 @@ export function ParticipantInterviewScreen({
             onChange={(event) => setTranscriptDraft(event.target.value)}
             value={transcriptDraft}
           />
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={!transcriptDraft.trim()} onClick={() => confirmAnswer(transcriptDraft)} type="button">
               Continue
             </button>
@@ -1265,14 +1351,13 @@ export function ParticipantInterviewScreen({
               className="secondary-button"
               onClick={() => {
                 setTypedDraft(transcriptDraft);
-                setResponseMode("typing");
-                setUiState("student_turn");
+                navigateToInterviewCard({ nextResponseMode: "typing", nextUiState: "student_turn" });
               }}
               type="button"
             >
               Edit by typing
             </button>
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1289,7 +1374,7 @@ export function ParticipantInterviewScreen({
             placeholder="Type your answer here."
             value={typedDraft}
           />
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={!typedDraft.trim()} onClick={() => confirmAnswer(typedDraft)} type="button">
               Continue
             </button>
@@ -1306,7 +1391,7 @@ export function ParticipantInterviewScreen({
               Skip
               </button>
             ) : null}
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1316,7 +1401,7 @@ export function ParticipantInterviewScreen({
         <InterviewStageCard eyebrow="Your turn" title="Listening">
           <VoiceWave isActive label="Your voice activity" level={microphoneLevel} />
           <p className="recording-timer">Recording {formatElapsedSeconds(elapsedSeconds)}</p>
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Done
             </button>
@@ -1335,7 +1420,7 @@ export function ParticipantInterviewScreen({
               Skip
               </button>
             ) : null}
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1345,7 +1430,7 @@ export function ParticipantInterviewScreen({
         <InterviewStageCard eyebrow="Your turn" title="Your turn">
           <p>{responseMode === "push_to_talk" ? "Press record when you are ready to answer." : "Start when you are ready. We will wait briefly if you pause."}</p>
           <VoiceWave isActive={responseMode === "natural" && !quietMode} label="Your input meter" level={microphoneLevel} />
-          <div className="participant-interview-card-actions">
+          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button
               className="primary-button"
               disabled={responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking"}
@@ -1374,7 +1459,7 @@ export function ParticipantInterviewScreen({
               Skip
               </button>
             ) : null}
-          </div>
+          </InterviewCardActions>
         </InterviewStageCard>
       );
     }
@@ -1387,7 +1472,7 @@ export function ParticipantInterviewScreen({
           <span />
           <span />
         </div>
-        <div className="participant-interview-card-actions">
+        <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
           <button className="secondary-button" onClick={handleRepeatQuestion} type="button">
             Repeat question
           </button>
@@ -1397,7 +1482,7 @@ export function ParticipantInterviewScreen({
           <button className="primary-button" onClick={handleInterruptAi} type="button">
             I stopped - go ahead
           </button>
-        </div>
+        </InterviewCardActions>
       </InterviewStageCard>
     );
   }
@@ -1514,6 +1599,27 @@ interface PendingInterviewTurn {
   readonly audioEndMs?: number;
 }
 
+function InterviewCardActions({
+  canGoBack,
+  children,
+  onBack
+}: {
+  readonly canGoBack: boolean;
+  readonly children: ReactNode;
+  readonly onBack: () => void;
+}) {
+  return (
+    <div className="participant-interview-card-actions">
+      {canGoBack ? (
+        <button className="secondary-button" onClick={onBack} type="button">
+          Back
+        </button>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
 function InterviewStageCard({
   children,
   eyebrow,
@@ -1530,6 +1636,102 @@ function InterviewStageCard({
       {children}
     </div>
   );
+}
+
+interface InterviewHistoryEntry {
+  readonly index: number;
+  readonly mode: InterviewMode;
+  readonly quietMode: boolean;
+  readonly responseMode: InterviewResponseMode;
+  readonly uiState: InterviewUiState;
+}
+
+const participantInterviewHistoryKey = "educationResearcherParticipantInterview";
+
+const interviewUiStates: readonly InterviewUiState[] = [
+  "onboarding",
+  "mic_check",
+  "mode_selection",
+  "ai_speaking",
+  "ai_thinking",
+  "student_turn",
+  "student_speaking",
+  "student_paused",
+  "transcript_review",
+  "paused",
+  "break_prompt",
+  "completed"
+];
+
+const interviewResponseModeValues: readonly InterviewResponseMode[] = ["natural", "push_to_talk", "typing"];
+
+const interviewModeValues: readonly InterviewMode[] = ["ready", "active", "paused"];
+
+function createInterviewHistoryEntry(entry: InterviewHistoryEntry): InterviewHistoryEntry {
+  return entry;
+}
+
+function pushInterviewHistoryEntry(entry: InterviewHistoryEntry) {
+  window.history.pushState(createBrowserHistoryState(entry), "", window.location.href);
+}
+
+function replaceInterviewHistoryEntry(entry: InterviewHistoryEntry) {
+  window.history.replaceState(createBrowserHistoryState(entry), "", window.location.href);
+}
+
+function createBrowserHistoryState(entry: InterviewHistoryEntry) {
+  return {
+    ...getObjectHistoryState(window.history.state),
+    [participantInterviewHistoryKey]: entry
+  };
+}
+
+function getInterviewHistoryEntry(state: unknown): InterviewHistoryEntry | undefined {
+  const entry = getObjectHistoryState(state)[participantInterviewHistoryKey];
+
+  if (!isObjectRecord(entry)) {
+    return undefined;
+  }
+
+  const { index, mode, quietMode, responseMode, uiState } = entry;
+
+  if (
+    typeof index !== "number" ||
+    !isInterviewMode(mode) ||
+    typeof quietMode !== "boolean" ||
+    !isInterviewResponseMode(responseMode) ||
+    !isInterviewUiState(uiState)
+  ) {
+    return undefined;
+  }
+
+  return {
+    index,
+    mode,
+    quietMode,
+    responseMode,
+    uiState
+  };
+}
+
+function getObjectHistoryState(state: unknown): Record<string, unknown> {
+  return isObjectRecord(state) ? state : {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isInterviewMode(value: unknown): value is InterviewMode {
+  return typeof value === "string" && interviewModeValues.includes(value as InterviewMode);
+}
+
+function isInterviewResponseMode(value: unknown): value is InterviewResponseMode {
+  return typeof value === "string" && interviewResponseModeValues.includes(value as InterviewResponseMode);
+}
+
+function isInterviewUiState(value: unknown): value is InterviewUiState {
+  return typeof value === "string" && interviewUiStates.includes(value as InterviewUiState);
 }
 
 function getInitialInterviewUiState(mode: InterviewMode): InterviewUiState {
