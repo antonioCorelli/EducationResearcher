@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ParticipantSurveyScreen,
   ParticipantInterviewScreen,
+  createRealtimeResponseModeSessionUpdate,
   getRepeatQuestionUiState,
   parseRealtimeAiTranscriptUpdate,
   shouldNoticeStudentPause,
@@ -406,6 +407,35 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("Skip question");
   });
 
+  it("labels the push-to-talk recording stop control explicitly", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialResponseMode="push_to_talk"
+        initialUiState="student_speaking"
+        isActionPending={false}
+        isRecording
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="connected"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Listening");
+    expect(markup).toContain("Stop Talking");
+    expect(markup).not.toContain("Done");
+  });
+
   it("does not notice a pause while natural speech is still active", () => {
     expect(
       shouldNoticeStudentPause({
@@ -424,6 +454,46 @@ describe("ParticipantInterviewScreen", () => {
         uiState: "student_speaking"
       })
     ).toBe(true);
+
+    expect(
+      shouldNoticeStudentPause({
+        isActive: true,
+        microphoneLevel: 0,
+        responseMode: "push_to_talk",
+        uiState: "student_speaking"
+      })
+    ).toBe(false);
+  });
+
+  it("uses manual realtime turn control for push-to-talk mode", () => {
+    expect(createRealtimeResponseModeSessionUpdate("push_to_talk")).toEqual({
+      type: "session.update",
+      session: {
+        type: "realtime",
+        audio: {
+          input: {
+            turn_detection: null
+          }
+        }
+      }
+    });
+
+    expect(createRealtimeResponseModeSessionUpdate("natural")).toEqual({
+      type: "session.update",
+      session: {
+        type: "realtime",
+        audio: {
+          input: {
+            turn_detection: {
+              type: "semantic_vad",
+              eagerness: "low",
+              create_response: true,
+              interrupt_response: true
+            }
+          }
+        }
+      }
+    });
   });
 
   it("pauses push-to-talk voice input when the AI starts speaking", () => {

@@ -136,6 +136,8 @@ export function Participant() {
   const mediaStreamRef = useRef<MediaStream | undefined>(undefined);
   const remoteAudioRef = useRef<HTMLAudioElement | undefined>(undefined);
   const pendingInterviewTurnsRef = useRef<PendingInterviewTurn[]>([]);
+  const [interviewResponseMode, setInterviewResponseMode] = useState<InterviewResponseMode>("natural");
+  const interviewResponseModeRef = useRef<InterviewResponseMode>("natural");
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
     const accessToken = getParticipantAccessTokenFromPath();
 
@@ -259,10 +261,35 @@ export function Participant() {
         return currentValue;
       }
 
+      if (recording && interviewResponseModeRef.current === "push_to_talk") {
+        if (!isRealtimeDataChannelOpen(dataChannelRef.current)) {
+          setInterviewError("The voice connection is still getting ready. Please try again in a moment.");
+          return currentValue;
+        }
+
+        updateRealtimeResponseMode(dataChannelRef.current, "push_to_talk");
+        startPushToTalkInput(dataChannelRef.current);
+      }
+
       setMicrophoneEnabled(recording);
 
       return recording;
     });
+  }
+
+  function updateInterviewResponseMode(responseMode: InterviewResponseMode) {
+    interviewResponseModeRef.current = responseMode;
+    setInterviewResponseMode(responseMode);
+    updateRealtimeResponseMode(dataChannelRef.current, responseMode);
+  }
+
+  function finishPushToTalkAnswer() {
+    if (interviewResponseModeRef.current !== "push_to_talk") {
+      return;
+    }
+
+    setMicrophoneEnabled(false);
+    finishPushToTalkInput(dataChannelRef.current);
   }
 
   function confirmInterviewAnswer(answer: { readonly aiQuestion: string; readonly responseText: string }) {
@@ -304,6 +331,7 @@ export function Participant() {
 
       const connection = await connectOpenAiRealtimeVoice(
         realtimeSession,
+        () => interviewResponseModeRef.current,
         (turn) => {
           pendingInterviewTurnsRef.current.push(turn);
 
@@ -679,6 +707,7 @@ export function Participant() {
           error={interviewError}
           isActionPending={isSubmittingInterviewAction}
           isRecording={isRecording}
+          initialResponseMode={interviewResponseMode}
           latestSpokenTranscript={latestParticipantTranscript}
           maxInterviewMinutes={accessState.run.maxInterviewMinutes}
           mode={interviewMode}
@@ -686,8 +715,10 @@ export function Participant() {
           realtimeVoiceActivity={realtimeVoiceActivity}
           onComplete={() => void submitInterviewAction("complete")}
           onConfirmAnswer={confirmInterviewAnswer}
+          onFinishPushToTalkAnswer={finishPushToTalkAnswer}
           onPause={() => void submitInterviewAction("pause")}
           onRecordingChange={setInterviewRecording}
+          onResponseModeChange={updateInterviewResponseMode}
           onResume={() => void submitInterviewAction("resume")}
           onRetry={() => void retryRealtimeVoice()}
           onStart={() => void submitInterviewAction("start")}
@@ -734,8 +765,10 @@ export function ParticipantInterviewScreen({
   realtimeVoiceActivity = "idle",
   onComplete,
   onConfirmAnswer,
+  onFinishPushToTalkAnswer = () => undefined,
   onPause,
   onRecordingChange,
+  onResponseModeChange = () => undefined,
   onResume,
   onRetry,
   onStart,
@@ -755,8 +788,10 @@ export function ParticipantInterviewScreen({
   readonly realtimeVoiceActivity?: RealtimeVoiceActivity;
   readonly onComplete: () => void;
   readonly onConfirmAnswer: (answer: { readonly aiQuestion: string; readonly responseText: string }) => void;
+  readonly onFinishPushToTalkAnswer?: () => void;
   readonly onPause: () => void;
   readonly onRecordingChange: (recording: boolean) => void;
+  readonly onResponseModeChange?: (responseMode: InterviewResponseMode) => void;
   readonly onResume: () => void;
   readonly onRetry: () => void;
   readonly onStart: () => void;
@@ -837,8 +872,9 @@ export function ParticipantInterviewScreen({
     setCanReturnToPreviousCard(entry.index > 0);
     replaceInterviewHistoryEntry(entry);
 
-    if (entry.uiState !== uiState) {
+    if (entry.uiState !== uiState || entry.responseMode !== responseMode) {
       setResponseMode(entry.responseMode);
+      onResponseModeChange(entry.responseMode);
       setUiState(entry.uiState);
     }
 
@@ -852,6 +888,7 @@ export function ParticipantInterviewScreen({
       interviewHistoryIndexRef.current = historyEntry.index;
       setCanReturnToPreviousCard(historyEntry.index > 0);
       setResponseMode(historyEntry.responseMode);
+      onResponseModeChange(historyEntry.responseMode);
       setUiState(historyEntry.uiState);
     }
 
@@ -999,6 +1036,9 @@ export function ParticipantInterviewScreen({
     interviewHistoryIndexRef.current = nextEntry.index;
     setCanReturnToPreviousCard(nextEntry.index > 0);
     setResponseMode(nextResponseMode);
+    if (nextResponseMode !== responseMode) {
+      onResponseModeChange(nextResponseMode);
+    }
     setUiState(nextUiState);
 
     if (replace) {
@@ -1016,6 +1056,7 @@ export function ParticipantInterviewScreen({
 
   function handleStartInterview() {
     setInterruptionNotice("");
+    onResponseModeChange(responseMode);
     onStart();
   }
 
@@ -1046,6 +1087,7 @@ export function ParticipantInterviewScreen({
     setInterruptionNotice("");
     setTranscriptDraft("");
     setTypedDraft("");
+    onResponseModeChange(responseMode);
 
     if (responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking") {
       navigateToInterviewCard({ nextUiState: "student_turn" });
@@ -1061,6 +1103,10 @@ export function ParticipantInterviewScreen({
   }
 
   function handleFinishSpeaking() {
+    if (responseMode === "push_to_talk") {
+      onFinishPushToTalkAnswer();
+    }
+
     setTranscriptDraft(getBestTranscriptDraft(transcriptDraft, speechTranscript, latestSpokenTranscript));
     navigateToInterviewCard({ nextUiState: "transcript_review" });
   }
@@ -1099,6 +1145,7 @@ export function ParticipantInterviewScreen({
 
   function handleSelectResponseMode(nextResponseMode: InterviewResponseMode) {
     setResponseMode(nextResponseMode);
+    onResponseModeChange(nextResponseMode);
 
     if (nextResponseMode !== "typing") {
       setLastVoiceResponseMode(nextResponseMode);
@@ -1358,7 +1405,7 @@ export function ParticipantInterviewScreen({
           <p className="recording-timer">Recording {formatElapsedSeconds(elapsedSeconds)}</p>
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
-              Done
+              Stop Talking
             </button>
             <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
               Pause
@@ -2309,6 +2356,7 @@ async function reportAudioConnectionState(
 
 async function connectOpenAiRealtimeVoice(
   realtimeSession: RealtimeVoiceSession,
+  getResponseMode: () => InterviewResponseMode,
   onTranscriptTurn: (turn: PendingInterviewTurn) => void,
   onVoiceActivity: (activity: RealtimeVoiceActivity) => void,
   onAiQuestionTranscriptChange: (transcript: string) => void
@@ -2335,9 +2383,7 @@ async function connectOpenAiRealtimeVoice(
   const dataChannel = peerConnection.createDataChannel("oai-events");
   let activeAiTranscriptItemId: string | undefined;
   let activeAiTranscript = "";
-  dataChannel.addEventListener("open", () => {
-    sendRealtimeEvent(dataChannel, { type: "response.create" });
-  });
+  const dataChannelOpen = waitForRealtimeDataChannelOpen(dataChannel);
   dataChannel.addEventListener("message", (event) => {
     const realtimeEvent = parseRealtimeServerEvent(event.data);
     const activity = getRealtimeVoiceActivity(realtimeEvent);
@@ -2401,6 +2447,10 @@ async function connectOpenAiRealtimeVoice(
     sdp: await sdpResponse.text()
   });
 
+  await dataChannelOpen;
+  updateRealtimeResponseMode(dataChannel, getResponseMode());
+  sendRealtimeEvent(dataChannel, { type: "response.create" });
+
   return {
     peerConnection,
     dataChannel,
@@ -2413,6 +2463,100 @@ function sendRealtimeEvent(dataChannel: RTCDataChannel, event: Record<string, un
   if (dataChannel.readyState === "open") {
     dataChannel.send(JSON.stringify(event));
   }
+}
+
+function isRealtimeDataChannelOpen(dataChannel: RTCDataChannel | undefined) {
+  return dataChannel?.readyState === "open";
+}
+
+function waitForRealtimeDataChannelOpen(dataChannel: RTCDataChannel) {
+  if (dataChannel.readyState === "open") {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("The realtime voice control channel did not open."));
+    }, 5000);
+
+    function cleanup() {
+      window.clearTimeout(timeout);
+      dataChannel.removeEventListener("open", handleOpen);
+      dataChannel.removeEventListener("error", handleError);
+      dataChannel.removeEventListener("close", handleClose);
+    }
+
+    function handleOpen() {
+      cleanup();
+      resolve();
+    }
+
+    function handleError() {
+      cleanup();
+      reject(new Error("The realtime voice control channel failed."));
+    }
+
+    function handleClose() {
+      cleanup();
+      reject(new Error("The realtime voice control channel closed."));
+    }
+
+    dataChannel.addEventListener("open", handleOpen);
+    dataChannel.addEventListener("error", handleError);
+    dataChannel.addEventListener("close", handleClose);
+  });
+}
+
+function updateRealtimeResponseMode(dataChannel: RTCDataChannel | undefined, responseMode: InterviewResponseMode) {
+  if (!dataChannel) {
+    return;
+  }
+
+  sendRealtimeEvent(dataChannel, createRealtimeResponseModeSessionUpdate(responseMode));
+
+  if (responseMode !== "push_to_talk") {
+    sendRealtimeEvent(dataChannel, { type: "input_audio_buffer.clear" });
+  }
+}
+
+function startPushToTalkInput(dataChannel: RTCDataChannel | undefined) {
+  if (!dataChannel) {
+    return;
+  }
+
+  sendRealtimeEvent(dataChannel, { type: "input_audio_buffer.clear" });
+}
+
+function finishPushToTalkInput(dataChannel: RTCDataChannel | undefined) {
+  if (!dataChannel) {
+    return;
+  }
+
+  sendRealtimeEvent(dataChannel, { type: "input_audio_buffer.commit" });
+  sendRealtimeEvent(dataChannel, { type: "response.create" });
+}
+
+export function createRealtimeResponseModeSessionUpdate(responseMode: InterviewResponseMode) {
+  return {
+    type: "session.update",
+    session: {
+      type: "realtime",
+      audio: {
+        input: {
+          turn_detection:
+            responseMode === "natural"
+              ? {
+                  type: "semantic_vad",
+                  eagerness: "low",
+                  create_response: true,
+                  interrupt_response: true
+                }
+              : null
+        }
+      }
+    }
+  };
 }
 
 function parseRealtimeServerEvent(value: unknown): Record<string, unknown> | undefined {

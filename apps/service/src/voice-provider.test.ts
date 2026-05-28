@@ -177,12 +177,7 @@ describe("realtime voice provider", () => {
             transcription: {
               model: "gpt-4o-transcribe"
             },
-            turn_detection: {
-              type: "semantic_vad",
-              eagerness: "low",
-              create_response: true,
-              interrupt_response: true
-            }
+            turn_detection: null
           },
           output: {
             voice: "marin"
