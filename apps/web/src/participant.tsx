@@ -1097,6 +1097,14 @@ export function ParticipantInterviewScreen({
     onPause();
   }
 
+  function handleSelectResponseMode(nextResponseMode: InterviewResponseMode) {
+    setResponseMode(nextResponseMode);
+
+    if (nextResponseMode !== "typing") {
+      setLastVoiceResponseMode(nextResponseMode);
+    }
+  }
+
   function switchToTyping() {
     if (responseMode !== "typing") {
       setLastVoiceResponseMode(responseMode);
@@ -1187,23 +1195,11 @@ export function ParticipantInterviewScreen({
     if (mode === "ready" && uiState === "mode_selection") {
       return (
         <InterviewStageCard eyebrow="Response mode" title="Choose how you want to answer">
-          <fieldset className="interview-mode-options">
-            <legend className="visually-hidden">Response mode</legend>
-            {interviewResponseModes.map((option) => (
-              <label className="interview-mode-option" key={option.value}>
-                <input
-                  checked={responseMode === option.value}
-                  onChange={() => setResponseMode(option.value)}
-                  type="radio"
-                  value={option.value}
-                />
-                <span>
-                  <strong>{option.label}</strong>
-                  <small>{option.description}</small>
-                </span>
-              </label>
-            ))}
-          </fieldset>
+          <InterviewResponseModeOptions
+            legendLabel="Response mode"
+            responseMode={responseMode}
+            onChange={handleSelectResponseMode}
+          />
           <p className="privacy-note">Your microphone is only on during your answer.</p>
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={handleStartInterview} type="button">
@@ -1217,7 +1213,13 @@ export function ParticipantInterviewScreen({
     if (uiState === "paused") {
       return (
         <InterviewStageCard eyebrow="Paused" title="Interview paused">
-          <p>Take your time. Your microphone is paused.</p>
+          <p>Take your time. Your interview is paused.</p>
+          <InterviewResponseModeOptions
+            disabled={isActionPending}
+            legendLabel="Resume response mode"
+            responseMode={responseMode}
+            onChange={handleSelectResponseMode}
+          />
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={onResume} type="button">
               {isActionPending ? "Resuming" : "Resume interview"}
@@ -1570,6 +1572,39 @@ function InterviewCardActions({
       ) : null}
       {children}
     </div>
+  );
+}
+
+function InterviewResponseModeOptions({
+  disabled = false,
+  legendLabel,
+  onChange,
+  responseMode
+}: {
+  readonly disabled?: boolean;
+  readonly legendLabel: string;
+  readonly onChange: (responseMode: InterviewResponseMode) => void;
+  readonly responseMode: InterviewResponseMode;
+}) {
+  return (
+    <fieldset className="interview-mode-options">
+      <legend className="visually-hidden">{legendLabel}</legend>
+      {interviewResponseModes.map((option) => (
+        <label className="interview-mode-option" key={option.value}>
+          <input
+            checked={responseMode === option.value}
+            disabled={disabled}
+            onChange={() => onChange(option.value)}
+            type="radio"
+            value={option.value}
+          />
+          <span>
+            <strong>{option.label}</strong>
+            <small>{option.description}</small>
+          </span>
+        </label>
+      ))}
+    </fieldset>
   );
 }
 

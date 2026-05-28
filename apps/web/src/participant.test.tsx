@@ -206,6 +206,37 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("I stopped - go ahead");
   });
 
+  it("lets paused participants choose a different response mode before resuming", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="What part of your survey answer would you like to explain more?"
+        error=""
+        initialResponseMode="push_to_talk"
+        initialUiState="paused"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="paused"
+        realtimeConnectionState="connected"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Interview paused");
+    expect(markup).toContain("Talk naturally");
+    expect(markup).toContain("Press to record each answer");
+    expect(markup).toContain("Type my answers");
+    expect(markup).toContain("Resume interview");
+  });
+
   it("shows the paused screen immediately while a natural pause action is pending", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
