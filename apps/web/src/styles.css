@@ -319,8 +319,7 @@ textarea {
   padding: 12px;
 }
 
-.interview-mode-option input,
-.quiet-mode-toggle input {
+.interview-mode-option input {
   width: auto;
   margin-top: 4px;
 }
@@ -341,19 +340,6 @@ textarea {
   margin: 0;
   color: #172033;
   font-weight: 700;
-}
-
-.quiet-mode-toggle {
-  display: inline-flex;
-  width: fit-content;
-  gap: 8px;
-  align-items: center;
-  border: 1px solid #d7e0da;
-  border-radius: 999px;
-  background: #ffffff;
-  padding: 6px 10px;
-  font-size: 0.86rem;
-  font-weight: 800;
 }
 
 .mic-check-meter {

@@ -95,12 +95,11 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toContain("A few follow-up questions");
     expect(markup).toContain("no right or wrong answers");
     expect(markup).toContain("pause, skip, redo, or type");
-    expect(markup).toContain("This is not graded");
+    expect(markup).toContain("not graded");
     expect(markup).toContain("interview-layout-centered");
     expect(markup).not.toContain("Current question");
     expect(markup).not.toContain("Microphone off");
     expect(markup).not.toContain("Connected");
-    expect(markup).not.toContain("Quiet mode");
   });
 
   it("clearly distinguishes AI speaking from microphone listening state", () => {
@@ -297,7 +296,6 @@ describe("ParticipantInterviewScreen", () => {
       shouldNoticeStudentPause({
         isActive: true,
         microphoneLevel: 0.08,
-        quietMode: false,
         responseMode: "natural",
         uiState: "student_speaking"
       })
@@ -307,7 +305,6 @@ describe("ParticipantInterviewScreen", () => {
       shouldNoticeStudentPause({
         isActive: true,
         microphoneLevel: 0,
-        quietMode: false,
         responseMode: "natural",
         uiState: "student_speaking"
       })
@@ -341,36 +338,6 @@ describe("ParticipantInterviewScreen", () => {
         uiState: "student_speaking"
       })
     ).toBe(false);
-  });
-
-  it("supports typing-only quiet mode", () => {
-    const markup = renderToStaticMarkup(
-      <ParticipantInterviewScreen
-        aiQuestion="Could you share a concrete example?"
-        error=""
-        initialQuietMode
-        initialResponseMode="typing"
-        initialUiState="student_turn"
-        isActionPending={false}
-        isRecording={false}
-        maxInterviewMinutes={45}
-        mode="active"
-        realtimeConnectionState="connected"
-        onComplete={noop}
-        onConfirmAnswer={noop}
-        onPause={noop}
-        onRecordingChange={noop}
-        onResume={noop}
-        onRetry={noop}
-        onStart={noop}
-        onStopAfterFailure={noop}
-        retryCount={0}
-      />
-    );
-
-    expect(markup).toContain("Quiet mode");
-    expect(markup).toContain("Type your answer");
-    expect(markup).toContain("Your microphone is off");
   });
 
   it("lets push-to-talk participants return to recording after choosing typing", () => {

@@ -723,7 +723,6 @@ export function Participant() {
 export function ParticipantInterviewScreen({
   aiQuestion,
   error,
-  initialQuietMode,
   initialResponseMode,
   initialUiState,
   isActionPending,
@@ -745,7 +744,6 @@ export function ParticipantInterviewScreen({
 }: {
   readonly aiQuestion: string;
   readonly error: string;
-  readonly initialQuietMode?: boolean;
   readonly initialResponseMode?: InterviewResponseMode;
   readonly initialUiState?: InterviewUiState;
   readonly isActionPending: boolean;
@@ -772,7 +770,6 @@ export function ParticipantInterviewScreen({
   const [lastVoiceResponseMode, setLastVoiceResponseMode] = useState<Exclude<InterviewResponseMode, "typing">>(
     initialResponseMode === "push_to_talk" ? "push_to_talk" : "natural"
   );
-  const [quietMode, setQuietMode] = useState(Boolean(initialQuietMode));
   const [micCheckStatus, setMicCheckStatus] = useState<"idle" | "checking" | "heard">("idle");
   const [micCheckTranscript, setMicCheckTranscript] = useState("");
   const [answerCount, setAnswerCount] = useState(0);
@@ -787,7 +784,7 @@ export function ParticipantInterviewScreen({
   
   const isNaturalRealtimeConversation = isActive && responseMode === "natural" && realtimeConnectionState === "connected";
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
-  const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing" && !quietMode;
+  const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing";
   const shouldCaptureMicCheckSpeech = mode === "ready" && uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard");
   const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech || shouldCaptureMicCheckSpeech);
   const microphoneLevel = useMicrophoneLevel(
@@ -797,7 +794,7 @@ export function ParticipantInterviewScreen({
   );
   const participantVoiceState = isNaturalRealtimeConversation
     ? getNaturalConversationTitle(realtimeVoiceActivity)
-    : getParticipantVoiceState(uiState, responseMode, quietMode, isActive);
+    : getParticipantVoiceState(uiState, responseMode, isActive);
   const shouldShowInterviewControls = mode === "active" && uiState !== "completed" && !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
     mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState);
@@ -807,7 +804,6 @@ export function ParticipantInterviewScreen({
   const shouldWatchForStudentPause = shouldNoticeStudentPause({
     isActive,
     microphoneLevel,
-    quietMode,
     responseMode,
     uiState
   });
@@ -829,7 +825,6 @@ export function ParticipantInterviewScreen({
         ? currentEntry
         : createInterviewHistoryEntry({
             mode,
-            quietMode,
             responseMode,
             uiState,
             index: 0
@@ -840,7 +835,6 @@ export function ParticipantInterviewScreen({
     replaceInterviewHistoryEntry(entry);
 
     if (entry.uiState !== uiState) {
-      setQuietMode(entry.quietMode);
       setResponseMode(entry.responseMode);
       setUiState(entry.uiState);
     }
@@ -854,7 +848,6 @@ export function ParticipantInterviewScreen({
 
       interviewHistoryIndexRef.current = historyEntry.index;
       setCanReturnToPreviousCard(historyEntry.index > 0);
-      setQuietMode(historyEntry.quietMode);
       setResponseMode(historyEntry.responseMode);
       setUiState(historyEntry.uiState);
     }
@@ -914,7 +907,6 @@ export function ParticipantInterviewScreen({
     }
 
     const shouldRecord =
-      !quietMode &&
       realtimeConnectionState !== "failed" &&
       (responseMode === "natural" &&
         (isNaturalRealtimeConversation ||
@@ -930,7 +922,6 @@ export function ParticipantInterviewScreen({
     isPushToTalkAiSpeaking,
     micCheckStatus,
     onRecordingChange,
-    quietMode,
     realtimeConnectionState,
     responseMode,
     uiState
@@ -949,11 +940,11 @@ export function ParticipantInterviewScreen({
       return;
     }
 
-    speakInterviewQuestion(displayQuestion, quietMode);
+    speakInterviewQuestion(displayQuestion);
     const timeout = window.setTimeout(() => setUiState("student_turn"), 1400);
 
     return () => window.clearTimeout(timeout);
-  }, [isActive, quietMode, responseMode, uiState, displayQuestion, speechNonce]);
+  }, [isActive, responseMode, uiState, displayQuestion, speechNonce]);
 
   useEffect(() => {
     if (!shouldWatchForStudentPause) {
@@ -986,12 +977,10 @@ export function ParticipantInterviewScreen({
   }
 
   function navigateToInterviewCard({
-    nextQuietMode = quietMode,
     nextResponseMode = responseMode,
     nextUiState,
     replace = false
   }: {
-    readonly nextQuietMode?: boolean;
     readonly nextResponseMode?: InterviewResponseMode;
     readonly nextUiState: InterviewUiState;
     readonly replace?: boolean;
@@ -999,7 +988,6 @@ export function ParticipantInterviewScreen({
     const nextIndex = replace ? interviewHistoryIndexRef.current : interviewHistoryIndexRef.current + 1;
     const nextEntry = createInterviewHistoryEntry({
       mode,
-      quietMode: nextQuietMode,
       responseMode: nextResponseMode,
       uiState: nextUiState,
       index: nextIndex
@@ -1007,7 +995,6 @@ export function ParticipantInterviewScreen({
 
     interviewHistoryIndexRef.current = nextEntry.index;
     setCanReturnToPreviousCard(nextEntry.index > 0);
-    setQuietMode(nextQuietMode);
     setResponseMode(nextResponseMode);
     setUiState(nextUiState);
 
@@ -1021,20 +1008,6 @@ export function ParticipantInterviewScreen({
   function returnToPreviousInterviewCard() {
     if (canReturnToPreviousCard) {
       window.history.back();
-    }
-  }
-
-  function handleQuietModeChange(enabled: boolean) {
-    setQuietMode(enabled);
-
-    if (enabled) {
-      if (responseMode !== "typing") {
-        setLastVoiceResponseMode(responseMode);
-      }
-      setResponseMode("typing");
-      setUiState((currentState) =>
-        currentState === "student_speaking" || currentState === "student_paused" ? "student_turn" : currentState
-      );
     }
   }
 
@@ -1070,7 +1043,7 @@ export function ParticipantInterviewScreen({
       return;
     }
 
-    if (responseMode === "typing" || quietMode) {
+    if (responseMode === "typing") {
       navigateToInterviewCard({ nextUiState: "student_turn" });
       return;
     }
@@ -1124,7 +1097,6 @@ export function ParticipantInterviewScreen({
 
   function switchToRecording() {
     navigateToInterviewCard({
-      nextQuietMode: false,
       nextResponseMode: lastVoiceResponseMode,
       nextUiState: "student_turn"
     });
@@ -1184,7 +1156,7 @@ export function ParticipantInterviewScreen({
     if (mode === "ready" && uiState === "mic_check") {
       return (
         <InterviewStageCard eyebrow="Voice Test" title="Testing your voice input">
-          <p>Please Say: "My microphone is ready."</p>
+          <p>Please Say: "I'm ready to begin."</p>
           <button className="mic-check-button" disabled={micCheckStatus === "checking" || micCheckStatus === "heard"} onClick={startMicCheck} type="button">
             Start mic check
           </button>
@@ -1223,10 +1195,6 @@ export function ParticipantInterviewScreen({
               </label>
             ))}
           </fieldset>
-          <label className="quiet-mode-toggle">
-            <input checked={quietMode} onChange={(event) => handleQuietModeChange(event.target.checked)} type="checkbox" />
-            <span>Quiet mode</span>
-          </label>
           <p className="privacy-note">Your microphone is only on during your answer.</p>
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={handleStartInterview} type="button">
@@ -1340,10 +1308,10 @@ export function ParticipantInterviewScreen({
       );
     }
 
-    if (uiState === "student_turn" && (responseMode === "typing" || quietMode)) {
+    if (uiState === "student_turn" && responseMode === "typing") {
       return (
         <InterviewStageCard eyebrow="Your turn" title="Type your answer">
-          <p className="privacy-note">Quiet mode is available. Your microphone is off.</p>
+          <p className="privacy-note">Your microphone is off while you type.</p>
           <textarea
             aria-label="Typed answer"
             autoFocus
@@ -1356,11 +1324,9 @@ export function ParticipantInterviewScreen({
             <button className="primary-button" disabled={!typedDraft.trim()} onClick={() => confirmAnswer(typedDraft)} type="button">
               Continue
             </button>
-            {!quietMode ? (
-              <button className="secondary-button" onClick={switchToRecording} type="button">
-                Record instead
-              </button>
-            ) : null}
+            <button className="secondary-button" onClick={switchToRecording} type="button">
+              Record instead
+            </button>
             <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
               Pause
             </button>
@@ -1407,7 +1373,7 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Your turn" title="Your turn">
           <p>{responseMode === "push_to_talk" ? "Press record when you are ready to answer." : "Start when you are ready. We will wait briefly if you pause."}</p>
-          <VoiceWave isActive={responseMode === "natural" && !quietMode} label="Your input meter" level={microphoneLevel} />
+          <VoiceWave isActive={responseMode === "natural"} label="Your input meter" level={microphoneLevel} />
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button
               className="primary-button"
@@ -1476,7 +1442,7 @@ export function ParticipantInterviewScreen({
         </div>
 
         <div className="participant-reassurance" role="note">
-          This is not graded. The goal is to explain your thinking.
+          Share your thinking in your own words.
         </div>
 
         <div className={interviewLayoutClassName}>
@@ -1619,7 +1585,6 @@ function InterviewStageCard({
 interface InterviewHistoryEntry {
   readonly index: number;
   readonly mode: InterviewMode;
-  readonly quietMode: boolean;
   readonly responseMode: InterviewResponseMode;
   readonly uiState: InterviewUiState;
 }
@@ -1671,12 +1636,11 @@ function getInterviewHistoryEntry(state: unknown): InterviewHistoryEntry | undef
     return undefined;
   }
 
-  const { index, mode, quietMode, responseMode, uiState } = entry;
+  const { index, mode, responseMode, uiState } = entry;
 
   if (
     typeof index !== "number" ||
     !isInterviewMode(mode) ||
-    typeof quietMode !== "boolean" ||
     !isInterviewResponseMode(responseMode) ||
     !isInterviewUiState(uiState)
   ) {
@@ -1686,7 +1650,6 @@ function getInterviewHistoryEntry(state: unknown): InterviewHistoryEntry | undef
   return {
     index,
     mode,
-    quietMode,
     responseMode,
     uiState
   };
@@ -1896,8 +1859,8 @@ function getSpeechRecognitionConstructor() {
   return browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition;
 }
 
-function speakInterviewQuestion(question: string, quietMode: boolean) {
-  if (quietMode || !("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+function speakInterviewQuestion(question: string) {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
     return;
   }
 
@@ -1926,10 +1889,9 @@ function getBestTranscriptDraft(
 function getParticipantVoiceState(
   uiState: InterviewUiState,
   responseMode: InterviewResponseMode,
-  quietMode: boolean,
   isActive: boolean
 ) {
-  if (quietMode || responseMode === "typing") {
+  if (responseMode === "typing") {
     return "Typed response mode";
   }
 
@@ -1971,13 +1933,11 @@ function getNaturalConversationTitle(realtimeVoiceActivity: RealtimeVoiceActivit
 export function shouldNoticeStudentPause({
   isActive,
   microphoneLevel,
-  quietMode,
   responseMode,
   uiState
 }: {
   readonly isActive: boolean;
   readonly microphoneLevel: number;
-  readonly quietMode: boolean;
   readonly responseMode: InterviewResponseMode;
   readonly uiState: InterviewUiState;
 }) {
@@ -1985,7 +1945,6 @@ export function shouldNoticeStudentPause({
     isActive &&
     uiState === "student_speaking" &&
     responseMode === "natural" &&
-    !quietMode &&
     microphoneLevel <= speechPauseVoiceLevelThreshold
   );
 }
