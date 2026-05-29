@@ -590,8 +590,8 @@ export const DATA_DOMAIN_TABLES = [
         entity: "interview_turn",
         description: "One AI or participant transcript turn with timing metadata.",
         partitionKeyPattern: "INTERVIEW_SESSION#<interview_session_id>",
-        sortKeyPattern: "TURN#<created_at>#<interview_turn_id>",
-        requiredAttributes: ["id", "runId", "interviewSessionId", "speaker", "text"],
+        sortKeyPattern: "TURN#<sequence_number>#<created_at>#<interview_turn_id>",
+        requiredAttributes: ["id", "runId", "interviewSessionId", "sequenceNumber", "speaker", "text"],
         statusAttributes: [],
         timestampAttributes: ["createdAt"],
         references: [

@@ -1004,6 +1004,7 @@ describe("interview session lifecycle", () => {
       turns: [
         {
           id: "interview_turn_artifacts_001",
+          sequenceNumber: 1,
           speaker: "ai",
           text: "Could you share a concrete example?",
           audioStartMs: 1000,
@@ -1011,6 +1012,7 @@ describe("interview session lifecycle", () => {
         },
         {
           id: "interview_turn_artifacts_002",
+          sequenceNumber: 2,
           speaker: "participant",
           text: "The worked example helped me compare the two methods.",
           audioStartMs: 3300,
@@ -1024,13 +1026,36 @@ describe("interview session lifecycle", () => {
         status: "available"
       }
     });
-    expect(await runStore.listInterviewTurnsByRun("run_fixture_001")).toEqual(saved.turns);
+    const savedFollowUp = await artifactService.saveParticipantInterviewArtifacts(rawToken, {
+      turns: [
+        {
+          speaker: "participant",
+          text: "I would use that comparison again.",
+          audioStartMs: 8800,
+          audioEndMs: 11000
+        }
+      ],
+      transcriptTokenCount: 5
+    });
+
+    expect(await runStore.listInterviewTurnsByRun("run_fixture_001")).toEqual([...saved.turns, ...savedFollowUp.turns]);
     expect(await runStore.listInterviewAudioAssetsByRun("run_fixture_001")).toEqual([saved.audioAsset]);
+    expect(savedFollowUp.interviewSession).toMatchObject({
+      id: "interview_session_artifacts_001",
+      transcriptTokenCount: 24
+    });
+    expect(savedFollowUp.turns).toEqual([
+      expect.objectContaining({
+        id: "interview_turn_artifacts_003",
+        sequenceNumber: 3,
+        speaker: "participant"
+      })
+    ]);
     expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
       expect.objectContaining({
         id: "interview_session_artifacts_001",
         audioDurationSeconds: 8.7,
-        transcriptTokenCount: 19
+        transcriptTokenCount: 24
       })
     ]);
   });

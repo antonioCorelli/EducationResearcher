@@ -770,6 +770,7 @@ function rejectInterviewTurnMetadata(value: unknown) {
       "participantSlotId" in record ||
       "runId" in record ||
       "interviewSessionId" in record ||
+      "sequenceNumber" in record ||
       "createdAt" in record
     ) {
       throw {

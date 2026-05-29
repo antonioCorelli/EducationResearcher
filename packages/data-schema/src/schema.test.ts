@@ -272,7 +272,7 @@ describe("data domain schema", () => {
 
     expect(interviewSession?.description).toContain("audio duration and transcript token rollups");
     expect(interviewTurn?.requiredAttributes).toEqual(
-      expect.arrayContaining(["runId", "interviewSessionId", "speaker", "text"])
+      expect.arrayContaining(["runId", "interviewSessionId", "sequenceNumber", "speaker", "text"])
     );
     expect(audioAsset?.requiredAttributes).toEqual(
       expect.arrayContaining(["runId", "interviewSessionId", "storageUri", "durationSeconds"])
@@ -282,6 +282,7 @@ describe("data domain schema", () => {
       transcriptTokenCount: 450
     });
     expect(fixtureTurn?.attributes).toMatchObject({
+      sequenceNumber: 1,
       speaker: "participant",
       audioStartMs: 60000,
       audioEndMs: 68000

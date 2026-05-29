@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ParticipantSurveyScreen,
   ParticipantInterviewScreen,
+  createInterviewArtifactBatches,
   createRealtimeResponseModeSessionUpdate,
   getRepeatQuestionUiState,
   parseRealtimeAiTranscriptUpdate,
@@ -505,6 +506,9 @@ describe("ParticipantInterviewScreen", () => {
         type: "realtime",
         audio: {
           input: {
+            transcription: {
+              model: "gpt-4o-transcribe"
+            },
             turn_detection: null
           }
         }
@@ -517,6 +521,9 @@ describe("ParticipantInterviewScreen", () => {
         type: "realtime",
         audio: {
           input: {
+            transcription: {
+              model: "gpt-4o-transcribe"
+            },
             turn_detection: {
               type: "semantic_vad",
               eagerness: "low",
@@ -527,6 +534,24 @@ describe("ParticipantInterviewScreen", () => {
         }
       }
     });
+  });
+
+  it("batches transcript artifacts within the service route limit", () => {
+    const turns = Array.from({ length: 51 }, (_, index) => ({
+      speaker: index % 2 === 0 ? ("ai" as const) : ("participant" as const),
+      text: `Transcript turn ${index + 1}`
+    }));
+
+    expect(createInterviewArtifactBatches(turns)).toEqual([
+      expect.objectContaining({
+        turns: turns.slice(0, 50),
+        transcriptTokenCount: expect.any(Number)
+      }),
+      expect.objectContaining({
+        turns: turns.slice(50),
+        transcriptTokenCount: expect.any(Number)
+      })
+    ]);
   });
 
   it("does not use browser narration for push-to-talk questions", () => {

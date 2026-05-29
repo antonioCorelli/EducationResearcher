@@ -361,6 +361,7 @@ export interface RawEvidence {
   readonly interviewTurns: readonly {
     readonly id: string;
     readonly speaker: "ai" | "participant";
+    readonly sequenceNumber?: number;
     readonly text: string;
     readonly audioStartMs?: number;
     readonly audioEndMs?: number;

@@ -226,7 +226,7 @@ export class FakeScoringAiProvider implements StructuredAiProvider<ScoringGenera
   }) {
     const input = request.input;
     const firstSurveyResponse = input.surveyResponses[0];
-    const firstInterviewTurn = input.interviewTurns?.[0];
+    const firstInterviewTurn = input.interviewTurns?.find((turn) => turn.speaker === "participant") ?? input.interviewTurns?.[0];
     const defaultCitations: readonly ScoringEvidenceCitationOutput[] = firstInterviewTurn
       ? [
           {

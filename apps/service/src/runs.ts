@@ -192,6 +192,7 @@ export interface InterviewTurn {
   readonly participantSlotId: string;
   readonly runId: string;
   readonly interviewSessionId: string;
+  readonly sequenceNumber?: number;
   readonly speaker: InterviewTurnSpeaker;
   readonly text: string;
   readonly audioStartMs?: number;
@@ -437,6 +438,7 @@ interface InterviewTurnItem {
   readonly participantSlotId: string;
   readonly runId: string;
   readonly interviewSessionId: string;
+  readonly sequenceNumber?: number;
   readonly speaker: InterviewTurnSpeaker;
   readonly text: string;
   readonly audioStartMs?: number;
@@ -925,12 +927,17 @@ export class RunService {
     const activeSession = await this.requireActiveInterviewSession(run.id);
     const createdAt = this.now().toISOString();
     const parsedArtifacts = parseInterviewArtifactsInput(input);
-    const turns = parsedArtifacts.turns.map((turn) => ({
+    const existingTurnSequenceNumber = Math.max(
+      0,
+      ...(await this.runStore.listInterviewTurnsByRun(run.id)).map((turn) => turn.sequenceNumber ?? 0)
+    );
+    const turns = parsedArtifacts.turns.map((turn, index) => ({
       id: this.createInterviewTurnId(),
       studyId: run.studyId,
       participantSlotId: run.participantSlotId,
       runId: run.id,
       interviewSessionId: activeSession.id,
+      sequenceNumber: existingTurnSequenceNumber + index + 1,
       speaker: turn.speaker,
       text: turn.text,
       ...("audioStartMs" in turn ? { audioStartMs: turn.audioStartMs } : {}),
@@ -958,7 +965,7 @@ export class RunService {
       ...activeSession,
       ...(audioAsset ? { audioDurationSeconds: audioAsset.durationSeconds } : {}),
       ...(parsedArtifacts.transcriptTokenCount !== undefined
-        ? { transcriptTokenCount: parsedArtifacts.transcriptTokenCount }
+        ? { transcriptTokenCount: (activeSession.transcriptTokenCount ?? 0) + parsedArtifacts.transcriptTokenCount }
         : {}),
       updatedAt: createdAt
     };
@@ -1363,7 +1370,7 @@ export class InMemoryRunStore implements RunStore {
   async listInterviewTurnsByRun(runId: string) {
     return [...this.interviewTurns.values()]
       .filter((turn) => turn.runId === runId)
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      .sort(compareInterviewTurns);
   }
 
   async listInterviewAudioAssetsByRun(runId: string) {
@@ -1787,7 +1794,7 @@ export class DynamoDbRunStore implements RunStore {
     return (response.Items ?? [])
       .filter((item) => item.entity === "interview_turn")
       .map((item) => toInterviewTurn(item as InterviewTurnItem))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      .sort(compareInterviewTurns);
   }
 
   async listInterviewAudioAssetsByRun(runId: string) {
@@ -3003,14 +3010,15 @@ function toInterviewTurnItem(turn: InterviewTurn): InterviewTurnItem {
   return {
     entity: "interview_turn",
     pk: `INTERVIEW_SESSION#${turn.interviewSessionId}`,
-    sk: `TURN#${turn.createdAt}#${turn.id}`,
+    sk: `TURN#${(turn.sequenceNumber ?? 0).toString().padStart(8, "0")}#${turn.createdAt}#${turn.id}`,
     gsi3pk: `RUN#${turn.runId}#ARTIFACT#interview_turn`,
-    gsi3sk: `TURN#${turn.createdAt}#${turn.id}`,
+    gsi3sk: `TURN#${(turn.sequenceNumber ?? 0).toString().padStart(8, "0")}#${turn.createdAt}#${turn.id}`,
     id: turn.id,
     studyId: turn.studyId,
     participantSlotId: turn.participantSlotId,
     runId: turn.runId,
     interviewSessionId: turn.interviewSessionId,
+    sequenceNumber: turn.sequenceNumber,
     speaker: turn.speaker,
     text: turn.text,
     ...(turn.audioStartMs !== undefined ? { audioStartMs: turn.audioStartMs } : {}),
@@ -3028,6 +3036,7 @@ function toInterviewTurn(item: InterviewTurnItem): InterviewTurn {
     participantSlotId: item.participantSlotId,
     runId: item.runId,
     interviewSessionId: item.interviewSessionId,
+    sequenceNumber: item.sequenceNumber ?? 0,
     speaker: item.speaker,
     text: item.text,
     ...(item.audioStartMs !== undefined ? { audioStartMs: item.audioStartMs } : {}),
@@ -3036,6 +3045,19 @@ function toInterviewTurn(item: InterviewTurnItem): InterviewTurn {
     ...(item.endedAt ? { endedAt: item.endedAt } : {}),
     createdAt: item.createdAt
   };
+}
+
+function compareInterviewTurns(left: InterviewTurn, right: InterviewTurn) {
+  const leftSequenceNumber = left.sequenceNumber ?? 0;
+  const rightSequenceNumber = right.sequenceNumber ?? 0;
+
+  if (leftSequenceNumber !== rightSequenceNumber) {
+    return leftSequenceNumber - rightSequenceNumber;
+  }
+
+  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+
+  return createdAtComparison || left.id.localeCompare(right.id);
 }
 
 function toInterviewAudioAssetItem(asset: InterviewAudioAsset): InterviewAudioAssetItem {

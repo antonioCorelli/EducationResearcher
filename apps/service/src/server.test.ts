@@ -5192,7 +5192,7 @@ describe("participant interview routes", () => {
       payload: {
         turns: [
           {
-            id: "client_supplied_id",
+            sequenceNumber: 1,
             speaker: "participant",
             text: "Client metadata should be rejected."
           }

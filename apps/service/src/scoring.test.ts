@@ -5,6 +5,7 @@ import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectiv
 import { InMemoryRunStore, type InterviewAudioAsset, type InterviewTurn, type Run, type SurveyResponse } from "./runs.js";
 import {
   AiProviderScoringGenerator,
+  FakeScoringAiProvider,
   InMemoryScoringStore,
   SCORING_PROMPT_VERSION,
   ScoringService,
@@ -636,6 +637,56 @@ describe("score CSV export", () => {
 });
 
 describe("automatic scoring job", () => {
+  it("prefers participant transcript turns when local fake scoring creates citations", async () => {
+    const provider = new FakeScoringAiProvider();
+    const response = await provider.completeStructured({
+      promptVersion: SCORING_PROMPT_VERSION,
+      input: {
+        run,
+        surveyResponses: [surveyResponse],
+        objectiveVersions: [objective],
+        trigger: "automatic",
+        interviewAudioAssets: [],
+        interviewTurns: [
+          {
+            id: "interview_turn_ai_001",
+            studyId: run.studyId,
+            participantSlotId: run.participantSlotId,
+            runId: run.id,
+            interviewSessionId: "interview_session_001",
+            speaker: "ai",
+            text: "Could you say more?",
+            createdAt: "2026-05-06T12:24:00.000Z"
+          },
+          {
+            id: "interview_turn_participant_001",
+            studyId: run.studyId,
+            participantSlotId: run.participantSlotId,
+            runId: run.id,
+            interviewSessionId: "interview_session_001",
+            speaker: "participant",
+            text: "The worked example helped me explain the pattern.",
+            createdAt: "2026-05-06T12:25:00.000Z"
+          }
+        ]
+      }
+    });
+
+    expect(response.output).toMatchObject({
+      scores: [
+        {
+          citations: [
+            {
+              sourceType: "interview_turn",
+              sourceId: "interview_turn_participant_001",
+              quote: "The worked example helped me explain the pattern."
+            }
+          ]
+        }
+      ]
+    });
+  });
+
   it("scores a completed interview run, persists scores and citations, and marks the run scored", async () => {
     const runStore = new InMemoryRunStore([{ ...run, status: "created" }]);
     await runStore.submitSurvey([surveyResponse], { ...run, status: "survey_completed" }, "created");

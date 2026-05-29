@@ -460,15 +460,23 @@ export function Participant() {
       return;
     }
 
-    await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/artifacts`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        turns
-      })
-    });
+    const batches = createInterviewArtifactBatches(turns);
+
+    for (const batch of batches) {
+      const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/artifacts`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(batch)
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { message?: string };
+        throw new Error(payload.message ?? "Unable to save interview transcript.");
+      }
+    }
+
     pendingInterviewTurnsRef.current = [];
   }
 
@@ -1669,6 +1677,24 @@ interface PendingInterviewTurn {
   readonly audioEndMs?: number;
 }
 
+export function createInterviewArtifactBatches(turns: readonly PendingInterviewTurn[]) {
+  const batchSize = 50;
+  const batches: Array<{
+    readonly turns: readonly PendingInterviewTurn[];
+    readonly transcriptTokenCount: number;
+  }> = [];
+
+  for (let index = 0; index < turns.length; index += batchSize) {
+    const batchTurns = turns.slice(index, index + batchSize);
+    batches.push({
+      turns: batchTurns,
+      transcriptTokenCount: estimateTranscriptTokenCount(batchTurns)
+    });
+  }
+
+  return batches;
+}
+
 function InterviewCardActions({
   canGoBack,
   children,
@@ -2694,6 +2720,9 @@ export function createRealtimeResponseModeSessionUpdate(responseMode: InterviewR
       type: "realtime",
       audio: {
         input: {
+          transcription: {
+            model: "gpt-4o-transcribe"
+          },
           turn_detection:
             responseMode === "natural"
               ? {
@@ -2707,6 +2736,10 @@ export function createRealtimeResponseModeSessionUpdate(responseMode: InterviewR
       }
     }
   };
+}
+
+function estimateTranscriptTokenCount(turns: readonly Pick<PendingInterviewTurn, "text">[]) {
+  return turns.reduce((total, turn) => total + Math.ceil(turn.text.trim().split(/\s+/).filter(Boolean).length * 1.33), 0);
 }
 
 function parseRealtimeServerEvent(value: unknown): Record<string, unknown> | undefined {
