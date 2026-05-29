@@ -76,6 +76,7 @@ type ParticipantAccessState =
 
 type InterviewMode = "ready" | "active" | "paused";
 type InterviewResponseMode = "natural" | "push_to_talk" | "typing";
+type VoiceCaptureStatus = "idle" | "capturing" | "heard" | "captured";
 type InterviewUiState =
   | "onboarding"
   | "mic_check"
@@ -805,8 +806,8 @@ export function ParticipantInterviewScreen({
   const [lastVoiceResponseMode, setLastVoiceResponseMode] = useState<Exclude<InterviewResponseMode, "typing">>(
     initialResponseMode === "push_to_talk" ? "push_to_talk" : "natural"
   );
-  const [micCheckStatus, setMicCheckStatus] = useState<"idle" | "checking" | "heard">("idle");
-  const [micCheckTranscript, setMicCheckTranscript] = useState("");
+  const [voiceCaptureStatus, setVoiceCaptureStatus] = useState<VoiceCaptureStatus>("idle");
+  const [voiceCaptureTranscript, setVoiceCaptureTranscript] = useState("");
   const [answerCount, setAnswerCount] = useState(0);
   const [transcriptDraft, setTranscriptDraft] = useState(latestSpokenTranscript ?? "");
   const [typedDraft, setTypedDraft] = useState("");
@@ -815,15 +816,16 @@ export function ParticipantInterviewScreen({
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
   const interviewHistoryIndexRef = useRef(0);
-  
+  const voiceCaptureTimeoutRef = useRef<number | undefined>(undefined);
+
   const isNaturalRealtimeConversation =
     isActive && uiState !== "paused" && responseMode === "natural" && realtimeConnectionState === "connected";
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
   const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing";
-  const shouldCaptureMicCheckSpeech = mode === "ready" && uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard");
-  const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech || shouldCaptureMicCheckSpeech);
+  const isCapturingVoiceCheck = mode === "ready" && uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus);
+  const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech || isCapturingVoiceCheck);
   const microphoneLevel = useMicrophoneLevel(
-    (uiState === "mic_check" && (micCheckStatus === "checking" || micCheckStatus === "heard")) ||
+    (uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus)) ||
       shouldCaptureSpeech ||
       isNaturalRealtimeConversation
   );
@@ -903,21 +905,34 @@ export function ParticipantInterviewScreen({
   }, [latestSpokenTranscript]);
 
   useEffect(() => {
-    if (shouldCaptureMicCheckSpeech && speechTranscript.trim()) {
-      setMicCheckTranscript(speechTranscript.trim());
+    if (isCapturingVoiceCheck && speechTranscript.trim()) {
+      setVoiceCaptureTranscript(speechTranscript.trim());
       return;
     }
 
     if (shouldCaptureSpeech && speechTranscript.trim()) {
       setTranscriptDraft(speechTranscript.trim());
     }
-  }, [shouldCaptureMicCheckSpeech, shouldCaptureSpeech, speechTranscript]);
+  }, [isCapturingVoiceCheck, shouldCaptureSpeech, speechTranscript]);
 
   useEffect(() => {
-    if (uiState === "mic_check" && micCheckStatus === "checking" && microphoneLevel > 0.05) {
-      setMicCheckStatus("heard");
+    if (uiState === "mic_check" && voiceCaptureStatus === "capturing" && microphoneLevel > 0.05) {
+      setVoiceCaptureStatus("heard");
     }
-  }, [micCheckStatus, microphoneLevel, uiState]);
+  }, [microphoneLevel, uiState, voiceCaptureStatus]);
+
+  useEffect(() => {
+    if (uiState !== "mic_check" && isVoiceCaptureActive(voiceCaptureStatus)) {
+      stopVoiceCapture();
+    }
+  }, [uiState, voiceCaptureStatus]);
+
+  useEffect(
+    () => () => {
+      clearVoiceCaptureTimeout();
+    },
+    []
+  );
 
   useEffect(() => {
     setUiState((currentState) => {
@@ -952,18 +967,18 @@ export function ParticipantInterviewScreen({
           uiState === "student_turn" ||
           uiState === "student_speaking")) ||
       (responseMode === "push_to_talk" && uiState === "student_speaking" && !isPushToTalkAiSpeaking) ||
-      (uiState === "mic_check" && micCheckStatus === "checking");
+      (uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus));
 
     onRecordingChange(shouldRecord);
   }, [
     isActive,
     isNaturalRealtimeConversation,
     isPushToTalkAiSpeaking,
-    micCheckStatus,
     onRecordingChange,
     realtimeConnectionState,
     responseMode,
-    uiState
+    uiState,
+    voiceCaptureStatus
   ]);
 
   useEffect(() => {
@@ -1009,10 +1024,26 @@ export function ParticipantInterviewScreen({
     return () => window.clearTimeout(timeout);
   }, [answerCount, uiState]);
 
-  function startMicCheck() {
-    setMicCheckTranscript("");
-    setMicCheckStatus("checking");
-    window.setTimeout(() => setMicCheckStatus("heard"), 850);
+  function startVoiceCapture() {
+    clearVoiceCaptureTimeout();
+    setVoiceCaptureTranscript("");
+    setVoiceCaptureStatus("capturing");
+    voiceCaptureTimeoutRef.current = window.setTimeout(() => {
+      setVoiceCaptureStatus((currentStatus) => (currentStatus === "capturing" ? "heard" : currentStatus));
+      voiceCaptureTimeoutRef.current = undefined;
+    }, 850);
+  }
+
+  function stopVoiceCapture() {
+    clearVoiceCaptureTimeout();
+    setVoiceCaptureStatus((currentStatus) => (isVoiceCaptureActive(currentStatus) ? "captured" : currentStatus));
+  }
+
+  function clearVoiceCaptureTimeout() {
+    if (voiceCaptureTimeoutRef.current !== undefined) {
+      window.clearTimeout(voiceCaptureTimeoutRef.current);
+      voiceCaptureTimeoutRef.current = undefined;
+    }
   }
 
   function navigateToInterviewCard({
@@ -1049,6 +1080,7 @@ export function ParticipantInterviewScreen({
 
   function returnToPreviousInterviewCard() {
     if (canReturnToPreviousCard) {
+      stopVoiceCapture();
       window.history.back();
     }
   }
@@ -1229,20 +1261,34 @@ export function ParticipantInterviewScreen({
     }
 
     if (mode === "ready" && uiState === "mic_check") {
+      const voiceCaptureActive = isVoiceCaptureActive(voiceCaptureStatus);
+
       return (
-        <InterviewStageCard eyebrow="Voice Test" title="Testing your voice input">
+        <InterviewStageCard eyebrow="Voice capture" title="Check your voice input">
           <p>Please Say: "I'm ready to begin."</p>
-          <button className="mic-check-button" disabled={micCheckStatus === "checking" || micCheckStatus === "heard"} onClick={startMicCheck} type="button">
-            Start mic check
+          <button
+            className="mic-check-button"
+            onClick={voiceCaptureActive ? stopVoiceCapture : startVoiceCapture}
+            type="button"
+          >
+            {voiceCaptureActive ? "Stop voice capture" : "Start voice capture"}
           </button>
-          <div className="mic-check-meter" aria-label="Microphone test level">
-            <VoiceWave isActive={micCheckStatus === "checking" || micCheckStatus === "heard"} label="Microphone check" level={microphoneLevel} />
+          <div className="mic-check-meter" aria-label="Voice capture level">
+            <VoiceWave isActive={voiceCaptureActive} label="Voice capture" level={microphoneLevel} />
           </div>
           <p className="mic-check-transcript" aria-live="polite">
-            {micCheckTranscript || (micCheckStatus === "checking" ? "Listening for your test sentence." : "\u00a0")}
+            {voiceCaptureTranscript || (voiceCaptureActive ? "Capturing your test sentence." : "\u00a0")}
           </p>
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
-            <button className="primary-button" disabled={micCheckStatus !== "heard"} onClick={() => navigateToInterviewCard({ nextUiState: "mode_selection" })} type="button">
+            <button
+              className="primary-button"
+              disabled={!hasCompletedVoiceCapture(voiceCaptureStatus)}
+              onClick={() => {
+                stopVoiceCapture();
+                navigateToInterviewCard({ nextUiState: "mode_selection" });
+              }}
+              type="button"
+            >
               Continue
             </button>
           </InterviewCardActions>
@@ -1258,7 +1304,7 @@ export function ParticipantInterviewScreen({
             responseMode={responseMode}
             onChange={handleSelectResponseMode}
           />
-          <p className="privacy-note">Your microphone is only on during your answer.</p>
+          <p className="privacy-note">Your voice is only captured during your answer.</p>
           <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={handleStartInterview} type="button">
               {isActionPending ? "Starting" : "Start interview"}
@@ -1380,7 +1426,7 @@ export function ParticipantInterviewScreen({
     if (uiState === "student_turn" && responseMode === "typing") {
       return (
         <InterviewStageCard eyebrow="Your turn" title="Type your answer">
-          <p className="privacy-note">Your microphone is off while you type.</p>
+          <p className="privacy-note">Voice capture is off while you type.</p>
           <textarea
             aria-label="Typed answer"
             autoFocus
@@ -1572,6 +1618,14 @@ export function ParticipantInterviewScreen({
 
 const maximumRecoverableRetryCount = 2;
 
+function isVoiceCaptureActive(status: VoiceCaptureStatus) {
+  return status === "capturing" || status === "heard";
+}
+
+function hasCompletedVoiceCapture(status: VoiceCaptureStatus) {
+  return status === "heard" || status === "captured";
+}
+
 const interviewResponseModes: readonly {
   readonly value: InterviewResponseMode;
   readonly label: string;
@@ -1580,7 +1634,7 @@ const interviewResponseModes: readonly {
   {
     value: "natural",
     label: "Talk naturally",
-    description: "The microphone listens during your answer and waits briefly when you pause."
+    description: "Voice capture stays on during your answer and waits briefly when you pause."
   },
   {
     value: "push_to_talk",

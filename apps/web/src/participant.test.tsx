@@ -105,7 +105,7 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("Connected");
   });
 
-  it("clearly distinguishes AI speaking from microphone listening state", () => {
+  it("clearly distinguishes AI speaking from voice capture state", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="What felt uncertain or worth thinking about more?"
@@ -312,7 +312,7 @@ describe("ParticipantInterviewScreen", () => {
     ).toBeUndefined();
   });
 
-  it("hides the current question section through microphone check and response mode setup", () => {
+  it("hides the current question section through voice capture setup and response mode setup", () => {
     const baseProps = {
       aiQuestion: "Could you share a concrete example?",
       error: "",
@@ -335,7 +335,7 @@ describe("ParticipantInterviewScreen", () => {
     const micCheckMarkup = renderToStaticMarkup(<ParticipantInterviewScreen {...baseProps} initialUiState="mic_check" />);
     const modeSelectionMarkup = renderToStaticMarkup(<ParticipantInterviewScreen {...baseProps} initialUiState="mode_selection" />);
 
-    expect(micCheckMarkup).toContain("Microphone check");
+    expect(micCheckMarkup).toContain("Voice capture");
     expect(micCheckMarkup).toContain("interview-layout-centered");
     expect(micCheckMarkup).not.toContain("Current question");
     expect(modeSelectionMarkup).toContain("Response mode");
@@ -343,7 +343,7 @@ describe("ParticipantInterviewScreen", () => {
     expect(modeSelectionMarkup).not.toContain("Current question");
   });
 
-  it("requires the microphone check before continuing and does not offer retry copy", () => {
+  it("requires voice capture before continuing and does not offer retry copy", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="Could you share a concrete example?"
@@ -366,10 +366,11 @@ describe("ParticipantInterviewScreen", () => {
       />
     );
 
-    expect(markup).toContain("Start mic check");
+    expect(markup).toContain("Start voice capture");
     expect(markup).toContain("Continue");
     expect(markup).toContain("disabled");
     expect(markup).toContain("mic-check-transcript");
+    expect(markup).not.toContain("Start mic check");
     expect(markup).not.toContain("Try again");
   });
 
