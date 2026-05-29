@@ -438,7 +438,8 @@ describe("participant routes", () => {
         participantSlotId: "slot_fixture_001",
         status: "created",
         freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
-        maxInterviewMinutes: 45
+        maxInterviewMinutes: 45,
+        remainingInterviewSeconds: 2700
       },
       consentVersion: {
         id: "consent_version_active",
@@ -1235,7 +1236,8 @@ describe("participant routes", () => {
           participantSlotId: "slot_fixture_001",
           status,
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
-          maxInterviewMinutes: 45
+          maxInterviewMinutes: 45,
+          remainingInterviewSeconds: 2700
         }
       });
     }

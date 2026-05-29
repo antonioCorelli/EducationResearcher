@@ -9,6 +9,7 @@ import {
   parseRealtimeAiTranscriptUpdate,
   shouldNoticeStudentPause,
   shouldPausePushToTalkForAiSpeech,
+  shouldSpeakInterviewQuestionWithBrowserVoice,
   shouldShowRepeatQuestionControl
 } from "./participant";
 
@@ -172,6 +173,35 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("Start talking");
     expect(markup).not.toContain("Done");
     expect(markup).not.toContain("End interview");
+  });
+
+  it("shows remaining interview time in the active voice UI", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="What part of your survey answer would you like to explain more?"
+        error=""
+        isActionPending={false}
+        isRecording
+        maxInterviewMinutes={2}
+        mode="active"
+        realtimeConnectionState="connected"
+        remainingInterviewSeconds={83}
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Time remaining");
+    expect(markup).toContain("01:23");
+    expect(markup).toContain("2 min max");
+    expect(markup).toContain("role=\"timer\"");
   });
 
   it("keeps paused natural conversations out of the manual AI-speaking repeat flow", () => {
@@ -495,6 +525,24 @@ describe("ParticipantInterviewScreen", () => {
         }
       }
     });
+  });
+
+  it("does not use browser narration for push-to-talk questions", () => {
+    expect(
+      shouldSpeakInterviewQuestionWithBrowserVoice({
+        isActive: true,
+        responseMode: "push_to_talk",
+        uiState: "ai_speaking"
+      })
+    ).toBe(false);
+
+    expect(
+      shouldSpeakInterviewQuestionWithBrowserVoice({
+        isActive: true,
+        responseMode: "typing",
+        uiState: "ai_speaking"
+      })
+    ).toBe(true);
   });
 
   it("pauses push-to-talk voice input when the AI starts speaking", () => {

@@ -108,6 +108,7 @@ export interface ParticipantRunAccess {
     readonly status: RunStatus;
     readonly freshnessDeadlineAt: string;
     readonly maxInterviewMinutes: number;
+    readonly remainingInterviewSeconds: number;
   };
   readonly consentVersion?: ConsentVersion;
   readonly surveyVersion?: SurveyVersion;
@@ -642,14 +643,7 @@ export class RunService {
       : undefined;
 
     return {
-      run: {
-        id: run.id,
-        studyId: run.studyId,
-        participantSlotId: run.participantSlotId,
-        status: run.status,
-        freshnessDeadlineAt: run.freshnessDeadlineAt,
-        maxInterviewMinutes: run.maxInterviewMinutes
-      },
+      run: await this.toParticipantRunSummary(run),
       ...(consentVersion ? { consentVersion } : {}),
       ...(surveyVersion ? { surveyVersion } : {})
     };
@@ -715,7 +709,7 @@ export class RunService {
     const gapMap = await this.generateAndPersistGapMap(result.run, surveyVersion, result.surveyResponses);
 
     return {
-      ...result,
+      ...(await this.withRemainingInterviewTime(result)),
       gapMap
     };
   }
@@ -727,16 +721,18 @@ export class RunService {
       const activeSession = await this.getActiveInterviewSession(run.id);
 
       if (activeSession) {
-        return {
+        return this.withRemainingInterviewTime({
           interviewSession: activeSession,
           run
-        };
+        });
       }
     }
 
     if (run.status !== "survey_completed") {
       throw new ParticipantAccessError("Interview cannot be started for this run.");
     }
+
+    await this.requireInterviewTimeRemaining(run);
 
     return this.createInterviewSessionForRun(run);
   }
@@ -748,10 +744,10 @@ export class RunService {
       const pausedSession = await this.getLatestInterviewSession(run.id, "paused");
 
       if (pausedSession) {
-        return {
+        return this.withRemainingInterviewTime({
           interviewSession: pausedSession,
           run
-        };
+        });
       }
     }
 
@@ -769,7 +765,9 @@ export class RunService {
     };
     const pausedRun = applyRunStatusTransition(run, "interview_paused", this.now());
 
-    return this.runStore.updateInterviewSession(pausedSession, pausedRun, run.status, activeSession.status);
+    return this.withRemainingInterviewTime(
+      await this.runStore.updateInterviewSession(pausedSession, pausedRun, run.status, activeSession.status)
+    );
   }
 
   async resumeParticipantInterview(rawToken: string) {
@@ -779,16 +777,18 @@ export class RunService {
       const activeSession = await this.getActiveInterviewSession(run.id);
 
       if (activeSession) {
-        return {
+        return this.withRemainingInterviewTime({
           interviewSession: activeSession,
           run
-        };
+        });
       }
     }
 
     if (run.status !== "interview_paused") {
       throw new ParticipantAccessError("Interview cannot be resumed for this run.");
     }
+
+    await this.requireInterviewTimeRemaining(run);
 
     return this.createInterviewSessionForRun(run);
   }
@@ -800,10 +800,10 @@ export class RunService {
       const completedSession = await this.getLatestInterviewSession(run.id, "completed");
 
       if (completedSession) {
-        return {
+        return this.withRemainingInterviewTime({
           interviewSession: completedSession,
           run
-        };
+        });
       }
     }
 
@@ -829,7 +829,7 @@ export class RunService {
       context: {}
     });
 
-    return result;
+    return this.withRemainingInterviewTime(result);
   }
 
   async interruptParticipantInterview(rawToken: string, input: InterruptInterviewInput = {}) {
@@ -839,10 +839,10 @@ export class RunService {
       const interruptedSession = await this.getLatestInterviewSession(run.id, "interrupted");
 
       if (interruptedSession) {
-        return {
+        return this.withRemainingInterviewTime({
           interviewSession: interruptedSession,
           run
-        };
+        });
       }
     }
 
@@ -872,7 +872,7 @@ export class RunService {
       }
     });
 
-    return result;
+    return this.withRemainingInterviewTime(result);
   }
 
   async createParticipantRealtimeVoiceSession(rawToken: string, voiceProvider: RealtimeVoiceProvider) {
@@ -883,6 +883,7 @@ export class RunService {
     }
 
     const interviewSession = await this.requireActiveInterviewSession(run.id);
+    const remainingSeconds = await this.requireInterviewTimeRemaining(run);
     const surveyVersion = await this.getRunSurveyVersion(run);
     const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
     const objectiveVersions = await this.getRunObjectiveVersions(run);
@@ -897,11 +898,7 @@ export class RunService {
       objectiveVersions,
       ...(latestGeneratedGapMap ? { gapMap: latestGeneratedGapMap } : {}),
       personaStylePrompt: V1_DEFAULT_PERSONA_STYLE_PROMPT,
-      remainingSeconds: calculateRemainingInterviewSeconds(
-        run,
-        await this.runStore.listInterviewSessionsByRun(run.id),
-        this.now()
-      ),
+      remainingSeconds,
       nowIso: this.now().toISOString()
     };
     const instructions = buildRealtimeInterviewInstructions(promptInput);
@@ -913,7 +910,7 @@ export class RunService {
 
     return {
       realtimeSession,
-      run: toParticipantRunSummary(run),
+      run: await this.toParticipantRunSummary(run),
       interviewSession
     };
   }
@@ -1068,7 +1065,43 @@ export class RunService {
     };
     const activeRun = applyRunStatusTransition(run, "interview_in_progress", this.now());
 
-    return this.runStore.createInterviewSession(session, activeRun, run.status);
+    return this.withRemainingInterviewTime(await this.runStore.createInterviewSession(session, activeRun, run.status));
+  }
+
+  private async requireInterviewTimeRemaining(run: Run) {
+    const remainingSeconds = await this.calculateRemainingInterviewSeconds(run);
+
+    if (remainingSeconds <= 0) {
+      throw new ParticipantAccessError("Interview time has ended for this run.");
+    }
+
+    return remainingSeconds;
+  }
+
+  private async calculateRemainingInterviewSeconds(run: Run) {
+    return calculateRemainingInterviewSeconds(run, await this.runStore.listInterviewSessionsByRun(run.id), this.now());
+  }
+
+  private async toParticipantRunSummary(run: Run): Promise<ParticipantRunAccess["run"]> {
+    return {
+      id: run.id,
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      status: run.status,
+      freshnessDeadlineAt: run.freshnessDeadlineAt,
+      maxInterviewMinutes: run.maxInterviewMinutes,
+      remainingInterviewSeconds: await this.calculateRemainingInterviewSeconds(run)
+    };
+  }
+
+  private async withRemainingInterviewTime<T extends { readonly run: Run }>(result: T) {
+    return {
+      ...result,
+      run: {
+        ...result.run,
+        remainingInterviewSeconds: await this.calculateRemainingInterviewSeconds(result.run)
+      }
+    };
   }
 
   private async toResearcherRun(run: Run, rawToken?: string): Promise<ResearcherRun> {
@@ -2473,17 +2506,6 @@ function parseSurveyResponseText(value: unknown, question: SurveyQuestion) {
   }
 
   return responseText;
-}
-
-function toParticipantRunSummary(run: Run): ParticipantRunAccess["run"] {
-  return {
-    id: run.id,
-    studyId: run.studyId,
-    participantSlotId: run.participantSlotId,
-    status: run.status,
-    freshnessDeadlineAt: run.freshnessDeadlineAt,
-    maxInterviewMinutes: run.maxInterviewMinutes
-  };
 }
 
 function calculateRemainingInterviewSeconds(run: Run, sessions: readonly InterviewSession[], now: Date) {

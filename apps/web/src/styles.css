@@ -160,10 +160,47 @@ textarea {
   font-size: 1.45rem;
 }
 
-.participant-interview-topline span {
+.participant-interview-topline > span {
   color: #566173;
   font-size: 0.88rem;
   font-weight: 800;
+}
+
+.interview-time-indicator {
+  display: grid;
+  min-width: 148px;
+  gap: 3px;
+  justify-items: end;
+  color: #566173;
+  font-weight: 800;
+}
+
+.interview-time-indicator strong {
+  color: #172033;
+  font-size: 1.12rem;
+}
+
+.interview-time-indicator small {
+  font-size: 0.76rem;
+}
+
+.interview-time-track {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d7e0da;
+}
+
+.interview-time-track span {
+  display: block;
+  width: var(--interview-time-progress);
+  height: 100%;
+  background: #1f5b49;
+}
+
+.paused-interview-time-indicator .interview-time-track span {
+  background: #8a6a12;
 }
 
 .participant-reassurance {

@@ -19,6 +19,7 @@ import {
   type Run,
   type RunStatus,
   type SurveyResponse,
+  type InterviewSession,
   type AutomaticRunScoringTriggerInput,
   type StaleRunScoringTriggerInput
 } from "./runs.js";
@@ -685,6 +686,88 @@ describe("interview session lifecycle", () => {
       expect.objectContaining({ id: "interview_session_fixture_002", sessionNumber: 2, status: "completed" }),
       expect.objectContaining({ id: "interview_session_fixture_001", sessionNumber: 1, status: "paused" })
     ]);
+  });
+
+  it("reports remaining interview time using active sessions only", async () => {
+    const activeRun = createFixtureRun({
+      status: "interview_in_progress",
+      maxInterviewMinutes: 2
+    });
+    const activeSession: InterviewSession = {
+      id: "interview_session_active_time_001",
+      studyId: activeRun.studyId,
+      participantSlotId: activeRun.participantSlotId,
+      runId: activeRun.id,
+      sessionNumber: 1,
+      status: "active",
+      startedAt: "2026-05-06T12:20:00.000Z",
+      createdAt: "2026-05-06T12:20:00.000Z",
+      updatedAt: "2026-05-06T12:20:00.000Z"
+    };
+    const runStore = new InMemoryRunStore([activeRun]);
+    await runStore.createInterviewSession(activeSession, activeRun, "interview_in_progress");
+    const active = createParticipantRunService({
+      runStore,
+      now: () => new Date("2026-05-06T12:21:00.000Z")
+    });
+
+    await expect(active.service.validateParticipantAccess(active.rawToken)).resolves.toMatchObject({
+      run: {
+        maxInterviewMinutes: 2,
+        remainingInterviewSeconds: 60
+      }
+    });
+
+    const paused = await active.service.pauseParticipantInterview(active.rawToken);
+    expect(paused.run.remainingInterviewSeconds).toBe(60);
+
+    const later = createParticipantRunService({
+      runStore,
+      now: () => new Date("2026-05-06T12:25:00.000Z")
+    });
+    await expect(later.service.validateParticipantAccess(later.rawToken)).resolves.toMatchObject({
+      run: {
+        status: "interview_paused",
+        remainingInterviewSeconds: 60
+      }
+    });
+  });
+
+  it("does not mint a realtime session after the interview time cap is reached", async () => {
+    const activeRun = createFixtureRun({
+      status: "interview_in_progress",
+      maxInterviewMinutes: 2
+    });
+    const runStore = new InMemoryRunStore([activeRun]);
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_expired_001",
+        studyId: activeRun.studyId,
+        participantSlotId: activeRun.participantSlotId,
+        runId: activeRun.id,
+        sessionNumber: 1,
+        status: "active",
+        startedAt: "2026-05-06T12:18:00.000Z",
+        createdAt: "2026-05-06T12:18:00.000Z",
+        updatedAt: "2026-05-06T12:18:00.000Z"
+      },
+      activeRun,
+      "interview_in_progress"
+    );
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      now: () => new Date("2026-05-06T12:20:00.000Z")
+    });
+
+    await expect(
+      service.createParticipantRealtimeVoiceSession(rawToken, {
+        async createSession() {
+          throw new Error("Realtime provider should not be called.");
+        }
+      })
+    ).rejects.toMatchObject({
+      safeMessage: "Interview time has ended for this run."
+    });
   });
 
   it("triggers automatic scoring after interview completion", async () => {

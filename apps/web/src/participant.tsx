@@ -59,16 +59,19 @@ type RunStatus =
   | "technical_interruption"
   | "scored";
 
+interface ParticipantRunSummary {
+  readonly id: string;
+  readonly status: RunStatus;
+  readonly freshnessDeadlineAt: string;
+  readonly maxInterviewMinutes: number;
+  readonly remainingInterviewSeconds: number;
+}
+
 type ParticipantAccessState =
   | { readonly status: "checking" }
   | {
       readonly status: "ready";
-      readonly run: {
-        readonly id: string;
-        readonly status: RunStatus;
-        readonly freshnessDeadlineAt: string;
-        readonly maxInterviewMinutes: number;
-      };
+      readonly run: ParticipantRunSummary;
       readonly consentVersion?: ConsentVersion;
       readonly surveyVersion?: SurveyVersion;
     }
@@ -229,7 +232,7 @@ export function Participant() {
         method: "POST"
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+        run?: ParticipantRunSummary;
         message?: string;
       };
 
@@ -417,7 +420,7 @@ export function Participant() {
       })
     });
     const payload = (await response.json()) as {
-      run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+      run?: ParticipantRunSummary;
       message?: string;
     };
 
@@ -524,7 +527,7 @@ export function Participant() {
         )
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+        run?: ParticipantRunSummary;
         message?: string;
       };
 
@@ -590,7 +593,7 @@ export function Participant() {
         })
       });
       const payload = (await response.json()) as {
-        run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+        run?: ParticipantRunSummary;
         message?: string;
       };
 
@@ -714,6 +717,7 @@ export function Participant() {
           mode={interviewMode}
           realtimeConnectionState={realtimeConnectionState}
           realtimeVoiceActivity={realtimeVoiceActivity}
+          remainingInterviewSeconds={accessState.run.remainingInterviewSeconds}
           onComplete={() => void submitInterviewAction("complete")}
           onConfirmAnswer={confirmInterviewAnswer}
           onFinishPushToTalkAnswer={finishPushToTalkAnswer}
@@ -774,6 +778,7 @@ export function ParticipantInterviewScreen({
   onRetry,
   onStart,
   onStopAfterFailure,
+  remainingInterviewSeconds: initialRemainingInterviewSeconds,
   retryCount
 }: {
   readonly aiQuestion: string;
@@ -797,6 +802,7 @@ export function ParticipantInterviewScreen({
   readonly onRetry: () => void;
   readonly onStart: () => void;
   readonly onStopAfterFailure: () => void;
+  readonly remainingInterviewSeconds?: number;
   readonly retryCount: number;
 }) {
   const isActive = mode === "active";
@@ -817,9 +823,16 @@ export function ParticipantInterviewScreen({
   const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
   const interviewHistoryIndexRef = useRef(0);
   const voiceCaptureTimeoutRef = useRef<number | undefined>(undefined);
+  const hasRequestedTimeLimitCompletionRef = useRef(false);
 
   const isNaturalRealtimeConversation =
     isActive && uiState !== "paused" && responseMode === "natural" && realtimeConnectionState === "connected";
+  const interviewTimerIsRunning = isActive && uiState !== "paused" && uiState !== "completed";
+  const totalInterviewSeconds = maxInterviewMinutes * 60;
+  const remainingInterviewSeconds = useRemainingSeconds(
+    initialRemainingInterviewSeconds ?? totalInterviewSeconds,
+    interviewTimerIsRunning
+  );
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
   const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing";
   const isCapturingVoiceCheck = mode === "ready" && uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus);
@@ -835,7 +848,9 @@ export function ParticipantInterviewScreen({
   const shouldShowInterviewControls =
     mode === "active" && uiState !== "completed" && uiState !== "paused" && !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
-    uiState !== "paused" && (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
+    uiState !== "paused" &&
+    uiState !== "completed" &&
+    (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
   const shouldShowRepeatQuestion = shouldShowRepeatQuestionControl({ isNaturalRealtimeConversation, uiState });
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
@@ -856,6 +871,16 @@ export function ParticipantInterviewScreen({
   useEffect(() => {
     setDisplayQuestion(getDisplayQuestionText(aiQuestion));
   }, [aiQuestion]);
+
+  useEffect(() => {
+    if (!isActive || remainingInterviewSeconds > 0 || hasRequestedTimeLimitCompletionRef.current) {
+      return;
+    }
+
+    hasRequestedTimeLimitCompletionRef.current = true;
+    setUiState("completed");
+    onComplete();
+  }, [isActive, onComplete, remainingInterviewSeconds]);
 
   useEffect(() => {
     const currentEntry = getInterviewHistoryEntry(window.history.state);
@@ -990,7 +1015,7 @@ export function ParticipantInterviewScreen({
   }, [isPushToTalkAiSpeaking]);
 
   useEffect(() => {
-    if (!isActive || uiState !== "ai_speaking" || responseMode === "natural") {
+    if (!shouldSpeakInterviewQuestionWithBrowserVoice({ isActive, responseMode, uiState })) {
       return;
     }
 
@@ -1336,6 +1361,14 @@ export function ParticipantInterviewScreen({
       );
     }
 
+    if (uiState === "completed") {
+      return (
+        <InterviewStageCard eyebrow="Time reached" title="Interview complete">
+          <p>Thanks. The interview time has ended, and your responses are being saved.</p>
+        </InterviewStageCard>
+      );
+    }
+
     if (uiState === "ai_thinking") {
       return (
         <InterviewStageCard eyebrow="Saving your answer" title="Preparing a follow-up">
@@ -1553,7 +1586,11 @@ export function ParticipantInterviewScreen({
           <div>
             <p className="eyebrow">AI Guided Interview</p>
           </div>
-          <span>{maxInterviewMinutes} min max</span>
+          <InterviewTimeIndicator
+            isPaused={mode === "paused" || uiState === "paused"}
+            maxInterviewMinutes={maxInterviewMinutes}
+            remainingSeconds={remainingInterviewSeconds}
+          />
         </div>
 
         <div className="participant-reassurance" role="note">
@@ -1644,7 +1681,7 @@ const interviewResponseModes: readonly {
   {
     value: "typing",
     label: "Type my answers",
-    description: "Use the interview without speaking aloud."
+    description: "Do the interview without speaking aloud."
   }
 ];
 
@@ -1723,6 +1760,35 @@ function InterviewStageCard({
       <p className="eyebrow">{eyebrow}</p>
       <h2>{title}</h2>
       {children}
+    </div>
+  );
+}
+
+function InterviewTimeIndicator({
+  isPaused,
+  maxInterviewMinutes,
+  remainingSeconds
+}: {
+  readonly isPaused: boolean;
+  readonly maxInterviewMinutes: number;
+  readonly remainingSeconds: number;
+}) {
+  const totalSeconds = Math.max(1, maxInterviewMinutes * 60);
+  const elapsedSeconds = Math.max(0, totalSeconds - remainingSeconds);
+  const progressPercent = Math.min(100, Math.round((elapsedSeconds / totalSeconds) * 100));
+
+  return (
+    <div
+      aria-label="Interview time remaining"
+      className={isPaused ? "interview-time-indicator paused-interview-time-indicator" : "interview-time-indicator"}
+      role="timer"
+    >
+      <span>{isPaused ? "Paused" : "Time remaining"}</span>
+      <strong>{formatElapsedSeconds(remainingSeconds)}</strong>
+      <small>{maxInterviewMinutes} min max</small>
+      <div className="interview-time-track" aria-hidden="true">
+        <span style={{ "--interview-time-progress": `${progressPercent}%` } as CSSProperties} />
+      </div>
     </div>
   );
 }
@@ -1864,6 +1930,47 @@ function useElapsedSeconds(isActive: boolean) {
   }, [isActive]);
 
   return elapsedSeconds;
+}
+
+function useRemainingSeconds(initialRemainingSeconds: number, isActive: boolean) {
+  const [remainingSeconds, setRemainingSeconds] = useState(() => Math.max(0, Math.floor(initialRemainingSeconds)));
+  const remainingSecondsRef = useRef(remainingSeconds);
+
+  useEffect(() => {
+    const nextRemainingSeconds = Math.max(0, Math.floor(initialRemainingSeconds));
+    remainingSecondsRef.current = nextRemainingSeconds;
+    setRemainingSeconds(nextRemainingSeconds);
+  }, [initialRemainingSeconds]);
+
+  useEffect(() => {
+    remainingSecondsRef.current = remainingSeconds;
+  }, [remainingSeconds]);
+
+  useEffect(() => {
+    if (!isActive) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    const remainingAtStart = remainingSecondsRef.current;
+
+    const interval = window.setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      const nextRemainingSeconds = Math.max(0, remainingAtStart - elapsedSeconds);
+      remainingSecondsRef.current = nextRemainingSeconds;
+      setRemainingSeconds(nextRemainingSeconds);
+    }, 250);
+
+    return () => {
+      window.clearInterval(interval);
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      const nextRemainingSeconds = Math.max(0, remainingAtStart - elapsedSeconds);
+      remainingSecondsRef.current = nextRemainingSeconds;
+      setRemainingSeconds(nextRemainingSeconds);
+    };
+  }, [isActive]);
+
+  return remainingSeconds;
 }
 
 function useMicrophoneLevel(isActive: boolean) {
@@ -2029,6 +2136,18 @@ function speakInterviewQuestion(question: string) {
   utterance.pitch = 1;
   utterance.volume = 0.92;
   window.speechSynthesis.speak(utterance);
+}
+
+export function shouldSpeakInterviewQuestionWithBrowserVoice({
+  isActive,
+  responseMode,
+  uiState
+}: {
+  readonly isActive: boolean;
+  readonly responseMode: InterviewResponseMode;
+  readonly uiState: InterviewUiState;
+}) {
+  return isActive && uiState === "ai_speaking" && responseMode === "typing";
 }
 
 function cancelInterviewSpeech() {
@@ -2352,7 +2471,7 @@ function SurveyQuestionField({
 async function fetchParticipantAccess(accessToken: string) {
   const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}`);
   const payload = (await response.json()) as {
-    run?: { id: string; status: RunStatus; freshnessDeadlineAt: string; maxInterviewMinutes: number };
+    run?: ParticipantRunSummary;
     consentVersion?: ConsentVersion;
     surveyVersion?: SurveyVersion;
     message?: string;
