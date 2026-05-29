@@ -53,7 +53,7 @@ export const RUN_STATUS_TRANSITIONS = {
   survey_in_progress: ["survey_completed", "stale"],
   survey_completed: ["interview_in_progress", "stale", "partial"],
   interview_in_progress: ["interview_completed", "interview_paused", "stale", "technical_interruption"],
-  interview_paused: ["interview_in_progress", "stale", "partial"],
+  interview_paused: ["interview_in_progress", "interview_completed", "stale", "partial"],
   interview_completed: ["scored"],
   stale: ["scored"],
   partial: ["scored"],
@@ -825,21 +825,34 @@ export class RunService {
       }
     }
 
-    if (run.status !== "interview_in_progress") {
+    if (run.status !== "interview_in_progress" && run.status !== "interview_paused") {
       throw new ParticipantAccessError("Interview cannot be completed for this run.");
     }
 
-    const activeSession = await this.requireActiveInterviewSession(run.id);
+    const sessionToComplete =
+      run.status === "interview_in_progress"
+        ? await this.requireActiveInterviewSession(run.id)
+        : await this.getLatestInterviewSession(run.id, "paused");
+
+    if (!sessionToComplete) {
+      throw new ParticipantAccessError("Interview cannot be completed for this run.");
+    }
+
     const completedAt = this.now().toISOString();
     const completedSession: InterviewSession = {
-      ...activeSession,
+      ...sessionToComplete,
       status: "completed",
-      endedAt: completedAt,
+      endedAt: sessionToComplete.endedAt ?? completedAt,
       updatedAt: completedAt
     };
     const completedRun = applyRunStatusTransition(run, "interview_completed", this.now());
 
-    const result = await this.runStore.updateInterviewSession(completedSession, completedRun, run.status, activeSession.status);
+    const result = await this.runStore.updateInterviewSession(
+      completedSession,
+      completedRun,
+      run.status,
+      sessionToComplete.status
+    );
 
     await this.triggerAutomaticScoring({
       run: result.run,

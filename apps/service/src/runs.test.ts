@@ -185,6 +185,7 @@ describe("run state machine", () => {
         ["interview_completed", "scored"],
         ["interview_in_progress", "interview_paused"],
         ["interview_paused", "interview_in_progress"],
+        ["interview_paused", "interview_completed"],
         ["survey_in_progress", "stale"],
         ["survey_completed", "stale"],
         ["interview_in_progress", "stale"],
@@ -231,6 +232,13 @@ describe("run state machine", () => {
         new Date("2026-05-06T12:15:00.000Z")
       ).status
     ).toBe("interview_in_progress");
+    expect(
+      applyRunStatusTransition(
+        createFixtureRun({ status: "interview_paused" }),
+        "interview_completed",
+        new Date("2026-05-06T12:15:00.000Z")
+      ).status
+    ).toBe("interview_completed");
 
     const staleSourceStatuses = [
       "survey_in_progress",
@@ -685,6 +693,45 @@ describe("interview session lifecycle", () => {
     expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
       expect.objectContaining({ id: "interview_session_fixture_002", sessionNumber: 2, status: "completed" }),
       expect.objectContaining({ id: "interview_session_fixture_001", sessionNumber: 1, status: "paused" })
+    ]);
+  });
+
+  it("completes a paused interview without requiring participants to resume", async () => {
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    const { rawToken, service } = createParticipantRunService({
+      runStore,
+      createInterviewSessionId: () => "interview_session_paused_complete_001"
+    });
+
+    await service.startParticipantInterview(rawToken);
+    const paused = await service.pauseParticipantInterview(rawToken);
+    const completed = await service.completeParticipantInterview(rawToken);
+
+    expect(paused).toMatchObject({
+      interviewSession: {
+        id: "interview_session_paused_complete_001",
+        status: "paused",
+        endedAt: "2026-05-06T12:20:00.000Z"
+      },
+      run: {
+        status: "interview_paused"
+      }
+    });
+    expect(completed).toMatchObject({
+      interviewSession: {
+        id: "interview_session_paused_complete_001",
+        status: "completed",
+        endedAt: "2026-05-06T12:20:00.000Z"
+      },
+      run: {
+        status: "interview_completed"
+      }
+    });
+    expect(await runStore.listInterviewSessionsByRun("run_fixture_001")).toEqual([
+      expect.objectContaining({
+        id: "interview_session_paused_complete_001",
+        status: "completed"
+      })
     ]);
   });
 
