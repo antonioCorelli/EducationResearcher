@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ParticipantSlot, ResearcherDashboardRun, ResearcherRunDashboardSlot, RunScoreReview, StudyShell } from "../App";
 import { ScoreReviewList } from "./runAnalysis";
+import { normalizeAudioPlaybackUrl } from "./rawEvidence";
 import { ResearcherRunOperations, sortParticipantOperationSlots } from "./runOperations";
 
 const noop = () => undefined;
@@ -424,6 +425,15 @@ describe("ScoreReviewList", () => {
     expect(markup).toContain("The second example made the pattern much clearer.");
     expect(markup).toContain("Open signed audio link");
     expect(markup).toContain("focused-raw-evidence");
+  });
+
+  it("uses the configured service base URL for local audio playback links", () => {
+    expect(
+      normalizeAudioPlaybackUrl(
+        "http://localhost:4000/audio/interview?assetId=asset_001&signature=sig",
+        "http://127.0.0.1:4000"
+      )
+    ).toBe("http://127.0.0.1:4000/audio/interview?assetId=asset_001&signature=sig");
   });
 
   it("distinguishes the latest score from older manual rescoring history", () => {

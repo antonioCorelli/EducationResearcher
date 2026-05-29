@@ -5,7 +5,9 @@ import {
   ParticipantSurveyScreen,
   ParticipantInterviewScreen,
   createInterviewArtifactBatches,
+  createInterviewAudioUploadHeaders,
   createRealtimeResponseModeSessionUpdate,
+  getSupportedInterviewAudioMimeType,
   getRepeatQuestionUiState,
   parseRealtimeAiTranscriptUpdate,
   shouldNoticeStudentPause,
@@ -552,6 +554,16 @@ describe("ParticipantInterviewScreen", () => {
         transcriptTokenCount: expect.any(Number)
       })
     ]);
+  });
+
+  it("prepares browser audio uploads with recorder MIME type and duration metadata", () => {
+    const audioBlob = new Blob(["audio-bytes"], { type: "audio/webm;codecs=opus" });
+
+    expect(getSupportedInterviewAudioMimeType((mimeType) => mimeType === "audio/webm")).toBe("audio/webm");
+    expect(createInterviewAudioUploadHeaders({ blob: audioBlob, durationSeconds: 7.42 })).toEqual({
+      "content-type": "audio/webm;codecs=opus",
+      "x-audio-duration-seconds": "7.42"
+    });
   });
 
   it("does not use browser narration for push-to-talk questions", () => {

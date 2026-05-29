@@ -5,6 +5,7 @@
 !apps/**/.env.example
 .codex/
 .grill/
+.local/
 node_modules/
 dist/
 coverage/

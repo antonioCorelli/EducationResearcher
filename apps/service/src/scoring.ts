@@ -24,6 +24,7 @@ import {
   type RunStore,
   type SurveyResponse
 } from "./runs.js";
+import { createServiceSignedAudioUrl } from "./signed-audio-url.js";
 
 export const SCORING_PROMPT_VERSION = "scoring-v1";
 
@@ -857,11 +858,7 @@ function createLocalSignedAudioUrl(asset: InterviewAudioAsset, expiresAt: Date) 
     return undefined;
   }
 
-  const url = new URL("https://signed-audio.local/education-researcher");
-  url.searchParams.set("assetId", asset.id);
-  url.searchParams.set("expiresAt", expiresAt.toISOString());
-  url.searchParams.set("storageUri", asset.storageUri);
-  return url.toString();
+  return createServiceSignedAudioUrl({ asset, expiresAt });
 }
 
 function parseConfidence(value: unknown) {

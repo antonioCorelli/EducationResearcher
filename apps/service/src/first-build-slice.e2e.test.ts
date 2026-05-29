@@ -523,7 +523,7 @@ describe("end-to-end first build slice", () => {
       audioAssets: [
         {
           id: "interview_audio_asset_001",
-          signedUrl: expect.stringContaining("https://signed-audio.local/education-researcher")
+          signedUrl: expect.stringContaining("http://127.0.0.1:4000/audio/interview")
         }
       ]
     });

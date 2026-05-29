@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
-const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://localhost:4000";
+const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://127.0.0.1:4000";
 
 type ConsentMethod = "checkmark" | "electronic_signature";
 
@@ -140,6 +140,10 @@ export function Participant() {
   const mediaStreamRef = useRef<MediaStream | undefined>(undefined);
   const remoteAudioRef = useRef<HTMLAudioElement | undefined>(undefined);
   const pendingInterviewTurnsRef = useRef<PendingInterviewTurn[]>([]);
+  const audioRecorderRef = useRef<MediaRecorder | undefined>(undefined);
+  const audioRecorderChunksRef = useRef<Blob[]>([]);
+  const audioRecordingStartedAtRef = useRef<number | undefined>(undefined);
+  const pendingInterviewAudioUploadsRef = useRef<PendingInterviewAudioUpload[]>([]);
   const [interviewResponseMode, setInterviewResponseMode] = useState<InterviewResponseMode>("natural");
   const interviewResponseModeRef = useRef<InterviewResponseMode>("natural");
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
@@ -350,6 +354,7 @@ export function Participant() {
       dataChannelRef.current = connection.dataChannel;
       mediaStreamRef.current = connection.mediaStream;
       remoteAudioRef.current = connection.remoteAudio;
+      startInterviewAudioRecording(connection.mediaStream);
       setMicrophoneEnabled(false);
       setRealtimeConnectionState("connected");
       await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected", {
@@ -454,9 +459,11 @@ export function Participant() {
   }
 
   async function flushPendingInterviewArtifacts(accessToken: string) {
+    await stopInterviewAudioRecording();
     const turns = pendingInterviewTurnsRef.current;
+    const audioUploads = pendingInterviewAudioUploadsRef.current;
 
-    if (turns.length === 0) {
+    if (turns.length === 0 && audioUploads.length === 0) {
       return;
     }
 
@@ -478,9 +485,103 @@ export function Participant() {
     }
 
     pendingInterviewTurnsRef.current = [];
+
+    for (const audioUpload of audioUploads) {
+      await uploadParticipantInterviewAudio(accessToken, audioUpload);
+    }
+
+    pendingInterviewAudioUploadsRef.current = [];
+  }
+
+  function startInterviewAudioRecording(mediaStream: MediaStream) {
+    if (typeof MediaRecorder === "undefined") {
+      return;
+    }
+
+    stopInterviewAudioRecordingWithoutUpload();
+
+    try {
+      const mimeType = getSupportedInterviewAudioMimeType();
+      const recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+
+      audioRecorderChunksRef.current = [];
+      audioRecordingStartedAtRef.current = performance.now();
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) {
+          audioRecorderChunksRef.current.push(event.data);
+        }
+      });
+      recorder.start(1000);
+      audioRecorderRef.current = recorder;
+    } catch {
+      audioRecorderRef.current = undefined;
+      audioRecorderChunksRef.current = [];
+      audioRecordingStartedAtRef.current = undefined;
+    }
+  }
+
+  async function stopInterviewAudioRecording() {
+    const recorder = audioRecorderRef.current;
+
+    if (!recorder || recorder.state === "inactive") {
+      return;
+    }
+
+    const stoppedAt = performance.now();
+
+    await new Promise<void>((resolve) => {
+      const handleStop = () => {
+        recorder.removeEventListener("stop", handleStop);
+        resolve();
+      };
+
+      recorder.addEventListener("stop", handleStop);
+
+      try {
+        recorder.stop();
+      } catch {
+        recorder.removeEventListener("stop", handleStop);
+        resolve();
+      }
+    });
+
+    const chunks = audioRecorderChunksRef.current;
+    const startedAt = audioRecordingStartedAtRef.current;
+    const durationSeconds =
+      startedAt === undefined ? 0 : Math.max(0, Math.round(((stoppedAt - startedAt) / 1000) * 100) / 100);
+    const mimeType = recorder.mimeType || chunks[0]?.type || "application/octet-stream";
+
+    audioRecorderRef.current = undefined;
+    audioRecorderChunksRef.current = [];
+    audioRecordingStartedAtRef.current = undefined;
+
+    if (chunks.length > 0 && durationSeconds > 0) {
+      const blob = new Blob(chunks, { type: mimeType });
+
+      if (blob.size > 0) {
+        pendingInterviewAudioUploadsRef.current.push({ blob, durationSeconds });
+      }
+    }
+  }
+
+  function stopInterviewAudioRecordingWithoutUpload() {
+    const recorder = audioRecorderRef.current;
+
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch {
+        // The upload path is best-effort; transcript artifacts continue to be preserved.
+      }
+    }
+
+    audioRecorderRef.current = undefined;
+    audioRecorderChunksRef.current = [];
+    audioRecordingStartedAtRef.current = undefined;
   }
 
   function disconnectRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
+    void stopInterviewAudioRecording();
     dataChannelRef.current?.close();
     peerConnectionRef.current?.close();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1677,6 +1778,11 @@ interface PendingInterviewTurn {
   readonly audioEndMs?: number;
 }
 
+interface PendingInterviewAudioUpload {
+  readonly blob: Blob;
+  readonly durationSeconds: number;
+}
+
 export function createInterviewArtifactBatches(turns: readonly PendingInterviewTurn[]) {
   const batchSize = 50;
   const batches: Array<{
@@ -1693,6 +1799,19 @@ export function createInterviewArtifactBatches(turns: readonly PendingInterviewT
   }
 
   return batches;
+}
+
+export function getSupportedInterviewAudioMimeType(
+  supportsType: (mimeType: string) => boolean = (mimeType) => MediaRecorder.isTypeSupported(mimeType)
+) {
+  return ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((mimeType) => supportsType(mimeType));
+}
+
+export function createInterviewAudioUploadHeaders(audioUpload: Pick<PendingInterviewAudioUpload, "blob" | "durationSeconds">) {
+  return {
+    "content-type": audioUpload.blob.type || "application/octet-stream",
+    "x-audio-duration-seconds": audioUpload.durationSeconds.toString()
+  };
 }
 
 function InterviewCardActions({
@@ -2505,6 +2624,19 @@ async function fetchRealtimeVoiceSession(accessToken: string) {
   }
 
   return payload.realtimeSession;
+}
+
+async function uploadParticipantInterviewAudio(accessToken: string, audioUpload: PendingInterviewAudioUpload) {
+  const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/audio`, {
+    method: "POST",
+    headers: createInterviewAudioUploadHeaders(audioUpload),
+    body: audioUpload.blob
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message ?? "Unable to save interview audio.");
+  }
 }
 
 async function reportAudioConnectionState(

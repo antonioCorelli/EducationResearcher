@@ -25,6 +25,10 @@ import {
   type GapMapGenerator
 } from "./gap-map.js";
 import {
+  createConfiguredInterviewAudioStorage,
+  type InterviewAudioStorage
+} from "./interview-audio-storage.js";
+import {
   OperationalEventService,
   createConfiguredOperationalEventStore,
   parseAudioConnectionState,
@@ -62,6 +66,7 @@ import {
   type ParticipantAccessTokenStore,
   type RunServiceOptions,
   type RunStore,
+  type SaveInterviewAudioUploadInput,
   type SaveInterviewArtifactsInput,
   type SubmitParticipantSurveyInput
 } from "./runs.js";
@@ -92,6 +97,10 @@ import {
   type UpdateStudyShellInput,
   toSafeStudyShellValidationResponse
 } from "./study-shell.js";
+import {
+  SignedAudioUrlError,
+  verifySignedAudioUrl
+} from "./signed-audio-url.js";
 
 interface BuildServerOptions extends FastifyServerOptions {
   readonly authProvider?: AuthProvider;
@@ -697,6 +706,59 @@ function coerceSaveInterviewArtifactsInput(body: unknown): SaveInterviewArtifact
   };
 }
 
+function coerceSaveInterviewAudioUploadInput(
+  body: unknown,
+  headers: FastifyRequest["headers"]
+): SaveInterviewAudioUploadInput {
+  if (!(body instanceof Uint8Array) || body.byteLength === 0) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Interview audio upload is required."
+      }
+    };
+  }
+
+  const mimeType = getSingleHeaderValue(headers["content-type"])?.split(";")[0]?.trim();
+  const durationHeader = getSingleHeaderValue(headers["x-audio-duration-seconds"]);
+  const durationSeconds = durationHeader === undefined ? undefined : Number.parseFloat(durationHeader);
+
+  return {
+    content: body,
+    ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+    ...(mimeType ? { mimeType } : {})
+  };
+}
+
+function getSingleHeaderValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseRangeHeader(value: string | undefined, contentLength: number) {
+  if (!value) {
+    return undefined;
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const start = match[1] ? Number.parseInt(match[1], 10) : 0;
+  const end = match[2] ? Number.parseInt(match[2], 10) : contentLength - 1;
+
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= contentLength) {
+    return undefined;
+  }
+
+  return {
+    start,
+    end: Math.min(end, contentLength - 1)
+  };
+}
+
 function coerceAudioConnectionStateInput(body: unknown) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw {
@@ -1021,6 +1083,9 @@ export function buildServer(options: BuildServerOptions = {}) {
     scoringGenerator
   );
   const runDashboardService = new RunDashboardService(participantSlotStore, runStore, scoringStore);
+  const interviewAudioStorage: InterviewAudioStorage =
+    runServiceOptions?.interviewAudioStorage ?? createConfiguredInterviewAudioStorage();
+  const maxInterviewAudioUploadBytes = runServiceOptions?.maxInterviewAudioUploadBytes ?? 100 * 1024 * 1024;
   const runService = new RunService(
     runStore,
     participantAccessTokenStore,
@@ -1030,6 +1095,7 @@ export function buildServer(options: BuildServerOptions = {}) {
     surveyVersionStore,
     {
       ...runServiceOptions,
+      interviewAudioStorage,
       automaticScoringTrigger: runServiceOptions?.automaticScoringTrigger ?? scoringService
     },
     gapMapGenerator
@@ -1043,9 +1109,62 @@ export function buildServer(options: BuildServerOptions = {}) {
     ...fastifyOptions
   });
 
+  server.addContentTypeParser(
+    /^audio\/.+$/i,
+    { bodyLimit: maxInterviewAudioUploadBytes, parseAs: "buffer" },
+    (_request, body, done) => {
+      done(null, body);
+    }
+  );
+  server.addContentTypeParser(
+    "application/octet-stream",
+    { bodyLimit: maxInterviewAudioUploadBytes, parseAs: "buffer" },
+    (_request, body, done) => {
+      done(null, body);
+    }
+  );
+
   void server.register(cors, {
     methods: ["GET", "POST", "PATCH", "PUT", "OPTIONS"],
     origin: corsOrigin
+  });
+
+  server.get("/audio/interview", async (request, reply) => {
+    try {
+      const signedAudio = verifySignedAudioUrl(request.query as Record<string, unknown>);
+      const audio = await interviewAudioStorage.read(signedAudio.storageUri);
+      const content = Buffer.from(audio.content);
+      const range = parseRangeHeader(request.headers.range, content.byteLength);
+
+      if (range) {
+        return reply
+          .code(206)
+          .header("accept-ranges", "bytes")
+          .header("cache-control", "private, max-age=0, no-store")
+          .header("content-length", range.end - range.start + 1)
+          .header("content-range", `bytes ${range.start}-${range.end}/${content.byteLength}`)
+          .header("content-type", signedAudio.mimeType)
+          .send(content.subarray(range.start, range.end + 1));
+      }
+
+      return reply
+        .header("accept-ranges", "bytes")
+        .header("cache-control", "private, max-age=0, no-store")
+        .header("content-length", content.byteLength)
+        .header("content-type", signedAudio.mimeType)
+        .send(content);
+    } catch (error) {
+      const safeResponse = toSafeSignedAudioResponse(error);
+
+      if (safeResponse) {
+        return reply.code(safeResponse.statusCode).send(safeResponse.body);
+      }
+
+      return reply.code(404).send({
+        error: "Not Found",
+        message: "Audio file was not found."
+      });
+    }
   });
 
   const getAuthProvider = () => {
@@ -2065,6 +2184,29 @@ export function buildServer(options: BuildServerOptions = {}) {
     }
   );
 
+  server.post<{ Params: { accessToken: string } }>(
+    "/participant/runs/:accessToken/interview/audio",
+    async (request, reply) => {
+      try {
+        const result = await runService.saveParticipantInterviewAudioUpload(
+          request.params.accessToken,
+          coerceSaveInterviewAudioUploadInput(request.body, request.headers)
+        );
+
+        return reply.code(201).send(result);
+      } catch (error) {
+        const safeResponse =
+          toSafeParticipantAccessResponse(error) ?? toSafeRunValidationResponse(error) ?? toSafeInlineErrorResponse(error);
+
+        if (safeResponse) {
+          return reply.code(safeResponse.statusCode).send(safeResponse.body);
+        }
+
+        throw error;
+      }
+    }
+  );
+
   server.post<{ Params: { accessToken: string } }>("/participant/runs/:accessToken/interview/pause", async (request, reply) => {
     try {
       return await runService.pauseParticipantInterview(request.params.accessToken);
@@ -2179,4 +2321,18 @@ function toSafeInlineErrorResponse(error: unknown) {
   }
 
   return undefined;
+}
+
+function toSafeSignedAudioResponse(error: unknown) {
+  if (!(error instanceof SignedAudioUrlError)) {
+    return undefined;
+  }
+
+  return {
+    statusCode: error.statusCode,
+    body: {
+      error: "Forbidden",
+      message: error.safeMessage
+    }
+  };
 }

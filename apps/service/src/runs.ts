@@ -26,6 +26,10 @@ import {
   buildRealtimeInterviewInstructions,
   type RealtimeVoiceProvider
 } from "./voice-provider.js";
+import {
+  createConfiguredInterviewAudioStorage,
+  type InterviewAudioStorage
+} from "./interview-audio-storage.js";
 
 export const RUN_STATUSES = [
   "created",
@@ -131,6 +135,12 @@ export interface SaveInterviewArtifactsInput {
   readonly turns?: unknown;
   readonly audioAsset?: unknown;
   readonly transcriptTokenCount?: unknown;
+}
+
+export interface SaveInterviewAudioUploadInput {
+  readonly content: Uint8Array;
+  readonly durationSeconds?: unknown;
+  readonly mimeType?: unknown;
 }
 
 export const INTERVIEW_SESSION_STATUSES = ["active", "paused", "completed", "interrupted"] as const;
@@ -495,6 +505,8 @@ export interface RunServiceOptions {
   readonly createInterviewTurnId?: () => string;
   readonly createSurveyResponseId?: () => string;
   readonly createParticipantAccessTokenId?: () => string;
+  readonly interviewAudioStorage?: InterviewAudioStorage;
+  readonly maxInterviewAudioUploadBytes?: number;
   readonly participantAccessBaseUrl?: string;
   readonly participantAccessTokenSecret?: string;
   readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
@@ -511,6 +523,8 @@ export class RunService {
   private readonly createInterviewTurnId: () => string;
   private readonly createSurveyResponseId: () => string;
   private readonly createParticipantAccessTokenId: () => string;
+  private readonly interviewAudioStorage: InterviewAudioStorage;
+  private readonly maxInterviewAudioUploadBytes: number;
   private readonly participantAccessBaseUrl: string;
   private readonly participantAccessTokenSecret: string;
   private readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
@@ -537,6 +551,8 @@ export class RunService {
     this.createSurveyResponseId = options.createSurveyResponseId ?? (() => `survey_response_${randomUUID()}`);
     this.createParticipantAccessTokenId =
       options.createParticipantAccessTokenId ?? (() => createSecureRandomTokenId());
+    this.interviewAudioStorage = options.interviewAudioStorage ?? createConfiguredInterviewAudioStorage();
+    this.maxInterviewAudioUploadBytes = options.maxInterviewAudioUploadBytes ?? 100 * 1024 * 1024;
     this.participantAccessBaseUrl =
       options.participantAccessBaseUrl ?? process.env.PARTICIPANT_ACCESS_BASE_URL ?? "http://localhost:5173";
     this.participantAccessTokenSecret =
@@ -974,6 +990,56 @@ export class RunService {
       interviewSession,
       turns,
       ...(audioAsset ? { audioAsset } : {})
+    });
+  }
+
+  async saveParticipantInterviewAudioUpload(rawToken: string, input: SaveInterviewAudioUploadInput) {
+    const run = await this.resolveParticipantRun(rawToken);
+
+    if (run.status !== "interview_in_progress") {
+      throw new ParticipantAccessError("Interview audio can only be saved during an active interview.");
+    }
+
+    const activeSession = await this.requireActiveInterviewSession(run.id);
+    const parsedUpload = parseInterviewAudioUpload(input, this.maxInterviewAudioUploadBytes);
+    const createdAt = this.now().toISOString();
+    const audioAssetId = this.createInterviewAudioAssetId();
+    const storageKey = createInterviewAudioStorageKey({
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      interviewSessionId: activeSession.id,
+      audioAssetId,
+      mimeType: parsedUpload.mimeType
+    });
+    const storedAudio = await this.interviewAudioStorage.save({
+      storageKey,
+      content: parsedUpload.content,
+      mimeType: parsedUpload.mimeType
+    });
+    const audioAsset: InterviewAudioAsset = {
+      id: audioAssetId,
+      studyId: run.studyId,
+      participantSlotId: run.participantSlotId,
+      runId: run.id,
+      interviewSessionId: activeSession.id,
+      storageUri: storedAudio.storageUri,
+      durationSeconds: parsedUpload.durationSeconds,
+      mimeType: parsedUpload.mimeType,
+      byteSize: parsedUpload.content.byteLength,
+      status: "available",
+      createdAt
+    };
+    const interviewSession: InterviewSession = {
+      ...activeSession,
+      audioDurationSeconds: (activeSession.audioDurationSeconds ?? 0) + audioAsset.durationSeconds,
+      updatedAt: createdAt
+    };
+
+    return this.runStore.saveInterviewArtifacts({
+      interviewSession,
+      turns: [],
+      audioAsset
     });
   }
 
@@ -2630,6 +2696,84 @@ function parseInterviewAudioAsset(value: unknown) {
   };
 }
 
+function parseInterviewAudioUpload(input: SaveInterviewAudioUploadInput, maxInterviewAudioUploadBytes: number) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RunValidationError("Interview audio upload is required.");
+  }
+
+  if (!(input.content instanceof Uint8Array) || input.content.byteLength === 0) {
+    throw new RunValidationError("Interview audio upload must include audio bytes.");
+  }
+
+  if (input.content.byteLength > maxInterviewAudioUploadBytes) {
+    throw new RunValidationError("Interview audio upload is too large.");
+  }
+
+  return {
+    content: input.content,
+    durationSeconds: parsePositiveNumber(input.durationSeconds, "Audio duration"),
+    mimeType: parseInterviewAudioMimeType(input.mimeType)
+  };
+}
+
+function parseInterviewAudioMimeType(value: unknown) {
+  const mimeType = value === undefined ? "application/octet-stream" : parseBoundedText(value, "Audio MIME type", 120);
+
+  if (mimeType !== "application/octet-stream" && !/^audio\/[-+.\w]+(?:;\s*[-\w]+=[-+.\w]+)*$/i.test(mimeType)) {
+    throw new RunValidationError("Interview audio MIME type is invalid.");
+  }
+
+  return mimeType.toLowerCase();
+}
+
+function createInterviewAudioStorageKey(input: {
+  readonly studyId: string;
+  readonly participantSlotId: string;
+  readonly runId: string;
+  readonly interviewSessionId: string;
+  readonly audioAssetId: string;
+  readonly mimeType: string;
+}) {
+  const extension = getAudioFileExtension(input.mimeType);
+
+  return [
+    sanitizeStorageKeyPart(input.studyId),
+    sanitizeStorageKeyPart(input.participantSlotId),
+    sanitizeStorageKeyPart(input.runId),
+    "interview-audio",
+    sanitizeStorageKeyPart(input.interviewSessionId),
+    `${sanitizeStorageKeyPart(input.audioAssetId)}.${extension}`
+  ].join("/");
+}
+
+function sanitizeStorageKeyPart(value: string) {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function getAudioFileExtension(mimeType: string) {
+  if (mimeType.includes("webm")) {
+    return "webm";
+  }
+
+  if (mimeType.includes("mp4")) {
+    return "m4a";
+  }
+
+  if (mimeType.includes("mpeg")) {
+    return "mp3";
+  }
+
+  if (mimeType.includes("wav")) {
+    return "wav";
+  }
+
+  if (mimeType.includes("ogg")) {
+    return "ogg";
+  }
+
+  return "bin";
+}
+
 function parseStorageUri(value: unknown) {
   const storageUri = parseBoundedText(value, "Audio storage URI", 2000);
 
@@ -2673,6 +2817,14 @@ function parseBoundedText(value: unknown, label: string, maximumLength: number) 
 function parseNonNegativeNumber(value: unknown, label: string) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new RunValidationError(`${label} must be a non-negative number.`);
+  }
+
+  return value;
+}
+
+function parsePositiveNumber(value: unknown, label: string) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new RunValidationError(`${label} must be a positive number.`);
   }
 
   return value;

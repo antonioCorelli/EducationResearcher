@@ -16,6 +16,7 @@ import { InMemoryScoringStore, type EvidenceCitation, type ObjectiveScore, type 
 import { buildServer } from "./server.js";
 import { InMemoryStudyShellStore, V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import { InMemorySurveyVersionStore, type SurveyVersion } from "./survey.js";
+import type { InterviewAudioStorage } from "./interview-audio-storage.js";
 import type { RealtimeVoiceProvider } from "./voice-provider.js";
 
 const researcher: SessionUser = {
@@ -70,6 +71,38 @@ function createFakeAuthProvider(): AuthProvider {
       throw new Error("Invalid token.");
     }
   };
+}
+
+class FakeInterviewAudioStorage implements InterviewAudioStorage {
+  readonly savedObjects: Array<{
+    readonly storageKey: string;
+    readonly content: Uint8Array;
+    readonly mimeType: string;
+  }> = [];
+
+  async save(input: {
+    readonly storageKey: string;
+    readonly content: Uint8Array;
+    readonly mimeType: string;
+  }) {
+    this.savedObjects.push(input);
+
+    return {
+      storageUri: `s3://fixture-audio/${input.storageKey}`
+    };
+  }
+
+  async read(storageUri: string) {
+    const savedObject = this.savedObjects.find((object) => `s3://fixture-audio/${object.storageKey}` === storageUri);
+
+    if (!savedObject) {
+      throw new Error("Audio object was not found.");
+    }
+
+    return {
+      content: savedObject.content
+    };
+  }
 }
 
 function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
@@ -5259,6 +5292,113 @@ describe("participant interview routes", () => {
     });
     expect(await runStore.listInterviewTurnsByRun("run_fixture_001")).toHaveLength(2);
     expect(await runStore.listInterviewAudioAssetsByRun("run_fixture_001")).toHaveLength(1);
+
+    await server.close();
+  });
+
+  it("stores participant browser audio uploads before creating audio asset metadata", async () => {
+    const rawToken = createParticipantAccessTokenForTest({
+      tokenId: "token_fixture_audio_upload",
+      runId: "run_fixture_001",
+      participantSlotId: "slot_fixture_001",
+      secret: "test-participant-secret"
+    });
+    const runStore = new InMemoryRunStore([createFixtureRun({ status: "survey_completed" })]);
+    const audioStorage = new FakeInterviewAudioStorage();
+    const server = buildServer({
+      authProvider: createFakeAuthProvider(),
+      logger: false,
+      participantAccessTokenStore: new InMemoryParticipantAccessTokenStore([
+        createFixtureParticipantAccessToken({
+          tokenId: "token_fixture_audio_upload",
+          tokenHash: hashParticipantAccessTokenForTest(rawToken)
+        })
+      ]),
+      participantSlotStore: new InMemoryParticipantSlotStore([
+        {
+          id: "slot_fixture_001",
+          studyId: "study_fixture_001",
+          participantCode: "P001",
+          codeSource: "researcher_supplied",
+          status: "active",
+          createdAt: "2026-05-06T12:00:00.000Z",
+          updatedAt: "2026-05-06T12:00:00.000Z"
+        }
+      ]),
+      runServiceOptions: {
+        createInterviewAudioAssetId: () => "interview_audio_asset_upload_001",
+        createInterviewSessionId: () => "interview_session_upload_001",
+        interviewAudioStorage: audioStorage,
+        now: () => new Date("2026-05-06T12:30:00.000Z"),
+        participantAccessTokenSecret: "test-participant-secret"
+      },
+      runStore,
+      studyShellStore: new InMemoryStudyShellStore([createFixtureStudy()])
+    });
+
+    await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/start`
+    });
+
+    const savedAudio = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/audio`,
+      headers: {
+        "content-type": "audio/webm;codecs=opus",
+        "x-audio-duration-seconds": "12.5"
+      },
+      payload: Buffer.from("fixture-webm-audio")
+    });
+
+    expect(savedAudio.statusCode).toBe(201);
+    expect(audioStorage.savedObjects).toEqual([
+      expect.objectContaining({
+        storageKey:
+          "study_fixture_001/slot_fixture_001/run_fixture_001/interview-audio/interview_session_upload_001/interview_audio_asset_upload_001.webm",
+        mimeType: "audio/webm"
+      })
+    ]);
+    expect(savedAudio.json()).toMatchObject({
+      interviewSession: {
+        id: "interview_session_upload_001",
+        audioDurationSeconds: 12.5
+      },
+      audioAsset: {
+        id: "interview_audio_asset_upload_001",
+        storageUri:
+          "s3://fixture-audio/study_fixture_001/slot_fixture_001/run_fixture_001/interview-audio/interview_session_upload_001/interview_audio_asset_upload_001.webm",
+        durationSeconds: 12.5,
+        mimeType: "audio/webm",
+        byteSize: 18,
+        status: "available"
+      }
+    });
+    expect(await runStore.listInterviewAudioAssetsByRun("run_fixture_001")).toHaveLength(1);
+
+    const rawEvidence = await server.inject({
+      method: "GET",
+      url: "/researcher/studies/study_fixture_001/runs/run_fixture_001/raw-evidence",
+      headers: {
+        authorization: `Bearer ${tokens.accessToken}`
+      }
+    });
+    const signedUrl = rawEvidence.json().audioAssets[0].signedUrl as string;
+    const signedAudioUrl = new URL(signedUrl);
+    const playbackResponse = await server.inject({
+      method: "GET",
+      url: `${signedAudioUrl.pathname}${signedAudioUrl.search}`,
+      headers: {
+        range: "bytes=0-6"
+      }
+    });
+
+    expect(signedUrl).toContain("http://127.0.0.1:4000/audio/interview");
+    expect(playbackResponse.statusCode).toBe(206);
+    expect(playbackResponse.headers["accept-ranges"]).toBe("bytes");
+    expect(playbackResponse.headers["content-range"]).toBe("bytes 0-6/18");
+    expect(playbackResponse.headers["content-type"]).toBe("audio/webm");
+    expect(playbackResponse.body).toBe("fixture");
 
     await server.close();
   });

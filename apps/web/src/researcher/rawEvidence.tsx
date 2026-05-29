@@ -1,6 +1,8 @@
 import type { RawEvidenceState } from "../App";
 import { formatAudioDuration, formatDateTime, formatOptionalAudioSpan, formatSpeaker } from "./runFormat";
 
+const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://127.0.0.1:4000";
+
 interface RawEvidencePanelProps {
   readonly rawEvidenceState: RawEvidenceState;
   readonly onDismiss: () => void;
@@ -76,8 +78,8 @@ export function RawEvidencePanel({ rawEvidenceState, onDismiss }: RawEvidencePan
               <p>{formatAudioDuration(asset.durationSeconds)}</p>
               {asset.signedUrl ? (
                 <>
-                  <audio controls preload="none" src={asset.signedUrl} />
-                  <a href={asset.signedUrl} rel="noreferrer" target="_blank">
+                  <audio controls preload="none" src={normalizeAudioPlaybackUrl(asset.signedUrl)} />
+                  <a href={normalizeAudioPlaybackUrl(asset.signedUrl)} rel="noreferrer" target="_blank">
                     Open signed audio link
                   </a>
                 </>
@@ -91,4 +93,20 @@ export function RawEvidencePanel({ rawEvidenceState, onDismiss }: RawEvidencePan
       </div>
     </section>
   );
+}
+
+export function normalizeAudioPlaybackUrl(signedUrl: string, baseUrl = serviceBaseUrl) {
+  const parsedSignedUrl = new URL(signedUrl);
+
+  if (parsedSignedUrl.pathname !== "/audio/interview") {
+    return signedUrl;
+  }
+
+  const playbackBaseUrl = new URL(baseUrl);
+
+  if (playbackBaseUrl.hostname === "localhost") {
+    playbackBaseUrl.hostname = "127.0.0.1";
+  }
+
+  return new URL(`${parsedSignedUrl.pathname}${parsedSignedUrl.search}`, playbackBaseUrl).toString();
 }

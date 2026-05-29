@@ -16,7 +16,7 @@ import { createEmptyObjectiveDraft, createObjectiveDraftsFromVersions, Researche
 import { createStudyShellForm, defaultStudyShellForm, ResearcherShell } from "./researcher/shell";
 import { createSurveyItemsFromVersion, defaultSurveyItems, ResearcherSurvey } from "./researcher/survey";
 
-const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://localhost:4000";
+const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://127.0.0.1:4000";
 const accessTokenStorageKey = "educationResearcher.accessToken";
 const researcherProfilesStorageKey = "educationResearcher.researcherProfiles";
 
