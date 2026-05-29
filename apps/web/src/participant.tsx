@@ -807,8 +807,10 @@ export function ParticipantInterviewScreen({
 }) {
   const isActive = mode === "active";
   const hasRecoverableFailure = isActive && realtimeConnectionState === "failed";
-  const [uiState, setUiState] = useState<InterviewUiState>(() => initialUiState ?? getInitialInterviewUiState(mode));
   const [responseMode, setResponseMode] = useState<InterviewResponseMode>(initialResponseMode ?? "natural");
+  const [uiState, setUiState] = useState<InterviewUiState>(() =>
+    normalizeInterviewUiStateForResponseMode(initialUiState ?? getInitialInterviewUiState(mode, responseMode), responseMode)
+  );
   const [lastVoiceResponseMode, setLastVoiceResponseMode] = useState<Exclude<InterviewResponseMode, "typing">>(
     initialResponseMode === "push_to_talk" ? "push_to_talk" : "natural"
   );
@@ -884,7 +886,7 @@ export function ParticipantInterviewScreen({
 
   useEffect(() => {
     const currentEntry = getInterviewHistoryEntry(window.history.state);
-    const entry =
+    const entry = normalizeInterviewHistoryEntry(
       currentEntry?.mode === mode
         ? currentEntry
         : createInterviewHistoryEntry({
@@ -892,7 +894,8 @@ export function ParticipantInterviewScreen({
             responseMode,
             uiState,
             index: 0
-          });
+          })
+    );
 
     interviewHistoryIndexRef.current = entry.index;
     setCanReturnToPreviousCard(entry.index > 0);
@@ -901,7 +904,7 @@ export function ParticipantInterviewScreen({
     if (entry.uiState !== uiState || entry.responseMode !== responseMode) {
       setResponseMode(entry.responseMode);
       onResponseModeChange(entry.responseMode);
-      setUiState(entry.uiState);
+      setUiState(normalizeInterviewUiStateForResponseMode(entry.uiState, entry.responseMode));
     }
 
     function handleBrowserBack(event: PopStateEvent) {
@@ -915,7 +918,7 @@ export function ParticipantInterviewScreen({
       setCanReturnToPreviousCard(historyEntry.index > 0);
       setResponseMode(historyEntry.responseMode);
       onResponseModeChange(historyEntry.responseMode);
-      setUiState(historyEntry.uiState);
+      setUiState(normalizeInterviewUiStateForResponseMode(historyEntry.uiState, historyEntry.responseMode));
     }
 
     window.addEventListener("popstate", handleBrowserBack);
@@ -963,7 +966,7 @@ export function ParticipantInterviewScreen({
     setUiState((currentState) => {
       if (mode === "ready") {
         return currentState === "onboarding" || currentState === "mic_check" || currentState === "mode_selection"
-          ? currentState
+          ? normalizeInterviewUiStateForResponseMode(currentState, responseMode)
           : "onboarding";
       }
 
@@ -972,12 +975,12 @@ export function ParticipantInterviewScreen({
       }
 
       if (currentState === "onboarding" || currentState === "mic_check" || currentState === "mode_selection" || currentState === "paused") {
-        return "ai_speaking";
+        return getInitialInterviewUiState("active", responseMode);
       }
 
-      return currentState;
+      return normalizeInterviewUiStateForResponseMode(currentState, responseMode);
     });
-  }, [mode]);
+  }, [mode, responseMode]);
 
   useEffect(() => {
     if (!isActive) {
@@ -1043,11 +1046,16 @@ export function ParticipantInterviewScreen({
     }
 
     const timeout = window.setTimeout(() => {
-      setUiState(answerCount > 0 && answerCount % 3 === 0 ? "break_prompt" : "ai_speaking");
+      setUiState(
+        normalizeInterviewUiStateForResponseMode(
+          answerCount > 0 && answerCount % 3 === 0 ? "break_prompt" : "ai_speaking",
+          responseMode
+        )
+      );
     }, 850);
 
     return () => window.clearTimeout(timeout);
-  }, [answerCount, uiState]);
+  }, [answerCount, responseMode, uiState]);
 
   function startVoiceCapture() {
     clearVoiceCaptureTimeout();
@@ -1081,10 +1089,11 @@ export function ParticipantInterviewScreen({
     readonly replace?: boolean;
   }) {
     const nextIndex = replace ? interviewHistoryIndexRef.current : interviewHistoryIndexRef.current + 1;
+    const normalizedNextUiState = normalizeInterviewUiStateForResponseMode(nextUiState, nextResponseMode);
     const nextEntry = createInterviewHistoryEntry({
       mode,
       responseMode: nextResponseMode,
-      uiState: nextUiState,
+      uiState: normalizedNextUiState,
       index: nextIndex
     });
 
@@ -1094,7 +1103,7 @@ export function ParticipantInterviewScreen({
     if (nextResponseMode !== responseMode) {
       onResponseModeChange(nextResponseMode);
     }
-    setUiState(nextUiState);
+    setUiState(normalizedNextUiState);
 
     if (replace) {
       replaceInterviewHistoryEntry(nextEntry);
@@ -1116,12 +1125,6 @@ export function ParticipantInterviewScreen({
     onStart();
   }
 
-  function handleInterruptAi() {
-    cancelInterviewSpeech();
-    setInterruptionNotice("I stopped - go ahead.");
-    navigateToInterviewCard({ nextUiState: "student_turn" });
-  }
-
   function handleRepeatQuestion() {
     const nextUiState = getRepeatQuestionUiState(uiState);
 
@@ -1130,13 +1133,7 @@ export function ParticipantInterviewScreen({
     }
 
     setSpeechNonce((value) => value + 1);
-    setUiState(nextUiState);
-  }
-
-  function handleRephraseQuestion() {
-    setDisplayQuestion(`Said another way: ${getRephrasedQuestion(displayQuestion)}`);
-    setSpeechNonce((value) => value + 1);
-    setUiState("ai_speaking");
+    setUiState(normalizeInterviewUiStateForResponseMode(nextUiState, responseMode));
   }
 
   function handleStartAnswer() {
@@ -1456,7 +1453,7 @@ export function ParticipantInterviewScreen({
       );
     }
 
-    if (uiState === "student_turn" && responseMode === "typing") {
+    if ((uiState === "student_turn" || uiState === "ai_speaking") && responseMode === "typing") {
       return (
         <InterviewStageCard eyebrow="Your turn" title="Type your answer">
           <p className="privacy-note">Voice capture is off while you type.</p>
@@ -1517,7 +1514,7 @@ export function ParticipantInterviewScreen({
       );
     }
 
-    if (uiState === "student_turn") {
+    if (uiState === "student_turn" || uiState === "ai_speaking") {
       return (
         <InterviewStageCard eyebrow="Your turn" title="Your turn">
           <p>{responseMode === "push_to_talk" ? "Press record when you are ready to answer." : "Start when you are ready. We will wait briefly if you pause."}</p>
@@ -1556,27 +1553,7 @@ export function ParticipantInterviewScreen({
       );
     }
 
-    return (
-      <InterviewStageCard eyebrow="AI speaking" title="AI question">
-        <p className="ai-question-text">{displayQuestion}</p>
-        <div className="abstract-speaking-indicator" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-        <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
-          <button className="secondary-button" onClick={handleRepeatQuestion} type="button">
-            Repeat question
-          </button>
-          <button className="secondary-button" onClick={handleRephraseQuestion} type="button">
-            Say that another way
-          </button>
-          <button className="primary-button" onClick={handleInterruptAi} type="button">
-            I stopped - go ahead
-          </button>
-        </InterviewCardActions>
-      </InterviewStageCard>
-    );
+    return null;
   }
 
   return (
@@ -1886,13 +1863,31 @@ function isInterviewUiState(value: unknown): value is InterviewUiState {
   return typeof value === "string" && interviewUiStates.includes(value as InterviewUiState);
 }
 
-function getInitialInterviewUiState(mode: InterviewMode): InterviewUiState {
+function normalizeInterviewHistoryEntry(entry: InterviewHistoryEntry): InterviewHistoryEntry {
+  return {
+    ...entry,
+    uiState: normalizeInterviewUiStateForResponseMode(entry.uiState, entry.responseMode)
+  };
+}
+
+function normalizeInterviewUiStateForResponseMode(
+  uiState: InterviewUiState,
+  responseMode: InterviewResponseMode
+): InterviewUiState {
+  if (responseMode === "push_to_talk" && uiState === "ai_speaking") {
+    return "student_turn";
+  }
+
+  return uiState;
+}
+
+function getInitialInterviewUiState(mode: InterviewMode, responseMode: InterviewResponseMode): InterviewUiState {
   if (mode === "paused") {
     return "paused";
   }
 
   if (mode === "active") {
-    return "ai_speaking";
+    return responseMode === "push_to_talk" ? "student_turn" : "ai_speaking";
   }
 
   return "onboarding";
@@ -2150,12 +2145,6 @@ export function shouldSpeakInterviewQuestionWithBrowserVoice({
   return isActive && uiState === "ai_speaking" && responseMode === "typing";
 }
 
-function cancelInterviewSpeech() {
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-  }
-}
-
 function getBestTranscriptDraft(
   transcriptDraft: string,
   speechTranscript: string,
@@ -2239,18 +2228,6 @@ export function shouldPausePushToTalkForAiSpeech({
   readonly uiState: InterviewUiState;
 }) {
   return isActive && responseMode === "push_to_talk" && uiState === "student_speaking" && realtimeVoiceActivity === "ai_speaking";
-}
-
-function getRephrasedQuestion(question: string) {
-  if (/example/i.test(question)) {
-    return "What is one specific moment or situation that shows what you mean?";
-  }
-
-  if (/uncertain|sure/i.test(question)) {
-    return "What part feels clear to you, and what part still feels hard to decide?";
-  }
-
-  return question.replace(/^Earlier, you said/i, "Thinking back to your survey answer,");
 }
 
 function formatElapsedSeconds(totalSeconds: number) {

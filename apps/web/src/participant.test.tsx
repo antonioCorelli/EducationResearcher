@@ -106,7 +106,7 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("Connected");
   });
 
-  it("clearly distinguishes AI speaking from voice capture state", () => {
+  it("starts push-to-talk active interviews on the participant turn", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="What felt uncertain or worth thinking about more?"
@@ -133,9 +133,11 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toContain("What felt uncertain or worth thinking about more?");
     expect(markup).toContain("Current question");
     expect(markup).toContain("interview-layout-with-question");
-    expect(markup).toContain("AI speaking");
-    expect(markup).toContain("Repeat question");
-    expect(markup).toContain("Say that another way");
+    expect(markup).toContain("Your turn");
+    expect(markup).toContain("Press record when you are ready");
+    expect(markup).not.toContain("AI speaking");
+    expect(markup).not.toContain("Repeat question");
+    expect(markup).not.toContain("Say that another way");
     expect(markup).not.toMatch(/participant caption|full transcript|rubric|score|gap map|objective progress/i);
   });
 
