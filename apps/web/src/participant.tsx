@@ -141,9 +141,12 @@ export function Participant() {
   const remoteAudioRef = useRef<HTMLAudioElement | undefined>(undefined);
   const pendingInterviewTurnsRef = useRef<PendingInterviewTurn[]>([]);
   const audioRecorderRef = useRef<MediaRecorder | undefined>(undefined);
+  const audioRecorderStopPromiseRef = useRef<Promise<PendingInterviewAudioUpload | undefined> | undefined>(undefined);
   const audioRecorderChunksRef = useRef<Blob[]>([]);
   const audioRecordingStartedAtRef = useRef<number | undefined>(undefined);
   const pendingInterviewAudioUploadsRef = useRef<PendingInterviewAudioUpload[]>([]);
+  const unpairedParticipantAudioUploadsRef = useRef<PendingInterviewAudioUpload[]>([]);
+  const unpairedParticipantTurnsRef = useRef<PendingInterviewTurn[]>([]);
   const [interviewResponseMode, setInterviewResponseMode] = useState<InterviewResponseMode>("natural");
   const interviewResponseModeRef = useRef<InterviewResponseMode>("natural");
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
@@ -277,6 +280,7 @@ export function Participant() {
 
         updateRealtimeResponseMode(dataChannelRef.current, "push_to_talk");
         startPushToTalkInput(dataChannelRef.current);
+        startInterviewAudioRecording();
       }
 
       setMicrophoneEnabled(recording);
@@ -297,6 +301,11 @@ export function Participant() {
     }
 
     setMicrophoneEnabled(false);
+    void stopInterviewAudioRecording().then((audioUpload) => {
+      if (audioUpload) {
+        queueParticipantAudioUpload(audioUpload);
+      }
+    });
     finishPushToTalkInput(dataChannelRef.current);
   }
 
@@ -341,20 +350,20 @@ export function Participant() {
         realtimeSession,
         () => interviewResponseModeRef.current,
         (turn) => {
-          pendingInterviewTurnsRef.current.push(turn);
-
           if (turn.speaker === "participant") {
+            appendParticipantTranscriptTurn(turn);
             setLatestParticipantTranscript(turn.text);
+          } else {
+            pendingInterviewTurnsRef.current.push(turn);
           }
         },
-        setRealtimeVoiceActivity,
+        handleRealtimeVoiceActivity,
         setLatestAiQuestionTranscript
       );
       peerConnectionRef.current = connection.peerConnection;
       dataChannelRef.current = connection.dataChannel;
       mediaStreamRef.current = connection.mediaStream;
       remoteAudioRef.current = connection.remoteAudio;
-      startInterviewAudioRecording(connection.mediaStream);
       setMicrophoneEnabled(false);
       setRealtimeConnectionState("connected");
       await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connected", {
@@ -458,8 +467,62 @@ export function Participant() {
     }
   }
 
+  function handleRealtimeVoiceActivity(activity: RealtimeVoiceActivity) {
+    setRealtimeVoiceActivity(activity);
+
+    if (interviewResponseModeRef.current !== "natural") {
+      return;
+    }
+
+    if (activity === "participant_speaking") {
+      startInterviewAudioRecording();
+      return;
+    }
+
+    void stopInterviewAudioRecording().then((audioUpload) => {
+      if (audioUpload) {
+        queueParticipantAudioUpload(audioUpload);
+      }
+    });
+  }
+
+  function appendParticipantTranscriptTurn(turn: PendingInterviewTurn) {
+    const queuedTurn: PendingInterviewTurn = { ...turn };
+    const audioUpload = unpairedParticipantAudioUploadsRef.current.shift();
+
+    if (audioUpload) {
+      attachAudioUploadToParticipantTurn(queuedTurn, audioUpload);
+    } else {
+      unpairedParticipantTurnsRef.current.push(queuedTurn);
+    }
+
+    pendingInterviewTurnsRef.current.push(queuedTurn);
+  }
+
+  function queueParticipantAudioUpload(audioUpload: PendingInterviewAudioUpload) {
+    const queuedTurn = unpairedParticipantTurnsRef.current.shift();
+
+    if (queuedTurn) {
+      attachAudioUploadToParticipantTurn(queuedTurn, audioUpload);
+      return;
+    }
+
+    unpairedParticipantAudioUploadsRef.current.push(audioUpload);
+  }
+
+  function attachAudioUploadToParticipantTurn(turn: PendingInterviewTurn, audioUpload: PendingInterviewAudioUpload) {
+    turn.audioStartMs = 0;
+    turn.audioEndMs = Math.round(audioUpload.durationSeconds * 1000);
+    pendingInterviewAudioUploadsRef.current.push(audioUpload);
+  }
+
   async function flushPendingInterviewArtifacts(accessToken: string) {
-    await stopInterviewAudioRecording();
+    const activeAudioUpload = await stopInterviewAudioRecording();
+
+    if (activeAudioUpload) {
+      queueParticipantAudioUpload(activeAudioUpload);
+    }
+
     const turns = pendingInterviewTurnsRef.current;
     const audioUploads = pendingInterviewAudioUploadsRef.current;
 
@@ -493,12 +556,20 @@ export function Participant() {
     pendingInterviewAudioUploadsRef.current = [];
   }
 
-  function startInterviewAudioRecording(mediaStream: MediaStream) {
+  function startInterviewAudioRecording() {
     if (typeof MediaRecorder === "undefined") {
       return;
     }
 
-    stopInterviewAudioRecordingWithoutUpload();
+    if (audioRecorderRef.current && audioRecorderRef.current.state !== "inactive") {
+      return;
+    }
+
+    const mediaStream = mediaStreamRef.current;
+
+    if (!mediaStream) {
+      return;
+    }
 
     try {
       const mimeType = getSupportedInterviewAudioMimeType();
@@ -520,19 +591,23 @@ export function Participant() {
     }
   }
 
-  async function stopInterviewAudioRecording() {
+  async function stopInterviewAudioRecording(): Promise<PendingInterviewAudioUpload | undefined> {
+    if (audioRecorderStopPromiseRef.current) {
+      return audioRecorderStopPromiseRef.current;
+    }
+
     const recorder = audioRecorderRef.current;
 
     if (!recorder || recorder.state === "inactive") {
-      return;
+      return undefined;
     }
 
     const stoppedAt = performance.now();
 
-    await new Promise<void>((resolve) => {
+    audioRecorderStopPromiseRef.current = new Promise<PendingInterviewAudioUpload | undefined>((resolve) => {
       const handleStop = () => {
         recorder.removeEventListener("stop", handleStop);
-        resolve();
+        resolve(createStoppedInterviewAudioUpload(recorder, stoppedAt));
       };
 
       recorder.addEventListener("stop", handleStop);
@@ -541,10 +616,21 @@ export function Participant() {
         recorder.stop();
       } catch {
         recorder.removeEventListener("stop", handleStop);
-        resolve();
+        resolve(createStoppedInterviewAudioUpload(recorder, stoppedAt));
       }
     });
 
+    const audioUpload = await audioRecorderStopPromiseRef.current;
+
+    audioRecorderStopPromiseRef.current = undefined;
+
+    return audioUpload;
+  }
+
+  function createStoppedInterviewAudioUpload(
+    recorder: MediaRecorder,
+    stoppedAt: number
+  ): PendingInterviewAudioUpload | undefined {
     const chunks = audioRecorderChunksRef.current;
     const startedAt = audioRecordingStartedAtRef.current;
     const durationSeconds =
@@ -559,29 +645,19 @@ export function Participant() {
       const blob = new Blob(chunks, { type: mimeType });
 
       if (blob.size > 0) {
-        pendingInterviewAudioUploadsRef.current.push({ blob, durationSeconds });
-      }
-    }
-  }
-
-  function stopInterviewAudioRecordingWithoutUpload() {
-    const recorder = audioRecorderRef.current;
-
-    if (recorder && recorder.state !== "inactive") {
-      try {
-        recorder.stop();
-      } catch {
-        // The upload path is best-effort; transcript artifacts continue to be preserved.
+        return { blob, durationSeconds };
       }
     }
 
-    audioRecorderRef.current = undefined;
-    audioRecorderChunksRef.current = [];
-    audioRecordingStartedAtRef.current = undefined;
+    return undefined;
   }
 
   function disconnectRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
-    void stopInterviewAudioRecording();
+    void stopInterviewAudioRecording().then((audioUpload) => {
+      if (audioUpload) {
+        queueParticipantAudioUpload(audioUpload);
+      }
+    });
     dataChannelRef.current?.close();
     peerConnectionRef.current?.close();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1772,10 +1848,10 @@ const interviewResponseModes: readonly {
 ];
 
 interface PendingInterviewTurn {
-  readonly speaker: "ai" | "participant";
-  readonly text: string;
-  readonly audioStartMs?: number;
-  readonly audioEndMs?: number;
+  speaker: "ai" | "participant";
+  text: string;
+  audioStartMs?: number;
+  audioEndMs?: number;
 }
 
 interface PendingInterviewAudioUpload {

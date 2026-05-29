@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ParticipantSlot, ResearcherDashboardRun, ResearcherRunDashboardSlot, RunScoreReview, StudyShell } from "../App";
 import { ScoreReviewList } from "./runAnalysis";
-import { normalizeAudioPlaybackUrl } from "./rawEvidence";
+import { getParticipantTurnAudioAssets, normalizeAudioPlaybackUrl } from "./rawEvidence";
 import { ResearcherRunOperations, sortParticipantOperationSlots } from "./runOperations";
 
 const noop = () => undefined;
@@ -391,10 +391,11 @@ describe("ScoreReviewList", () => {
             interviewTurns: [
               {
                 id: "interview_turn_001",
+                sequenceNumber: 1,
                 speaker: "participant",
                 text: "The second example made the pattern much clearer.",
-                audioStartMs: 60000,
-                audioEndMs: 68000,
+                audioStartMs: 0,
+                audioEndMs: 8000,
                 createdAt: "2026-05-06T12:25:00.000Z"
               }
             ],
@@ -424,7 +425,45 @@ describe("ScoreReviewList", () => {
     expect(markup).toContain("I noticed that the example changed my reasoning.");
     expect(markup).toContain("The second example made the pattern much clearer.");
     expect(markup).toContain("Open signed audio link");
+    expect(markup).toContain("audio");
     expect(markup).toContain("focused-raw-evidence");
+  });
+
+  it("aligns participant audio clips to participant transcript turns by evidence order", () => {
+    const turnAudioAssets = getParticipantTurnAudioAssets({
+      interviewTurns: [
+        {
+          id: "interview_turn_ai_001",
+          speaker: "ai",
+          sequenceNumber: 1,
+          text: "Can you say more?",
+          createdAt: "2026-05-06T12:24:00.000Z"
+        },
+        {
+          id: "interview_turn_participant_001",
+          speaker: "participant",
+          sequenceNumber: 2,
+          text: "Sure, here is one example.",
+          audioStartMs: 0,
+          audioEndMs: 2600,
+          createdAt: "2026-05-06T12:25:00.000Z"
+        }
+      ],
+      audioAssets: [
+        {
+          id: "interview_audio_asset_001",
+          storageUri: "s3://fixture/turn-one.webm",
+          durationSeconds: 2.6,
+          status: "available",
+          signedUrl: "http://127.0.0.1:4000/audio/interview?assetId=interview_audio_asset_001&signature=sig",
+          signedUrlExpiresAt: "2026-05-06T13:00:00.000Z",
+          createdAt: "2026-05-06T12:25:01.000Z"
+        }
+      ]
+    });
+
+    expect(turnAudioAssets.get("interview_turn_participant_001")?.id).toBe("interview_audio_asset_001");
+    expect(turnAudioAssets.has("interview_turn_ai_001")).toBe(false);
   });
 
   it("uses the configured service base URL for local audio playback links", () => {

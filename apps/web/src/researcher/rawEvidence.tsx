@@ -1,4 +1,4 @@
-import type { RawEvidenceState } from "../App";
+import type { RawEvidence, RawEvidenceState } from "../App";
 import { formatAudioDuration, formatDateTime, formatOptionalAudioSpan, formatSpeaker } from "./runFormat";
 
 const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://127.0.0.1:4000";
@@ -22,6 +22,7 @@ export function RawEvidencePanel({ rawEvidenceState, onDismiss }: RawEvidencePan
   }
 
   const { evidence, focusSourceId } = rawEvidenceState;
+  const participantTurnAudioAssets = getParticipantTurnAudioAssets(evidence);
 
   return (
     <section className="evidence-panel raw-evidence-panel" id="raw-evidence-panel" aria-labelledby="raw-evidence-title">
@@ -54,15 +55,12 @@ export function RawEvidencePanel({ rawEvidenceState, onDismiss }: RawEvidencePan
           <h4 id="transcript-evidence-title">Transcript turns</h4>
           {evidence.interviewTurns.length === 0 ? <p className="muted-copy">No transcript turns captured</p> : null}
           {evidence.interviewTurns.map((turn) => (
-            <article
-              className={focusSourceId === turn.id ? "raw-evidence-item focused-raw-evidence" : "raw-evidence-item"}
-              id={`raw-evidence-${turn.id}`}
+            <TranscriptEvidenceItem
+              audioAsset={participantTurnAudioAssets.get(turn.id)}
+              focusSourceId={focusSourceId}
               key={turn.id}
-            >
-              <span>{formatSpeaker(turn.speaker)}</span>
-              <p>{turn.text}</p>
-              <small>{formatOptionalAudioSpan(turn.audioStartMs, turn.audioEndMs)}</small>
-            </article>
+              turn={turn}
+            />
           ))}
         </section>
         <section aria-labelledby="audio-evidence-title">
@@ -93,6 +91,46 @@ export function RawEvidencePanel({ rawEvidenceState, onDismiss }: RawEvidencePan
       </div>
     </section>
   );
+}
+
+function TranscriptEvidenceItem({
+  audioAsset,
+  focusSourceId,
+  turn
+}: {
+  readonly audioAsset?: RawEvidence["audioAssets"][number];
+  readonly focusSourceId?: string;
+  readonly turn: RawEvidence["interviewTurns"][number];
+}) {
+  return (
+    <article
+      className={focusSourceId === turn.id ? "raw-evidence-item focused-raw-evidence" : "raw-evidence-item"}
+      id={`raw-evidence-${turn.id}`}
+    >
+      <span>{formatSpeaker(turn.speaker)}</span>
+      <p>{turn.text}</p>
+      <small>{formatOptionalAudioSpan(turn.audioStartMs, turn.audioEndMs)}</small>
+      {audioAsset?.signedUrl ? <audio controls preload="none" src={normalizeAudioPlaybackUrl(audioAsset.signedUrl)} /> : null}
+    </article>
+  );
+}
+
+export function getParticipantTurnAudioAssets(evidence: Pick<RawEvidence, "audioAssets" | "interviewTurns">) {
+  const assetsByTurnId = new Map<string, RawEvidence["audioAssets"][number]>();
+  const participantTurnsWithAudio = evidence.interviewTurns
+    .filter((turn) => turn.speaker === "participant" && turn.audioStartMs !== undefined && turn.audioEndMs !== undefined)
+    .sort((left, right) => (left.sequenceNumber ?? 0) - (right.sequenceNumber ?? 0));
+  const audioAssets = [...evidence.audioAssets].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+
+  participantTurnsWithAudio.forEach((turn, index) => {
+    const audioAsset = audioAssets[index];
+
+    if (audioAsset) {
+      assetsByTurnId.set(turn.id, audioAsset);
+    }
+  });
+
+  return assetsByTurnId;
 }
 
 export function normalizeAudioPlaybackUrl(signedUrl: string, baseUrl = serviceBaseUrl) {
