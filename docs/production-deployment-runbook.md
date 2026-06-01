@@ -49,6 +49,37 @@ The production data stack created the expected table-per-domain tables:
 
 The synthesized `EducationResearcherData-prod` CloudFormation template includes `DeletionPolicy: Retain` and `UpdateReplacePolicy: Retain` for all six production DynamoDB tables.
 
+## S3 Artifact Storage
+
+Source issue: [#65](https://github.com/antonioCorelli/EducationResearcher/issues/65)
+
+The CDK app now includes `EducationResearcherArtifacts-prod` for production interview audio and reserved generated
+export object storage.
+
+Expected production bucket:
+
+| Stack | Output | Value |
+| --- | --- | --- |
+| `EducationResearcherArtifacts-prod` | `ArtifactBucketName` | `education-researcher-prod-artifacts-077317248751` |
+| `EducationResearcherArtifacts-prod` | `AudioArtifactPrefix` | `audio/` |
+| `EducationResearcherArtifacts-prod` | `ExportArtifactPrefix` | `exports/` |
+
+The bucket is private, blocks public access, enforces SSL, uses S3-managed server-side encryption, enables versioning in
+production, and has a 730-day lifecycle expiration rule for the default study-artifact retention window. Production stack
+deletion retains the bucket.
+
+The Elastic Beanstalk service environment must set:
+
+```text
+INTERVIEW_AUDIO_STORAGE_BACKEND=s3
+ARTIFACT_STORAGE_BUCKET_NAME=education-researcher-prod-artifacts-077317248751
+INTERVIEW_AUDIO_STORAGE_PREFIX=audio
+```
+
+Before enabling real participant audio, attach the S3 least-privilege policy from
+`docs/service-secrets-and-iam.md` to the Elastic Beanstalk instance profile and run a synthetic upload/playback smoke
+test.
+
 ### Researcher User Setup
 
 The pilot researcher user was created in the production user pool on June 1, 2026.
@@ -93,6 +124,26 @@ The repository now includes:
 
 The service must be verified at the default Elastic Beanstalk URL with `GET /health` before mapping
 `api.voxaria.io`.
+
+## Web Hosting
+
+Source issue: [#66](https://github.com/antonioCorelli/EducationResearcher/issues/66)
+
+The production web app hosting target is AWS Amplify Hosting for `apps/web`. The repository includes `amplify.yml` with
+the monorepo build settings:
+
+- app root: `apps/web`
+- build path: `/`
+- Node runtime: `20`
+- production API base URL: `VITE_SERVICE_BASE_URL=https://api.voxaria.io`
+- build command: `npm run build --workspace @education-researcher/web`
+- output directory: `apps/web/dist`
+
+The web app should be verified on the Amplify default domain before adding `voxaria.io`. Configure the Amplify SPA
+rewrite from `docs/web-hosting.md` so researcher and participant deep links, including `/participant/runs/<token>`, are
+served by `index.html`.
+
+`https://api.voxaria.io` remains the Elastic Beanstalk-hosted Service API origin; Amplify only serves the static web app.
 
 ### Managed Secret Parameters
 

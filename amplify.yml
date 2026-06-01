@@ -1,0 +1,25 @@
+version: 1
+applications:
+  - appRoot: apps/web
+    env:
+      variables:
+        AMPLIFY_MONOREPO_APP_ROOT: apps/web
+        VITE_SERVICE_BASE_URL: https://api.voxaria.io
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - nvm install 20
+            - nvm use 20
+            - npm ci
+        build:
+          commands:
+            - npm run build --workspace @education-researcher/web
+      artifacts:
+        baseDirectory: apps/web/dist
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - node_modules/**/*

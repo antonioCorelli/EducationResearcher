@@ -83,7 +83,7 @@ Real participant data collection is **no-go** until every required checkbox belo
 | Yes | Done | Production Cognito researcher auth and DynamoDB data-domain stacks are deployed in `us-east-1`; see `docs/production-deployment-runbook.md`. |
 | Yes | Done | The pilot researcher account is created outside the repository. |
 | Yes | Not done | Production service and web hosting are deployed with managed production secrets. |
-| Yes | Not done | S3-backed audio/export artifact storage is implemented, deployed, and used instead of local storage. |
+| Yes | Deployment pending | S3-backed audio/export artifact storage is implemented in the repository; deploy `EducationResearcherArtifacts-prod`, attach S3 IAM, and run the non-real upload/playback smoke test before marking done. |
 | Yes | Not done | AI and realtime voice provider data-processing decisions are documented and approved for real pilot data. |
 | Yes | Not done | Retention and researcher deletion operations are documented for database records, S3 objects, exports, logs, telemetry, and backups. |
 | Yes | Not done | Backup and restore expectations are documented and validated for pilot-critical data. |

@@ -15,7 +15,9 @@ const REQUIRED_PRODUCTION_ENV_VARS = [
   "OPERATIONS_STORE",
   "PARTICIPANT_ACCESS_BASE_URL",
   "PARTICIPANT_ACCESS_TOKEN_SECRET",
-  "AUDIO_LINK_SIGNING_SECRET"
+  "AUDIO_LINK_SIGNING_SECRET",
+  "INTERVIEW_AUDIO_STORAGE_BACKEND",
+  "ARTIFACT_STORAGE_BUCKET_NAME"
 ] as const;
 
 const DYNAMODB_STORE_ENV_VARS = [
@@ -41,6 +43,7 @@ export function validateProductionRuntimeConfig(env: NodeJS.ProcessEnv = process
     ...validateExpectedValue(env, "SERVICE_HOST", "0.0.0.0"),
     ...validateExpectedValue(env, "SERVICE_PUBLIC_BASE_URL", "https://api.voxaria.io"),
     ...validateExpectedValue(env, "PARTICIPANT_ACCESS_BASE_URL", "https://voxaria.io"),
+    ...validateExpectedValue(env, "INTERVIEW_AUDIO_STORAGE_BACKEND", "s3"),
     ...validateStoreModes(env),
     ...validateCorsOrigins(env.CORS_ORIGIN)
   ];

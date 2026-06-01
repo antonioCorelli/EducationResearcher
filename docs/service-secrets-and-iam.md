@@ -67,6 +67,9 @@ OBJECTIVE_VERSION_STORE=dynamodb
 RUN_LIFECYCLE_STORE=dynamodb
 OPERATIONS_STORE=dynamodb
 PARTICIPANT_ACCESS_BASE_URL=https://voxaria.io
+INTERVIEW_AUDIO_STORAGE_BACKEND=s3
+ARTIFACT_STORAGE_BUCKET_NAME=education-researcher-prod-artifacts-077317248751
+INTERVIEW_AUDIO_STORAGE_PREFIX=audio
 ```
 
 ## Required Secret Environment
@@ -128,6 +131,26 @@ DynamoDB queries against GSIs.
         "arn:aws:dynamodb:us-east-1:077317248751:table/education-researcher-prod-versioned-configuration",
         "arn:aws:dynamodb:us-east-1:077317248751:table/education-researcher-prod-versioned-configuration/index/*"
       ]
+    },
+    {
+      "Sid": "ListProductionArtifactPrefixes",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::education-researcher-prod-artifacts-077317248751",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": ["audio/*", "exports/*"]
+        }
+      }
+    },
+    {
+      "Sid": "ReadWriteProductionArtifacts",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": [
+        "arn:aws:s3:::education-researcher-prod-artifacts-077317248751/audio/*",
+        "arn:aws:s3:::education-researcher-prod-artifacts-077317248751/exports/*"
+      ]
     }
   ]
 }
@@ -136,9 +159,27 @@ DynamoDB queries against GSIs.
 If the parameters use a customer-managed KMS key instead of the AWS-managed SSM key, also grant `kms:Decrypt` for that
 key to the instance profile role.
 
-S3 IAM is intentionally not enabled yet because the current service storage adapter still uses local filesystem-backed
-storage. Real participant data remains blocked until S3-backed artifact storage is implemented, deployed, and granted
-least-privilege bucket access.
+## S3 Artifact Storage
+
+Source issue: [#65](https://github.com/antonioCorelli/EducationResearcher/issues/65)
+
+The CDK app provisions an artifact bucket named `education-researcher-<environment>-artifacts-<account-id>`. The
+production service uses `audio/` for interview audio objects. The `exports/` prefix is reserved for generated export
+objects when export generation becomes asynchronous or durable-file backed.
+
+Bucket defaults:
+
+- Block all public access.
+- Enforce SSL.
+- Use S3-managed server-side encryption.
+- Enforce bucket-owner object ownership.
+- Enable versioning in production.
+- Retain the production bucket if the stack is deleted.
+- Expire objects after 730 days to match the current default study-artifact retention window.
+
+Researchers do not receive public S3 URLs. Raw-evidence views continue to use the service authorization path, which
+returns short-lived signed service playback links for available audio assets. Participants only upload audio through
+their active run-scoped participant token and do not receive raw artifact access after completion.
 
 ## Verification
 

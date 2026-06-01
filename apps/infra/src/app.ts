@@ -1,4 +1,5 @@
 import { App } from "aws-cdk-lib";
+import { EducationResearcherArtifactStack } from "./artifact-stack.js";
 import { EducationResearcherAuthStack } from "./auth-stack.js";
 import { EducationResearcherDataStack } from "./data-stack.js";
 
@@ -10,5 +11,9 @@ new EducationResearcherAuthStack(app, `EducationResearcherAuth-${environment}`, 
 });
 
 new EducationResearcherDataStack(app, `EducationResearcherData-${environment}`, {
+  environment
+});
+
+new EducationResearcherArtifactStack(app, `EducationResearcherArtifacts-${environment}`, {
   environment
 });

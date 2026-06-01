@@ -19,7 +19,9 @@ const requiredProductionConfig = {
   OPERATIONS_STORE: "dynamodb",
   PARTICIPANT_ACCESS_BASE_URL: "https://voxaria.io",
   PARTICIPANT_ACCESS_TOKEN_SECRET: "participant-secret",
-  AUDIO_LINK_SIGNING_SECRET: "audio-secret"
+  AUDIO_LINK_SIGNING_SECRET: "audio-secret",
+  INTERVIEW_AUDIO_STORAGE_BACKEND: "s3",
+  ARTIFACT_STORAGE_BUCKET_NAME: "education-researcher-prod-artifacts-077317248751"
 };
 
 afterEach(() => {
@@ -62,5 +64,18 @@ describe("production runtime config validation", () => {
     vi.stubEnv("CORS_ORIGIN", "https://voxaria.io,https://evil.example");
 
     expect(() => validateProductionRuntimeConfig()).toThrow("invalid CORS_ORIGIN");
+  });
+
+  it("requires S3-backed artifact storage in production", () => {
+    for (const [name, value] of Object.entries(requiredProductionConfig)) {
+      vi.stubEnv(name, value);
+    }
+
+    vi.stubEnv("INTERVIEW_AUDIO_STORAGE_BACKEND", "local");
+    vi.stubEnv("ARTIFACT_STORAGE_BUCKET_NAME", "");
+
+    expect(() => validateProductionRuntimeConfig()).toThrow(
+      "Invalid production service configuration: missing ARTIFACT_STORAGE_BUCKET_NAME; invalid INTERVIEW_AUDIO_STORAGE_BACKEND."
+    );
   });
 });

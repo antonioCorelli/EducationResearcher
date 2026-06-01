@@ -87,10 +87,14 @@ Before collecting real participant data, review `docs/deployment-readiness.md`.
 The current launch-mode decision is `private_pilot_with_real_data` for a private pilot with one researcher account, one survey, and about 40 student participants. Real participant data collection remains blocked until the deployment readiness gate passes, including S3-backed artifact storage, managed production secrets, provider data-processing approval, retention/deletion operations, backup/restore expectations, production observability, incident response, and a non-real production smoke test.
 
 Production deployment notes and non-secret stack outputs are recorded in `docs/production-deployment-runbook.md`.
+The web hosting build settings, Amplify app setup, SPA rewrite, and verification steps are recorded in
+`docs/web-hosting.md`.
 The service hosting decision, Docker build path, Elastic Beanstalk environment configuration, and rollback steps are
 recorded in `docs/service-hosting.md`.
 Production service secrets, environment variables, and IAM requirements are recorded in
 `docs/service-secrets-and-iam.md`.
+Production S3 artifact storage for interview audio and reserved generated export objects is provisioned by
+`EducationResearcherArtifacts-<environment>` in the CDK app.
 
 ## Participant Slot Import Format
 
@@ -153,6 +157,10 @@ npm run infra:deploy
 After deploying the auth stack, set `AWS_REGION`, `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, and
 `EDUCATION_RESEARCHER_ENV=dev` in `.env`. The environment value is part of each DynamoDB table name, such as
 `education-researcher-dev-study-setup`.
+The service defaults to local filesystem-backed interview audio storage. For production, set
+`INTERVIEW_AUDIO_STORAGE_BACKEND=s3`, `ARTIFACT_STORAGE_BUCKET_NAME=<artifact-bucket-name>`, and
+`INTERVIEW_AUDIO_STORAGE_PREFIX=audio`. The production bucket also reserves an `exports/` prefix for generated export
+objects.
 The local fake/test credentials are not automatically created in Cognito. Create a researcher user in the deployed
 user pool before signing in through the app:
 
