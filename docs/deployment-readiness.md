@@ -80,7 +80,8 @@ Real participant data collection is **no-go** until every required checkbox belo
 | --- | --- | --- |
 | Yes | Done | Launch mode selected: `private_pilot_with_real_data`. |
 | Yes | Done | First launch scope confirmed: one pilot study, one survey, one pilot researcher account, about 40 students, June 5, 2026 target. |
-| Yes | Not done | Production Cognito researcher auth is deployed and the pilot researcher account is created outside the repository. |
+| Yes | Done | Production Cognito researcher auth and DynamoDB data-domain stacks are deployed in `us-east-1`; see `docs/production-deployment-runbook.md`. |
+| Yes | Done | The pilot researcher account is created outside the repository. |
 | Yes | Not done | Production service and web hosting are deployed with managed production secrets. |
 | Yes | Not done | S3-backed audio/export artifact storage is implemented, deployed, and used instead of local storage. |
 | Yes | Not done | AI and realtime voice provider data-processing decisions are documented and approved for real pilot data. |

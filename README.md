@@ -86,6 +86,8 @@ Before collecting real participant data, review `docs/deployment-readiness.md`.
 
 The current launch-mode decision is `private_pilot_with_real_data` for a private pilot with one researcher account, one survey, and about 40 student participants. Real participant data collection remains blocked until the deployment readiness gate passes, including S3-backed artifact storage, managed production secrets, provider data-processing approval, retention/deletion operations, backup/restore expectations, production observability, incident response, and a non-real production smoke test.
 
+Production deployment notes and non-secret stack outputs are recorded in `docs/production-deployment-runbook.md`.
+
 ## Participant Slot Import Format
 
 Participant slot CSV import accepts a single participant code column with an optional `participantCode` or
