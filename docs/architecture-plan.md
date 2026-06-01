@@ -197,6 +197,7 @@ Real providers should be selected through environment configuration and accessed
 ## Deployment Assumptions
 
 - A single React/Vite web application can serve researcher and participant routes for V1.
+- The first launch mode is `private_pilot_with_real_data`, gated by `docs/deployment-readiness.md`; real participant data remains blocked until that checklist passes.
 - AWS Amplify hosts and deploys the frontend.
 - AWS App Runner hosts and deploys the Fastify service API.
 - Cognito manages researcher/admin authentication.

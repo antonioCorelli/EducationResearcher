@@ -16,10 +16,11 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 - Local database mode: DynamoDB Local with create, reset, and seed commands.
 - Migration workflow: AWS CDK table/index definitions plus a versioned schema contract and fixture workflow.
 - Infrastructure-as-code approach: AWS CDK.
+- First launch mode: `private_pilot_with_real_data`, gated by `docs/deployment-readiness.md`.
+- First pilot user segment: one private classroom pilot with a single researcher account, one survey, and about 40 student participants.
 
 ## Product Questions
 
-- Which user segment is the first pilot: individual researchers, research labs, courses, or institutions?
 - Should V1 support study collaborators through `study_memberships`, or only one owner plus admin engineers?
 - How should researchers distribute participant access: copied links, access codes, email, CSV export of links, or another workflow?
 - What CSV import format should participant slots accept?
