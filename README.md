@@ -89,6 +89,8 @@ The current launch-mode decision is `private_pilot_with_real_data` for a private
 Production deployment notes and non-secret stack outputs are recorded in `docs/production-deployment-runbook.md`.
 The service hosting decision, Docker build path, Elastic Beanstalk environment configuration, and rollback steps are
 recorded in `docs/service-hosting.md`.
+Production service secrets, environment variables, and IAM requirements are recorded in
+`docs/service-secrets-and-iam.md`.
 
 ## Participant Slot Import Format
 

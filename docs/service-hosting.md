@@ -24,7 +24,9 @@ Use ECS Fargate + ALB later if the API needs independent worker services, queue 
 - `.dockerignore` keeps local build output, dependencies, environment files, and development artifacts out of the image build context.
 - `.ebextensions/01-service.config` configures Elastic Beanstalk for an Application Load Balancer, port `4000`, `/health` checks, production binding, and DynamoDB-backed stores.
 
-The committed Elastic Beanstalk configuration includes non-secret production defaults only. Set secrets and environment-specific values through Elastic Beanstalk configuration, SSM Parameter Store, or Secrets Manager. Do not commit secret values.
+The committed Elastic Beanstalk configuration includes non-secret production defaults plus references to managed SSM
+secret parameters. See `docs/service-secrets-and-iam.md` for the secret paths, IAM policy shape, and rotation guidance.
+Do not commit secret values.
 
 ## Required Production Environment
 
@@ -36,9 +38,11 @@ SERVICE_HOST=0.0.0.0
 PORT=4000
 SERVICE_PORT=4000
 SERVICE_PUBLIC_BASE_URL=https://api.voxaria.io
-CORS_ORIGIN=https://voxaria.io
+CORS_ORIGIN=https://voxaria.io,https://www.voxaria.io
 AWS_REGION=us-east-1
 EDUCATION_RESEARCHER_ENV=prod
+COGNITO_USER_POOL_ID=us-east-1_jTLroPp4Z
+COGNITO_CLIENT_ID=51gd0to7l28c5vi7veh0a7quu1
 STUDY_SHELL_STORE=dynamodb
 PARTICIPANT_SLOT_STORE=dynamodb
 CONSENT_VERSION_STORE=dynamodb
@@ -46,21 +50,20 @@ SURVEY_VERSION_STORE=dynamodb
 OBJECTIVE_VERSION_STORE=dynamodb
 RUN_LIFECYCLE_STORE=dynamodb
 OPERATIONS_STORE=dynamodb
+PARTICIPANT_ACCESS_BASE_URL=https://voxaria.io
 ```
 
-Set these as managed secrets or protected environment values before production traffic:
+Set these as managed secret references before production traffic:
 
 ```text
-COGNITO_USER_POOL_ID
-COGNITO_CLIENT_ID
-PARTICIPANT_ACCESS_TOKEN_SECRET
-AUDIO_LINK_SIGNING_SECRET
-OPENAI_API_KEY
-OPENAI_REALTIME_MODEL
-OPENAI_REALTIME_VOICE
+PARTICIPANT_ACCESS_TOKEN_SECRET=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/participant-access-token-secret
+AUDIO_LINK_SIGNING_SECRET=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/audio-link-signing-secret
 ```
 
-`CORS_ORIGIN` currently assumes the frontend origin is `https://voxaria.io`. If the production Amplify app uses a different canonical origin, update this value before deploying.
+Do not set provider keys such as `OPENAI_API_KEY` until real provider mode is approved for the pilot.
+
+`CORS_ORIGIN` is limited to `https://voxaria.io,https://www.voxaria.io`. If the production Amplify app uses a different
+canonical origin, update the runtime validation and deployment docs intentionally before deploying.
 
 ## IAM
 
@@ -73,7 +76,9 @@ The Elastic Beanstalk EC2 instance profile must allow the service to read and wr
 - `education-researcher-prod-study-setup`
 - `education-researcher-prod-versioned-configuration`
 
-The service also needs Cognito IDP permissions for the configured user pool sign-in flow. Start narrowly with the exact actions used by the service and expand only when a deployment error proves another action is required.
+The service also needs Cognito IDP permissions for the configured user pool sign-in flow and SSM read access for the
+managed secret parameters. See `docs/service-secrets-and-iam.md` for the policy template. Start narrowly with the exact
+actions used by the service and expand only when a deployment error proves another action is required.
 
 Do not enable real participant data collection until S3-backed interview audio storage, production secrets, provider data-processing approval, retention/deletion, observability, and incident response are complete in `docs/deployment-readiness.md`.
 

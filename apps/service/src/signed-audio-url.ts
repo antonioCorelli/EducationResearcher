@@ -93,7 +93,17 @@ function signAudioUrlPayload(
 }
 
 function getConfiguredAudioSigningSecret() {
-  return process.env.AUDIO_LINK_SIGNING_SECRET ?? process.env.PARTICIPANT_ACCESS_TOKEN_SECRET ?? "local-audio-link-secret";
+  const signingSecret = process.env.AUDIO_LINK_SIGNING_SECRET ?? process.env.PARTICIPANT_ACCESS_TOKEN_SECRET;
+
+  if (signingSecret) {
+    return signingSecret;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUDIO_LINK_SIGNING_SECRET is required in production.");
+  }
+
+  return "local-audio-link-secret";
 }
 
 function parseSignedAudioText(value: unknown, label: string) {

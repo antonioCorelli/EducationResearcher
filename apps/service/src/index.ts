@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 import { buildServer } from "./server.js";
+import { validateProductionRuntimeConfig } from "./runtime-config.js";
 
 config({
   path: fileURLToPath(new URL("../../../.env", import.meta.url))
@@ -14,6 +15,8 @@ config({
 const DEFAULT_PORT = 4000;
 
 export async function start() {
+  validateProductionRuntimeConfig();
+
   const server = buildServer();
   const host =
     process.env.SERVICE_HOST ??

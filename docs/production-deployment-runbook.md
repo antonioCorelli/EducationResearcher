@@ -87,7 +87,26 @@ The repository now includes:
 - `Dockerfile` for the `@education-researcher/service` workspace.
 - `Dockerrun.aws.json` to declare the Elastic Beanstalk Docker container port.
 - `.ebextensions/01-service.config` for the Application Load Balancer process port and `/health` check.
+- `.ebextensions/02-secrets.config` for managed SSM secret references.
 - `docs/service-hosting.md` for the deployment, verification, redeploy, and rollback procedure.
+- `docs/service-secrets-and-iam.md` for required service env vars, secret paths, and IAM policy shape.
 
 The service must be verified at the default Elastic Beanstalk URL with `GET /health` before mapping
 `api.voxaria.io`.
+
+### Managed Secret Parameters
+
+Source issue: [#64](https://github.com/antonioCorelli/EducationResearcher/issues/64)
+
+The production service expects these SecureString parameters in SSM Parameter Store:
+
+| Runtime env var | SSM parameter path |
+| --- | --- |
+| `PARTICIPANT_ACCESS_TOKEN_SECRET` | `/education-researcher/prod/participant-access-token-secret` |
+| `AUDIO_LINK_SIGNING_SECRET` | `/education-researcher/prod/audio-link-signing-secret` |
+
+Provider secrets such as `OPENAI_API_KEY` are intentionally not configured until real provider mode is approved.
+
+These parameters were created as `SecureString` values on June 1, 2026 after SSM permissions were added for the local
+deployment user. Both are standard-tier parameters at version 1. The values were generated locally as 64 random bytes,
+base64 encoded, written directly to SSM, and not printed or committed.
