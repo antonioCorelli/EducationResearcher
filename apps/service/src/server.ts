@@ -123,6 +123,25 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly realtimeVoiceProvider?: RealtimeVoiceProvider;
 }
 
+function createConfiguredCorsOrigin(): boolean | string | string[] {
+  const configuredOrigin = process.env.CORS_ORIGIN?.trim();
+
+  if (configuredOrigin) {
+    const origins = configuredOrigin
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+
+    return origins.length === 1 ? origins[0] : origins;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("CORS_ORIGIN is required in production.");
+  }
+
+  return true;
+}
+
 interface SignInBody {
   readonly email?: unknown;
   readonly password?: unknown;
@@ -1051,7 +1070,7 @@ export function buildServer(options: BuildServerOptions = {}) {
   const {
     authProvider,
     consentVersionStore = createConfiguredConsentVersionStore(),
-    corsOrigin = true,
+    corsOrigin = createConfiguredCorsOrigin(),
     gapMapGenerator = createConfiguredGapMapGenerator(),
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
     operationalEventServiceOptions,

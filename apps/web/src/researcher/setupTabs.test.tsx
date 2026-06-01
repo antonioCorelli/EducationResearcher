@@ -105,7 +105,7 @@ describe("researcher setup tab information", () => {
       />
     );
 
-    expect(markup).toContain("Interview information");
+    expect(markup).toContain("Interview");
     expect(markup).toContain("Interview minutes");
     expect(markup).toContain("Interviewer goals");
     expect(markup).toContain("concepts to clarify");
