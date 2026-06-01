@@ -73,3 +73,21 @@ aws cloudformation describe-stacks --region us-east-1 --stack-name EducationRese
 aws dynamodb list-tables --region us-east-1 --query "TableNames[?starts_with(@, 'education-researcher-prod-')]"
 aws cognito-idp list-users --region us-east-1 --user-pool-id us-east-1_jTLroPp4Z
 ```
+
+## Service Hosting
+
+Source issue: [#63](https://github.com/antonioCorelli/EducationResearcher/issues/63)
+
+The production service hosting target is AWS Elastic Beanstalk on the Docker platform. The previous App Runner plan was
+replaced because AWS documents that App Runner is no longer open to new customers after March 31, 2026, and the current
+local IAM user cannot confirm legacy App Runner access for account `077317248751`.
+
+The repository now includes:
+
+- `Dockerfile` for the `@education-researcher/service` workspace.
+- `Dockerrun.aws.json` to declare the Elastic Beanstalk Docker container port.
+- `.ebextensions/01-service.config` for the Application Load Balancer process port and `/health` check.
+- `docs/service-hosting.md` for the deployment, verification, redeploy, and rollback procedure.
+
+The service must be verified at the default Elastic Beanstalk URL with `GET /health` before mapping
+`api.voxaria.io`.

@@ -9,7 +9,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 - Frontend hosting/deploy: AWS Amplify.
 - Researcher/admin auth provider: Amazon Cognito.
 - Service API stack: Node.js, TypeScript, and Fastify.
-- Service API hosting/deploy: AWS App Runner.
+- Service API hosting/deploy: AWS Elastic Beanstalk on the Docker platform.
 - Primary AWS storage direction: DynamoDB for application data/state and S3 for audio assets and generated exports.
 - Fake providers are required from day one for local development and deterministic tests, including auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
 - DynamoDB physical data model: table per data domain.
@@ -37,7 +37,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 - Should background workers live in `apps/service` initially or become a separate workspace package?
 - What key and index refinements are needed as service access patterns become concrete?
-- What CDK stack boundaries should define Amplify, Cognito, App Runner, S3, and IAM?
+- What CDK stack boundaries should define Amplify, Cognito, Elastic Beanstalk supporting IAM, S3, and any later worker infrastructure?
 - How should signed S3 access be generated, scoped, expired, and audited for audio and exports?
 - Which AI model provider should handle gap map and scoring passes?
 - Which realtime voice provider should handle voice-to-voice interviews?

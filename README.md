@@ -25,7 +25,7 @@ This repository now has a foundation scaffold for local development:
 - **Frontend hosting/deploy:** AWS Amplify.
 - **Researcher/admin authentication:** Amazon Cognito.
 - **Service API:** Node.js, TypeScript, and Fastify.
-- **Service hosting/deploy:** AWS App Runner.
+- **Service hosting/deploy:** AWS Elastic Beanstalk on the Docker platform.
 - **Primary AWS data services:** DynamoDB for application data and state, S3 for interview audio assets and generated exports.
 - **Local provider mode:** fake providers are required from day one for auth/session, AI gap maps/scoring, voice interviews, and storage-like behavior.
 
@@ -87,6 +87,8 @@ Before collecting real participant data, review `docs/deployment-readiness.md`.
 The current launch-mode decision is `private_pilot_with_real_data` for a private pilot with one researcher account, one survey, and about 40 student participants. Real participant data collection remains blocked until the deployment readiness gate passes, including S3-backed artifact storage, managed production secrets, provider data-processing approval, retention/deletion operations, backup/restore expectations, production observability, incident response, and a non-real production smoke test.
 
 Production deployment notes and non-secret stack outputs are recorded in `docs/production-deployment-runbook.md`.
+The service hosting decision, Docker build path, Elastic Beanstalk environment configuration, and rollback steps are
+recorded in `docs/service-hosting.md`.
 
 ## Participant Slot Import Format
 

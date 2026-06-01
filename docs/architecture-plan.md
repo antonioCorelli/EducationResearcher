@@ -12,7 +12,7 @@ The following implementation decisions are confirmed for the first scaffold:
 - **Frontend hosting/deploy:** AWS Amplify.
 - **Researcher/admin auth:** Amazon Cognito.
 - **Service API:** Node.js, TypeScript, and Fastify.
-- **Service hosting/deploy:** AWS App Runner.
+- **Service hosting/deploy:** AWS Elastic Beanstalk on the Docker platform.
 - **Primary AWS data services:** DynamoDB for application records and run state, S3 for interview audio assets and generated exports.
 - **Local/test provider mode:** fake providers are required from day one for auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
 - **DynamoDB physical model:** table per data domain, defined through a shared TypeScript schema contract.
@@ -31,7 +31,7 @@ This fits the PRD because the core product behavior is not just screens; it is d
 
 - **Researcher web app:** React/Vite authenticated study setup, participant/run management, review, evidence drilldown, and export, deployed with AWS Amplify.
 - **Participant web app:** React/Vite token-scoped consent, survey, voice interview, pause/resume, recovery, and thank-you flow, deployed with AWS Amplify.
-- **Service API:** Node.js/TypeScript/Fastify endpoints for studies, configuration versions, slots, runs, artifacts, scoring, exports, and admin support, deployed with AWS App Runner.
+- **Service API:** Node.js/TypeScript/Fastify endpoints for studies, configuration versions, slots, runs, artifacts, scoring, exports, and admin support, deployed with AWS Elastic Beanstalk on the Docker platform.
 - **Run orchestration service:** explicit state transitions, freshness enforcement, technical interruption handling, and scoring triggers.
 - **AI orchestration layer:** gap map pass, interview pass/session integration, scoring pass, model metadata, prompt versioning, schema validation, retries, and error categorization.
 - **Realtime voice adapter:** browser audio capture/playback, transcription, voice response, turn handling, connection state, and resume behavior.
@@ -128,7 +128,7 @@ Important data properties:
 
 - **AWS Amplify:** frontend hosting/deploy for the React/Vite app.
 - **Amazon Cognito:** researcher/admin login, role claims, and session management.
-- **AWS App Runner:** hosted container runtime for the Fastify service API.
+- **AWS Elastic Beanstalk:** Docker-based hosting for the Fastify service API behind an Application Load Balancer.
 - **DynamoDB:** study, run, versioned configuration, artifact metadata, scoring, telemetry, and audit records.
 - **S3:** audio and export storage with signed access.
 - **AI model provider:** gap map and scoring generation with structured output support; final provider not yet selected.
@@ -199,7 +199,7 @@ Real providers should be selected through environment configuration and accessed
 - A single React/Vite web application can serve researcher and participant routes for V1.
 - The first launch mode is `private_pilot_with_real_data`, gated by `docs/deployment-readiness.md`; real participant data remains blocked until that checklist passes.
 - AWS Amplify hosts and deploys the frontend.
-- AWS App Runner hosts and deploys the Fastify service API.
+- AWS Elastic Beanstalk hosts and deploys the Fastify service API using the repository Dockerfile.
 - Cognito manages researcher/admin authentication.
 - DynamoDB and S3 are required from the beginning.
 - Background workers or scheduled jobs are required before participant flows are production-ready.
@@ -210,7 +210,7 @@ Real providers should be selected through environment configuration and accessed
 
 ## Open Architecture Decisions
 
-- CDK stack boundaries for Amplify, Cognito, App Runner, S3, and supporting IAM.
+- CDK stack boundaries for Amplify, Cognito, Elastic Beanstalk supporting IAM, S3, and any later worker infrastructure.
 - DynamoDB index refinements after service access patterns are implemented.
 - Signed URL and access policy details for S3 audio/export artifacts.
 - Cognito role/group claim mapping for researcher and admin users.
