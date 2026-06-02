@@ -22,6 +22,7 @@
     "infra:list": "npm run list --workspace @education-researcher/infra",
     "infra:synth": "npm run synth --workspace @education-researcher/infra",
     "lint": "eslint .",
+    "smoke:prod": "node scripts/production-smoke-test.mjs",
     "test": "vitest run",
     "typecheck": "npm run typecheck --workspaces"
   },

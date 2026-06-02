@@ -15,7 +15,7 @@ export default [
     }
   },
   {
-    files: ["apps/service/**/*.ts", "*.config.js"],
+    files: ["apps/service/**/*.ts", "scripts/**/*.mjs", "*.config.js"],
     languageOptions: {
       globals: globals.node
     }

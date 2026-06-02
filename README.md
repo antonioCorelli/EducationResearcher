@@ -80,6 +80,18 @@ npm test
 npm run build
 ```
 
+Run the production smoke test locally after creating `.env.production-smoke.local` from `.env.production-smoke.example`:
+
+```bash
+npm run smoke:prod
+```
+
+The smoke test checks that `https://voxaria.io` returns the web app shell, `https://api.voxaria.io/health` is healthy,
+the configured researcher can sign in, and authenticated researcher data can load. The local
+`.env.production-smoke.local` file is ignored by git. In GitHub, store the same credentials as repository secrets named
+`VOXARIA_SMOKE_USERNAME` and `VOXARIA_SMOKE_PASSWORD`; the `Production Smoke` workflow runs after successful `main` CI
+and can also be started manually.
+
 ## Deployment Readiness
 
 Before collecting real participant data, review `docs/deployment-readiness.md`.
