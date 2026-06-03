@@ -379,9 +379,10 @@ export interface RawEvidence {
 }
 
 export type RawEvidenceState =
-  | { readonly status: "idle" | "loading" }
+  | { readonly status: "idle" }
+  | { readonly status: "loading"; readonly runId?: string; readonly focusSourceId?: string }
   | { readonly status: "ready"; readonly evidence: RawEvidence; readonly focusSourceId?: string }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "error"; readonly message: string; readonly runId?: string; readonly focusSourceId?: string };
 
 export type SurveyLayoutItem =
   | {
@@ -1672,11 +1673,11 @@ export function App() {
     const token = localStorage.getItem(accessTokenStorageKey);
 
     if (!token || !selectedStudyId) {
-      setRawEvidenceState({ status: "error", message: "Select a study before opening raw evidence." });
+      setRawEvidenceState({ status: "error", message: "Select a study before opening raw evidence.", runId, focusSourceId });
       return;
     }
 
-    setRawEvidenceState({ status: "loading" });
+    setRawEvidenceState({ status: "loading", runId, focusSourceId });
 
     try {
       const evidence = await fetchRawEvidence(token, selectedStudyId, runId);
@@ -1687,7 +1688,12 @@ export function App() {
         });
       }, 0);
     } catch (error) {
-      setRawEvidenceState({ status: "error", message: error instanceof Error ? error.message : "Unable to load raw evidence." });
+      setRawEvidenceState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Unable to load raw evidence.",
+        runId,
+        focusSourceId
+      });
     }
   }
 
@@ -2398,6 +2404,11 @@ export function App() {
             onExportScores={handleExportScores}
             onManualRescore={handleManualRescore}
             onOpenEvidenceCitation={handleOpenEvidenceCitation}
+            onOpenRawEvidence={async (runId, focusSourceId) => {
+              setSelectedEvidenceCitation(null);
+              setSelectedEvidenceCitationError("");
+              await openRawEvidence(runId, focusSourceId);
+            }}
           />
         }
         consentPanel={

@@ -349,6 +349,7 @@ describe("ScoreReviewList", () => {
         onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
+        onOpenRawEvidence={noop}
         isRescoringRunId={null}
       />
     );
@@ -417,6 +418,7 @@ describe("ScoreReviewList", () => {
         onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
+        onOpenRawEvidence={noop}
         isRescoringRunId={null}
       />
     );
@@ -424,9 +426,90 @@ describe("ScoreReviewList", () => {
     expect(markup).toContain("Raw evidence");
     expect(markup).toContain("I noticed that the example changed my reasoning.");
     expect(markup).toContain("The second example made the pattern much clearer.");
-    expect(markup).toContain("Open signed audio link");
     expect(markup).toContain("audio");
+    expect(markup).not.toContain("Open signed audio link");
+    expect(markup).not.toContain("audio-evidence-title");
     expect(markup).toContain("focused-raw-evidence");
+  });
+
+  it("expands interview transcript citations inside the current score card with a collapse button", () => {
+    const review = createScoreReview("run_completed_001", []);
+    const transcriptReview: RunScoreReview = {
+      ...review,
+      objectiveScores: [
+        {
+          ...review.objectiveScores[0],
+          citations: [
+            {
+              id: "citation_transcript_001",
+              objectiveScoreId: "score_run_completed_001",
+              runId: "run_completed_001",
+              sourceType: "interview_turn",
+              sourceId: "interview_turn_001",
+              quote: "The second example made the pattern much clearer.",
+              createdAt: "2026-05-06T12:40:00.000Z"
+            }
+          ]
+        }
+      ]
+    };
+    const markup = renderToStaticMarkup(
+      <ScoreReviewList
+        isExportingScores={false}
+        isLoadingEvidenceCitationId={null}
+        participantCodeBySlotId={new Map([["slot_fixture_001", "P001"]])}
+        scoreReviewState={{ status: "ready", scoreReviews: [transcriptReview] }}
+        scoreReviews={[transcriptReview]}
+        selectedEvidenceCitation={null}
+        selectedEvidenceCitationError=""
+        rescoreError=""
+        scoreExportError=""
+        rawEvidenceState={{
+          status: "ready",
+          focusSourceId: "interview_turn_001",
+          evidence: {
+            run: transcriptReview.run,
+            surveyResponses: [],
+            interviewTurns: [
+              {
+                id: "interview_turn_001",
+                sequenceNumber: 1,
+                speaker: "participant",
+                text: "The second example made the pattern much clearer.",
+                audioStartMs: 0,
+                audioEndMs: 8000,
+                createdAt: "2026-05-06T12:25:00.000Z"
+              }
+            ],
+            audioAssets: [
+              {
+                id: "interview_audio_asset_001",
+                storageUri: "s3://fixture/audio.wav",
+                durationSeconds: 8,
+                status: "available",
+                signedUrl: "https://signed.example.test/audio",
+                signedUrlExpiresAt: "2026-05-06T13:00:00.000Z",
+                createdAt: "2026-05-06T12:35:00.000Z"
+              }
+            ]
+          }
+        }}
+        onDismissEvidenceCitation={noop}
+        onDismissRawEvidence={noop}
+        onExportScores={noop}
+        onManualRescore={noop}
+        onOpenEvidenceCitation={noop}
+        onOpenRawEvidence={noop}
+        isRescoringRunId={null}
+      />
+    );
+
+    expect(markup).toContain("Collapse transcript");
+    expect(markup).toContain("Interview transcript");
+    expect(markup).toContain("The second example made the pattern much clearer.");
+    expect(markup).toContain("audio");
+    expect(markup).not.toContain("audio-evidence-title");
+    expect(markup).not.toContain("Survey responses");
   });
 
   it("aligns participant audio clips to participant transcript turns by evidence order", () => {
@@ -518,6 +601,7 @@ describe("ScoreReviewList", () => {
         onExportScores={noop}
         onManualRescore={noop}
         onOpenEvidenceCitation={noop}
+        onOpenRawEvidence={noop}
         isRescoringRunId={null}
       />
     );

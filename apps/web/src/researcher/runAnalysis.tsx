@@ -38,6 +38,7 @@ interface ResearcherRunAnalysisProps {
   readonly onExportScores: () => void;
   readonly onManualRescore: (runId: string) => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+  readonly onOpenRawEvidence: (runId: string, focusSourceId?: string) => void;
 }
 
 export function ResearcherRunAnalysis({
@@ -55,7 +56,8 @@ export function ResearcherRunAnalysis({
   onDismissRawEvidence,
   onExportScores,
   onManualRescore,
-  onOpenEvidenceCitation
+  onOpenEvidenceCitation,
+  onOpenRawEvidence
 }: ResearcherRunAnalysisProps) {
   const scoreReviews = scoreReviewState.status === "ready" ? scoreReviewState.scoreReviews : [];
   const participantCodeBySlotId = new Map(participantSlots.map((slot) => [slot.id, slot.participantCode]));
@@ -82,6 +84,7 @@ export function ResearcherRunAnalysis({
         onExportScores={onExportScores}
         onManualRescore={onManualRescore}
         onOpenEvidenceCitation={onOpenEvidenceCitation}
+        onOpenRawEvidence={onOpenRawEvidence}
       />
     </section>
   );
@@ -103,6 +106,7 @@ interface ScoreReviewListProps {
   readonly onExportScores: () => void;
   readonly onManualRescore: (runId: string) => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+  readonly onOpenRawEvidence: (runId: string, focusSourceId?: string) => void;
   readonly isRescoringRunId: string | null;
 }
 
@@ -122,9 +126,15 @@ export function ScoreReviewList({
   onExportScores,
   onManualRescore,
   isRescoringRunId,
-  onOpenEvidenceCitation
+  onOpenEvidenceCitation,
+  onOpenRawEvidence
 }: ScoreReviewListProps) {
   const scoredReviews = scoreReviews.filter((review) => review.scoringRun);
+  const hasInlineTranscriptEvidence = scoredReviews.some((review) =>
+    review.objectiveScores.some(({ citations }) =>
+      citations.some((citation) => isInlineTranscriptEvidenceCitation(rawEvidenceState, review.run.id, citation))
+    )
+  );
 
   return (
     <div className="score-review-section" aria-labelledby="score-review-title">
@@ -214,8 +224,11 @@ export function ScoreReviewList({
                       <CitationList
                         citations={citations}
                         isLoadingEvidenceCitationId={isLoadingEvidenceCitationId}
+                        rawEvidenceState={rawEvidenceState}
                         runId={review.run.id}
+                        onDismissRawEvidence={onDismissRawEvidence}
                         onOpenEvidenceCitation={onOpenEvidenceCitation}
+                        onOpenRawEvidence={onOpenRawEvidence}
                       />
                     </section>
                   );
@@ -231,7 +244,7 @@ export function ScoreReviewList({
       {selectedEvidenceCitation ? (
         <EvidenceCitationPanel citation={selectedEvidenceCitation} onDismiss={onDismissEvidenceCitation} />
       ) : null}
-      <RawEvidencePanel rawEvidenceState={rawEvidenceState} onDismiss={onDismissRawEvidence} />
+      {hasInlineTranscriptEvidence ? null : <RawEvidencePanel rawEvidenceState={rawEvidenceState} onDismiss={onDismissRawEvidence} />}
     </div>
   );
 }
@@ -271,13 +284,19 @@ function FlagList({ flags }: { readonly flags: readonly ScoreFlag[] }) {
 function CitationList({
   citations,
   isLoadingEvidenceCitationId,
+  rawEvidenceState,
   runId,
-  onOpenEvidenceCitation
+  onDismissRawEvidence,
+  onOpenEvidenceCitation,
+  onOpenRawEvidence
 }: {
   readonly citations: readonly EvidenceCitation[];
   readonly isLoadingEvidenceCitationId: string | null;
+  readonly rawEvidenceState: RawEvidenceState;
   readonly runId: string;
+  readonly onDismissRawEvidence: () => void;
   readonly onOpenEvidenceCitation: (runId: string, evidenceCitationId: string) => void;
+  readonly onOpenRawEvidence: (runId: string, focusSourceId?: string) => void;
 }) {
   if (citations.length === 0) {
     return <p className="muted-copy">No cited evidence</p>;
@@ -285,19 +304,60 @@ function CitationList({
 
   return (
     <div className="citation-list" aria-label="Evidence citations">
-      {citations.map((citation) => (
-        <button
-          className="citation-link"
-          key={citation.id}
-          onClick={() => onOpenEvidenceCitation(runId, citation.id)}
-          type="button"
-        >
-          <span>{formatCitationSource(citation)}</span>
-          <small>{isLoadingEvidenceCitationId === citation.id ? "Opening evidence" : citation.quote}</small>
-        </button>
-      ))}
+      {citations.map((citation) => {
+        const isTranscriptCitation = citation.sourceType === "interview_turn";
+        const isInlineTranscriptEvidence = isInlineTranscriptEvidenceCitation(rawEvidenceState, runId, citation);
+
+        if (isTranscriptCitation && isInlineTranscriptEvidence) {
+          return (
+            <div className="inline-transcript-panel" key={citation.id}>
+              <button className="secondary-button compact-button" onClick={onDismissRawEvidence} type="button">
+                Collapse transcript
+              </button>
+              {rawEvidenceState.status === "loading" ? <p className="muted-copy">Loading interview transcript</p> : null}
+              {rawEvidenceState.status === "error" ? <p className="form-error">{rawEvidenceState.message}</p> : null}
+              {rawEvidenceState.status === "ready" ? (
+                <RawEvidencePanel
+                  mode="transcript"
+                  rawEvidenceState={rawEvidenceState}
+                  showDismissButton={false}
+                  onDismiss={onDismissRawEvidence}
+                />
+              ) : null}
+            </div>
+          );
+        }
+
+        return (
+          <button
+            className="citation-link"
+            key={citation.id}
+            onClick={() =>
+              isTranscriptCitation ? onOpenRawEvidence(runId, citation.sourceId) : onOpenEvidenceCitation(runId, citation.id)
+            }
+            type="button"
+          >
+            <span>{formatCitationSource(citation)}</span>
+            <small>{isLoadingEvidenceCitationId === citation.id ? "Opening evidence" : citation.quote}</small>
+          </button>
+        );
+      })}
     </div>
   );
+}
+
+function isInlineTranscriptEvidenceCitation(rawEvidenceState: RawEvidenceState, runId: string, citation: EvidenceCitation) {
+  if (citation.sourceType !== "interview_turn") {
+    return false;
+  }
+
+  if (rawEvidenceState.status === "idle") {
+    return false;
+  }
+
+  const rawEvidenceRunId = rawEvidenceState.status === "ready" ? rawEvidenceState.evidence.run.id : rawEvidenceState.runId;
+
+  return rawEvidenceRunId === runId && rawEvidenceState.focusSourceId === citation.sourceId;
 }
 
 function EvidenceCitationPanel({

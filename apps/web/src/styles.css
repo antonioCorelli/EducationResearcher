@@ -2034,8 +2034,22 @@ textarea {
 
 .raw-evidence-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.transcript-only-evidence-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.inline-transcript-panel {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.inline-transcript-panel .raw-evidence-panel {
+  width: 100%;
 }
 
 .raw-evidence-grid section,
