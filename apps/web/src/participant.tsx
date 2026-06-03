@@ -320,6 +320,7 @@ export function Participant() {
         text: answer.responseText
       }
     );
+    sendRealtimeTypedAnswer(dataChannelRef.current, answer.responseText);
   }
 
   async function connectRealtimeVoice(accessToken: string, retryCount = realtimeRetryCount) {
@@ -1005,7 +1006,6 @@ export function ParticipantInterviewScreen({
   const [transcriptDraft, setTranscriptDraft] = useState(latestSpokenTranscript ?? "");
   const [typedDraft, setTypedDraft] = useState("");
   const [displayQuestion, setDisplayQuestion] = useState(getDisplayQuestionText(aiQuestion));
-  const [speechNonce, setSpeechNonce] = useState(0);
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
   const interviewHistoryIndexRef = useRef(0);
@@ -1038,7 +1038,11 @@ export function ParticipantInterviewScreen({
     uiState !== "paused" &&
     uiState !== "completed" &&
     (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
-  const shouldShowRepeatQuestion = shouldShowRepeatQuestionControl({ isNaturalRealtimeConversation, uiState });
+  const canUseCardBackButton = shouldShowInterviewCardBackButton({
+    canReturnToPreviousCard,
+    lastVoiceResponseMode,
+    responseMode
+  });
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
     : "interview-layout interview-layout-centered";
@@ -1211,7 +1215,7 @@ export function ParticipantInterviewScreen({
     const timeout = window.setTimeout(() => setUiState("student_turn"), 1400);
 
     return () => window.clearTimeout(timeout);
-  }, [isActive, responseMode, uiState, displayQuestion, speechNonce]);
+  }, [isActive, responseMode, uiState, displayQuestion]);
 
   useEffect(() => {
     if (!shouldWatchForStudentPause) {
@@ -1308,17 +1312,6 @@ export function ParticipantInterviewScreen({
     setInterruptionNotice("");
     onResponseModeChange(responseMode);
     onStart();
-  }
-
-  function handleRepeatQuestion() {
-    const nextUiState = getRepeatQuestionUiState(uiState);
-
-    if (nextUiState === uiState) {
-      return;
-    }
-
-    setSpeechNonce((value) => value + 1);
-    setUiState(normalizeInterviewUiStateForResponseMode(nextUiState, responseMode));
   }
 
   function handleStartAnswer() {
@@ -1458,7 +1451,7 @@ export function ParticipantInterviewScreen({
             Thank you for taking part. Your voice matters, and we appreciate your contribution to this research.
           </p>
 
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={() => navigateToInterviewCard({ nextUiState: "mic_check" })} type="button">
               Let's Begin
             </button>
@@ -1486,7 +1479,7 @@ export function ParticipantInterviewScreen({
           <p className="mic-check-transcript" aria-live="polite">
             {voiceCaptureTranscript || (voiceCaptureActive ? "Capturing your test sentence." : "\u00a0")}
           </p>
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button
               className="primary-button"
               disabled={!hasCompletedVoiceCapture(voiceCaptureStatus)}
@@ -1512,7 +1505,7 @@ export function ParticipantInterviewScreen({
             onChange={handleSelectResponseMode}
           />
           <p className="privacy-note">Your voice is only captured during your answer.</p>
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={handleStartInterview} type="button">
               {isActionPending ? "Starting" : "Start interview"}
             </button>
@@ -1531,7 +1524,7 @@ export function ParticipantInterviewScreen({
             responseMode={responseMode}
             onChange={handleSelectResponseMode}
           />
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={onResume} type="button">
               {isActionPending ? "Resuming" : "Resume interview"}
             </button>
@@ -1568,7 +1561,7 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Optional break" title="Would you like a short break?">
           <p>You are doing fine. You can pause for a moment or keep going.</p>
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
               Take a break
             </button>
@@ -1584,7 +1577,7 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Your turn" title="Want to add anything?">
           <p>We noticed a pause. You can continue, add more, redo, or type instead.</p>
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Continue
             </button>
@@ -1616,7 +1609,7 @@ export function ParticipantInterviewScreen({
             onChange={(event) => setTranscriptDraft(event.target.value)}
             value={transcriptDraft}
           />
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={!transcriptDraft.trim()} onClick={() => confirmAnswer(transcriptDraft)} type="button">
               Continue
             </button>
@@ -1650,7 +1643,7 @@ export function ParticipantInterviewScreen({
             placeholder="Type your answer here."
             value={typedDraft}
           />
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={!typedDraft.trim()} onClick={() => confirmAnswer(typedDraft)} type="button">
               Continue
             </button>
@@ -1675,7 +1668,7 @@ export function ParticipantInterviewScreen({
         <InterviewStageCard eyebrow="Your turn" title="Listening">
           <VoiceWave isActive label="Your voice activity" level={microphoneLevel} />
           <p className="recording-timer">Recording {formatElapsedSeconds(elapsedSeconds)}</p>
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Stop Talking
             </button>
@@ -1704,7 +1697,7 @@ export function ParticipantInterviewScreen({
         <InterviewStageCard eyebrow="Your turn" title="Your turn">
           <p>{responseMode === "push_to_talk" ? "Press record when you are ready to answer." : "Start when you are ready. We will wait briefly if you pause."}</p>
           <VoiceWave isActive={responseMode === "natural"} label="Your input meter" level={microphoneLevel} />
-          <InterviewCardActions canGoBack={canReturnToPreviousCard} onBack={returnToPreviousInterviewCard}>
+          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button
               className="primary-button"
               disabled={responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking"}
@@ -1764,11 +1757,6 @@ export function ParticipantInterviewScreen({
             <section className="ai-question-card" aria-label="Current AI question" aria-live="polite">
               <div className="card-heading-row">
                 <p className="eyebrow">Current question</p>
-                {shouldShowRepeatQuestion ? (
-                  <button className="secondary-button compact-button" onClick={handleRepeatQuestion} type="button">
-                    Repeat
-                  </button>
-                ) : null}
               </div>
               <p>{displayQuestion}</p>
             </section>
@@ -1804,7 +1792,7 @@ export function ParticipantInterviewScreen({
 
         {shouldShowInterviewControls ? (
           <div className="participant-interview-controls" aria-label="Interview controls">
-            <button className="secondary-button" disabled={isActionPending || isRecording} onClick={onComplete} type="button">
+            <button className="secondary-button" disabled={isActionPending} onClick={onComplete} type="button">
               End interview
             </button>
           </div>
@@ -2114,18 +2102,16 @@ function getInitialInterviewUiState(mode: InterviewMode, responseMode: Interview
   return "onboarding";
 }
 
-export function shouldShowRepeatQuestionControl({
-  isNaturalRealtimeConversation,
-  uiState
+export function shouldShowInterviewCardBackButton({
+  canReturnToPreviousCard,
+  lastVoiceResponseMode,
+  responseMode
 }: {
-  readonly isNaturalRealtimeConversation: boolean;
-  readonly uiState: InterviewUiState;
+  readonly canReturnToPreviousCard: boolean;
+  readonly lastVoiceResponseMode: Exclude<InterviewResponseMode, "typing">;
+  readonly responseMode: InterviewResponseMode;
 }) {
-  return !isNaturalRealtimeConversation && uiState !== "paused";
-}
-
-export function getRepeatQuestionUiState(uiState: InterviewUiState): InterviewUiState {
-  return uiState === "paused" ? "paused" : "ai_speaking";
+  return canReturnToPreviousCard && responseMode !== "push_to_talk" && lastVoiceResponseMode !== "push_to_talk";
 }
 
 function useElapsedSeconds(isActive: boolean) {
@@ -2919,6 +2905,43 @@ function finishPushToTalkInput(dataChannel: RTCDataChannel | undefined) {
 
   sendRealtimeEvent(dataChannel, { type: "input_audio_buffer.commit" });
   sendRealtimeEvent(dataChannel, { type: "response.create" });
+}
+
+function sendRealtimeTypedAnswer(dataChannel: RTCDataChannel | undefined, answerText: string) {
+  if (!dataChannel) {
+    return;
+  }
+
+  for (const event of createRealtimeTypedAnswerEvents(answerText)) {
+    sendRealtimeEvent(dataChannel, event);
+  }
+}
+
+export function createRealtimeTypedAnswerEvents(answerText: string) {
+  const text = answerText.trim().slice(0, 20000);
+
+  if (!text) {
+    return [];
+  }
+
+  return [
+    {
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text
+          }
+        ]
+      }
+    },
+    {
+      type: "response.create"
+    }
+  ];
 }
 
 export function createRealtimeResponseModeSessionUpdate(responseMode: InterviewResponseMode) {

@@ -7,13 +7,13 @@ import {
   createInterviewArtifactBatches,
   createInterviewAudioUploadHeaders,
   createRealtimeResponseModeSessionUpdate,
+  createRealtimeTypedAnswerEvents,
   getSupportedInterviewAudioMimeType,
-  getRepeatQuestionUiState,
   parseRealtimeAiTranscriptUpdate,
+  shouldShowInterviewCardBackButton,
   shouldNoticeStudentPause,
   shouldPausePushToTalkForAiSpeech,
-  shouldSpeakInterviewQuestionWithBrowserVoice,
-  shouldShowRepeatQuestionControl
+  shouldSpeakInterviewQuestionWithBrowserVoice
 } from "./participant";
 
 const noop = () => undefined;
@@ -305,19 +305,26 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("What part of your survey answer would you like to explain more?");
   });
 
-  it("does not let repeat move a paused interview into AI speaking state", () => {
-    expect(getRepeatQuestionUiState("paused")).toBe("paused");
-    expect(getRepeatQuestionUiState("student_turn")).toBe("ai_speaking");
+  it("does not show card back controls in push-to-talk flows", () => {
     expect(
-      shouldShowRepeatQuestionControl({
-        isNaturalRealtimeConversation: false,
-        uiState: "paused"
+      shouldShowInterviewCardBackButton({
+        canReturnToPreviousCard: true,
+        lastVoiceResponseMode: "push_to_talk",
+        responseMode: "push_to_talk"
       })
     ).toBe(false);
     expect(
-      shouldShowRepeatQuestionControl({
-        isNaturalRealtimeConversation: false,
-        uiState: "ai_speaking"
+      shouldShowInterviewCardBackButton({
+        canReturnToPreviousCard: true,
+        lastVoiceResponseMode: "push_to_talk",
+        responseMode: "typing"
+      })
+    ).toBe(false);
+    expect(
+      shouldShowInterviewCardBackButton({
+        canReturnToPreviousCard: true,
+        lastVoiceResponseMode: "natural",
+        responseMode: "natural"
       })
     ).toBe(true);
   });
@@ -469,6 +476,7 @@ describe("ParticipantInterviewScreen", () => {
 
     expect(markup).toContain("Listening");
     expect(markup).toContain("Stop Talking");
+    expect(markup).toContain("<button class=\"secondary-button\" type=\"button\">End interview</button>");
     expect(markup).not.toContain("Done");
   });
 
@@ -536,6 +544,28 @@ describe("ParticipantInterviewScreen", () => {
         }
       }
     });
+  });
+
+  it("adds typed answers to realtime voice context before requesting a follow-up", () => {
+    expect(createRealtimeTypedAnswerEvents("  I would explain this with a classroom example.  ")).toEqual([
+      {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "I would explain this with a classroom example."
+            }
+          ]
+        }
+      },
+      {
+        type: "response.create"
+      }
+    ]);
+    expect(createRealtimeTypedAnswerEvents("   ")).toEqual([]);
   });
 
   it("batches transcript artifacts within the service route limit", () => {
