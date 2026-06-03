@@ -82,6 +82,7 @@ import {
 } from "./scoring.js";
 import {
   createConfiguredRealtimeVoiceProvider,
+  toRealtimeVoiceProviderError,
   type RealtimeVoiceProvider
 } from "./voice-provider.js";
 import {
@@ -2127,6 +2128,18 @@ export function buildServer(options: BuildServerOptions = {}) {
         if (safeResponse) {
           return reply.code(safeResponse.statusCode).send(safeResponse.body);
         }
+
+        const providerError = toRealtimeVoiceProviderError(error);
+        request.log.error(
+          {
+            realtimeVoiceProviderError: {
+              safeCategory: providerError.safeCategory,
+              serviceRequestId: providerError.serviceRequestId,
+              providerStatus: providerError.providerStatus
+            }
+          },
+          "Unable to prepare participant realtime voice session."
+        );
 
         return reply.code(502).send({
           error: "Bad Gateway",

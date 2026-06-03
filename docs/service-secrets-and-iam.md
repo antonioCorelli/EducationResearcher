@@ -17,7 +17,7 @@ values.
 | --- | --- | --- | --- |
 | `PARTICIPANT_ACCESS_TOKEN_SECRET` | `/education-researcher/prod/participant-access-token-secret` | Yes | HMAC secret for run-scoped participant access tokens. |
 | `AUDIO_LINK_SIGNING_SECRET` | `/education-researcher/prod/audio-link-signing-secret` | Yes | HMAC secret for short-lived service audio links. |
-| `OPENAI_API_KEY` | `/education-researcher/prod/openai-api-key` | No | Create and reference only after real provider mode is approved. |
+| `OPENAI_API_KEY` | `/education-researcher/prod/openai-api-key` | Yes | Required for production realtime voice interviews. |
 
 Create or rotate the required parameters without printing values:
 
@@ -31,6 +31,8 @@ $bytes = New-Object byte[] 64
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
 $secret = [Convert]::ToBase64String($bytes)
 aws ssm put-parameter --region us-east-1 --name /education-researcher/prod/audio-link-signing-secret --type SecureString --value $secret --overwrite
+
+aws ssm put-parameter --region us-east-1 --name /education-researcher/prod/openai-api-key --type SecureString --value "<openai-api-key>" --overwrite
 ```
 
 Do not place these values in `.env`, GitHub Actions logs, issue comments, screenshots, shell transcripts, or browser
@@ -77,6 +79,7 @@ INTERVIEW_AUDIO_STORAGE_PREFIX=audio
 ```text
 PARTICIPANT_ACCESS_TOKEN_SECRET=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/participant-access-token-secret
 AUDIO_LINK_SIGNING_SECRET=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/audio-link-signing-secret
+OPENAI_API_KEY=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/openai-api-key
 ```
 
 In Elastic Beanstalk these are configured as environment secrets, not regular environment properties. At runtime the
@@ -97,7 +100,8 @@ DynamoDB queries against GSIs.
       "Action": ["ssm:GetParameter", "ssm:GetParameters"],
       "Resource": [
         "arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/participant-access-token-secret",
-        "arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/audio-link-signing-secret"
+        "arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/audio-link-signing-secret",
+        "arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/openai-api-key"
       ]
     },
     {
@@ -188,6 +192,7 @@ Before deploying a new production EB version:
 ```bash
 aws ssm get-parameter --region us-east-1 --name /education-researcher/prod/participant-access-token-secret --query "Parameter.ARN" --output text
 aws ssm get-parameter --region us-east-1 --name /education-researcher/prod/audio-link-signing-secret --query "Parameter.ARN" --output text
+aws ssm get-parameter --region us-east-1 --name /education-researcher/prod/openai-api-key --query "Parameter.ARN" --output text
 ```
 
 After deployment, verify the EB default URL before `api.voxaria.io`:

@@ -122,8 +122,19 @@ The repository now includes:
 - `docs/service-hosting.md` for the deployment, verification, redeploy, and rollback procedure.
 - `docs/service-secrets-and-iam.md` for required service env vars, secret paths, and IAM policy shape.
 
-The service must be verified at the default Elastic Beanstalk URL with `GET /health` before mapping
-`api.voxaria.io`.
+The production API environment was created on June 1, 2026:
+
+| Setting | Value |
+| --- | --- |
+| EB application | `education-researcher-service` |
+| EB environment | `education-researcher-api-prod` |
+| Environment ID | `e-2cved2uqzm` |
+| Version | `prod-20260601-2308` |
+| Default URL | `https://education-researcher-api-prod.eba-xpf5qcne.us-east-1.elasticbeanstalk.com` |
+| Custom URL | `https://api.voxaria.io` |
+
+The environment is `Green/Ok`. `GET https://api.voxaria.io/health` returns
+`{"service":"education-researcher-service","status":"ok"}`.
 
 ## Web Hosting
 
@@ -145,6 +156,40 @@ served by `index.html`.
 
 `https://api.voxaria.io` remains the Elastic Beanstalk-hosted Service API origin; Amplify only serves the static web app.
 
+### Amplify Production App
+
+The production Amplify app was created from the GitHub repository on June 1, 2026:
+
+| Setting | Value |
+| --- | --- |
+| App name | `EducationResearcher` |
+| App ID | `d2ho422yprknty` |
+| Production branch | `main` |
+| Default domain | `https://main.d2ho422yprknty.amplifyapp.com` |
+| API base URL | `https://api.voxaria.io` |
+
+The first three Amplify release jobs for `main` completed build, deploy, and verify successfully. The default domain
+returns `200 OK` for `/` and for participant deep links such as `/participant/runs/test-token`.
+
+## DNS And TLS
+
+Source issue: [#67](https://github.com/antonioCorelli/EducationResearcher/issues/67)
+
+See `docs/dns-and-tls.md` for the current DNS state, records, TLS automation details, and renewal caveats.
+
+`voxaria.io` is hosted in Route 53 in public hosted zone `Z02410783JLHRBD4MJ87Y`.
+
+As of June 1, 2026, the public application records are:
+
+```text
+voxaria.io      A alias -> d2am5nz3zwr4jf.cloudfront.net.
+www.voxaria.io  CNAME   -> d2am5nz3zwr4jf.cloudfront.net.
+api.voxaria.io  A alias -> awseb--AWSEB-ryIE5zt3ZjEb-1779189747.us-east-1.elb.amazonaws.com.
+```
+
+The older prototype CloudFront distribution `EU3TQU5NTNRGO` had the `voxaria.io` and `www.voxaria.io` aliases removed
+before the Amplify cutover.
+
 ### Managed Secret Parameters
 
 Source issue: [#64](https://github.com/antonioCorelli/EducationResearcher/issues/64)
@@ -155,9 +200,12 @@ The production service expects these SecureString parameters in SSM Parameter St
 | --- | --- |
 | `PARTICIPANT_ACCESS_TOKEN_SECRET` | `/education-researcher/prod/participant-access-token-secret` |
 | `AUDIO_LINK_SIGNING_SECRET` | `/education-researcher/prod/audio-link-signing-secret` |
+| `OPENAI_API_KEY` | `/education-researcher/prod/openai-api-key` |
 
-Provider secrets such as `OPENAI_API_KEY` are intentionally not configured until real provider mode is approved.
+`OPENAI_API_KEY` is required for production participant realtime voice interviews. Store it as a SecureString value and
+expose it through Elastic Beanstalk environment secrets; never commit or print the key value.
 
 These parameters were created as `SecureString` values on June 1, 2026 after SSM permissions were added for the local
 deployment user. Both are standard-tier parameters at version 1. The values were generated locally as 64 random bytes,
-base64 encoded, written directly to SSM, and not printed or committed.
+base64 encoded, written directly to SSM, and not printed or committed. The OpenAI API key parameter must be created or
+rotated from the approved provider key value without logging the key.

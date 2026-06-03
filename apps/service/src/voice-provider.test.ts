@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   OpenAiRealtimeVoiceProvider,
+  RealtimeVoiceProviderError,
   buildRealtimeInterviewInstructions,
   type RealtimeInterviewPromptInput
 } from "./voice-provider.js";
@@ -186,5 +187,60 @@ describe("realtime voice provider", () => {
       }
     });
     expect(JSON.stringify(session)).not.toContain("test-api-key");
+  });
+
+  it("categorizes missing OpenAI realtime configuration without calling the provider", async () => {
+    const provider = new OpenAiRealtimeVoiceProvider({
+      apiKey: "",
+      createServiceRequestId: () => "req_realtime_missing_config",
+      fetch: (async () => {
+        throw new Error("fetch should not be called");
+      }) as typeof fetch
+    });
+
+    await expect(
+      provider.createSession({
+        promptInput,
+        instructions: buildRealtimeInterviewInstructions(promptInput),
+        promptVersion: "realtime-interview-v1"
+      })
+    ).rejects.toMatchObject({
+      name: "RealtimeVoiceProviderError",
+      safeCategory: "missing_configuration",
+      serviceRequestId: "req_realtime_missing_config"
+    });
+  });
+
+  it("categorizes OpenAI realtime authentication failures without exposing the API key", async () => {
+    const provider = new OpenAiRealtimeVoiceProvider({
+      apiKey: "test-api-key",
+      createServiceRequestId: () => "req_realtime_auth_error",
+      fetch: (async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message: "Invalid API key"
+            }
+          }),
+          { status: 401 }
+        )) as typeof fetch
+    });
+
+    const error = await provider
+      .createSession({
+        promptInput,
+        instructions: buildRealtimeInterviewInstructions(promptInput),
+        promptVersion: "realtime-interview-v1"
+      })
+      .catch((error: unknown) => error);
+
+    expect(error).toBeInstanceOf(RealtimeVoiceProviderError);
+    expect(error).toMatchObject({
+      name: "RealtimeVoiceProviderError",
+      safeCategory: "auth_error",
+      serviceRequestId: "req_realtime_auth_error",
+      providerStatus: 401
+    });
+    expect(JSON.stringify(error)).not.toContain("test-api-key");
   });
 });

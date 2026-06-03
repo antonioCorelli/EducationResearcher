@@ -20,6 +20,7 @@ const requiredProductionConfig = {
   PARTICIPANT_ACCESS_BASE_URL: "https://voxaria.io",
   PARTICIPANT_ACCESS_TOKEN_SECRET: "participant-secret",
   AUDIO_LINK_SIGNING_SECRET: "audio-secret",
+  OPENAI_API_KEY: "openai-secret",
   INTERVIEW_AUDIO_STORAGE_BACKEND: "s3",
   ARTIFACT_STORAGE_BUCKET_NAME: "education-researcher-prod-artifacts-077317248751"
 };
@@ -50,9 +51,10 @@ describe("production runtime config validation", () => {
 
     vi.stubEnv("PARTICIPANT_ACCESS_TOKEN_SECRET", "");
     vi.stubEnv("AUDIO_LINK_SIGNING_SECRET", "");
+    vi.stubEnv("OPENAI_API_KEY", "");
 
     expect(() => validateProductionRuntimeConfig()).toThrow(
-      "Invalid production service configuration: missing PARTICIPANT_ACCESS_TOKEN_SECRET, AUDIO_LINK_SIGNING_SECRET."
+      "Invalid production service configuration: missing PARTICIPANT_ACCESS_TOKEN_SECRET, AUDIO_LINK_SIGNING_SECRET, OPENAI_API_KEY."
     );
   });
 

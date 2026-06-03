@@ -27,6 +27,7 @@ ENV PORT=4000
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/service/package.json ./apps/service/package.json
+COPY --from=build /app/apps/service/node_modules ./apps/service/node_modules
 COPY --from=build /app/apps/service/dist ./apps/service/dist
 COPY --from=build /app/packages/data-schema/package.json ./packages/data-schema/package.json
 COPY --from=build /app/packages/data-schema/dist ./packages/data-schema/dist

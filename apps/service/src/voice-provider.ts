@@ -10,6 +10,14 @@ export const DEFAULT_REALTIME_MODEL = "gpt-realtime";
 export const DEFAULT_REALTIME_VOICE = "marin";
 export const OPENAI_REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 
+export type RealtimeVoiceProviderErrorCategory =
+  | "missing_configuration"
+  | "auth_error"
+  | "invalid_request"
+  | "rate_limited"
+  | "service_unavailable"
+  | "provider_failure";
+
 export interface RealtimeInterviewPromptInput {
   readonly run: Run;
   readonly interviewSession: InterviewSession;
@@ -43,6 +51,25 @@ export interface RealtimeVoiceProvider {
   createSession(request: RealtimeVoiceSessionRequest): Promise<RealtimeVoiceSession>;
 }
 
+export class RealtimeVoiceProviderError extends Error {
+  readonly safeCategory: RealtimeVoiceProviderErrorCategory;
+  readonly serviceRequestId: string;
+  readonly providerStatus?: number;
+
+  constructor(input: {
+    readonly safeCategory: RealtimeVoiceProviderErrorCategory;
+    readonly serviceRequestId: string;
+    readonly message?: string;
+    readonly providerStatus?: number;
+  }) {
+    super(input.message ?? "Realtime voice provider request failed.");
+    this.name = "RealtimeVoiceProviderError";
+    this.safeCategory = input.safeCategory;
+    this.serviceRequestId = input.serviceRequestId;
+    this.providerStatus = input.providerStatus;
+  }
+}
+
 export class FakeRealtimeVoiceProvider implements RealtimeVoiceProvider {
   async createSession(request: RealtimeVoiceSessionRequest): Promise<RealtimeVoiceSession> {
     return {
@@ -69,41 +96,54 @@ export class OpenAiRealtimeVoiceProvider implements RealtimeVoiceProvider {
   ) {}
 
   async createSession(request: RealtimeVoiceSessionRequest): Promise<RealtimeVoiceSession> {
+    const serviceRequestId = this.options.createServiceRequestId?.() ?? `realtime_${randomUUID()}`;
     const apiKey = this.options.apiKey ?? process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
-      throw new Error("OPENAI_API_KEY is required to create realtime voice sessions.");
+      throw new RealtimeVoiceProviderError({
+        safeCategory: "missing_configuration",
+        serviceRequestId,
+        message: "OPENAI_API_KEY is required to create realtime voice sessions."
+      });
     }
 
     const model = this.options.model ?? process.env.OPENAI_REALTIME_MODEL ?? DEFAULT_REALTIME_MODEL;
     const voice = this.options.voice ?? process.env.OPENAI_REALTIME_VOICE ?? DEFAULT_REALTIME_VOICE;
-    const serviceRequestId = this.options.createServiceRequestId?.() ?? `realtime_${randomUUID()}`;
     const fetchImplementation = this.options.fetch ?? fetch;
-    const response = await fetchImplementation("https://api.openai.com/v1/realtime/client_secrets", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        session: {
-          type: "realtime",
-          model,
-          instructions: request.instructions,
-          audio: {
-            input: {
-              transcription: {
-                model: "gpt-4o-transcribe"
+    let response: Response;
+
+    try {
+      response = await fetchImplementation("https://api.openai.com/v1/realtime/client_secrets", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          session: {
+            type: "realtime",
+            model,
+            instructions: request.instructions,
+            audio: {
+              input: {
+                transcription: {
+                  model: "gpt-4o-transcribe"
+                },
+                turn_detection: null
               },
-              turn_detection: null
-            },
-            output: {
-              voice
+              output: {
+                voice
+              }
             }
           }
-        }
-      })
-    });
+        })
+      });
+    } catch {
+      throw new RealtimeVoiceProviderError({
+        safeCategory: "provider_failure",
+        serviceRequestId
+      });
+    }
 
     const responseBody = (await response.json().catch(() => undefined)) as
       | {
@@ -122,10 +162,25 @@ export class OpenAiRealtimeVoiceProvider implements RealtimeVoiceProvider {
     if (!response.ok) {
       const providerMessage =
         typeof responseBody?.error?.message === "string" ? responseBody.error.message : "Realtime provider request failed.";
-      throw new Error(providerMessage);
+      throw new RealtimeVoiceProviderError({
+        safeCategory: mapOpenAiRealtimeStatusToCategory(response.status),
+        serviceRequestId,
+        providerStatus: response.status,
+        message: providerMessage
+      });
     }
 
-    const clientSecret = parseClientSecret(responseBody);
+    let clientSecret: string;
+
+    try {
+      clientSecret = parseClientSecret(responseBody);
+    } catch (error) {
+      throw new RealtimeVoiceProviderError({
+        safeCategory: "provider_failure",
+        serviceRequestId,
+        message: error instanceof Error ? error.message : undefined
+      });
+    }
 
     return {
       provider: "openai",
@@ -150,6 +205,38 @@ export function createConfiguredRealtimeVoiceProvider(): RealtimeVoiceProvider {
   }
 
   return new FakeRealtimeVoiceProvider();
+}
+
+export function toRealtimeVoiceProviderError(error: unknown) {
+  if (error instanceof RealtimeVoiceProviderError) {
+    return error;
+  }
+
+  return new RealtimeVoiceProviderError({
+    safeCategory: "provider_failure",
+    serviceRequestId: "unknown",
+    message: error instanceof Error ? error.message : undefined
+  });
+}
+
+function mapOpenAiRealtimeStatusToCategory(status: number): RealtimeVoiceProviderErrorCategory {
+  if (status === 401 || status === 403) {
+    return "auth_error";
+  }
+
+  if (status === 400 || status === 404) {
+    return "invalid_request";
+  }
+
+  if (status === 429) {
+    return "rate_limited";
+  }
+
+  if (status >= 500) {
+    return "service_unavailable";
+  }
+
+  return "provider_failure";
 }
 
 export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromptInput) {

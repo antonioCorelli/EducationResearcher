@@ -22,7 +22,9 @@ Use ECS Fargate + ALB later if the API needs independent worker services, queue 
 - `Dockerfile` builds the `@education-researcher/service` workspace and runs `npm run start --workspace @education-researcher/service`.
 - `Dockerrun.aws.json` explicitly maps Elastic Beanstalk to the service container port, matching the Dockerfile `EXPOSE 4000`.
 - `.dockerignore` keeps local build output, dependencies, environment files, and development artifacts out of the image build context.
-- `.ebextensions/01-service.config` configures Elastic Beanstalk for an Application Load Balancer, port `4000`, `/health` checks, production binding, and DynamoDB-backed stores.
+- `.ebextensions/01-service.config` configures the Elastic Beanstalk default process on port `80`, `/health` checks,
+  production binding, and DynamoDB-backed stores. `Dockerrun.aws.json` maps the Docker container port `4000`; the
+  load balancer targets the EB host/proxy port.
 
 The committed Elastic Beanstalk configuration includes non-secret production defaults plus references to managed SSM
 secret parameters. See `docs/service-secrets-and-iam.md` for the secret paths, IAM policy shape, and rotation guidance.
@@ -58,9 +60,11 @@ Set these as managed secret references before production traffic:
 ```text
 PARTICIPANT_ACCESS_TOKEN_SECRET=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/participant-access-token-secret
 AUDIO_LINK_SIGNING_SECRET=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/audio-link-signing-secret
+OPENAI_API_KEY=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher/prod/openai-api-key
 ```
 
-Do not set provider keys such as `OPENAI_API_KEY` until real provider mode is approved for the pilot.
+Production participant voice interviews require `OPENAI_API_KEY`. Store the value as a SecureString parameter and expose it
+through Elastic Beanstalk environment secrets; never commit or print the key value.
 
 `CORS_ORIGIN` is limited to `https://voxaria.io,https://www.voxaria.io`. If the production Amplify app uses a different
 canonical origin, update the runtime validation and deployment docs intentionally before deploying.
@@ -92,7 +96,19 @@ docker run --rm -p 4000:4000 --env-file .env education-researcher-service:prod
 curl http://127.0.0.1:4000/health
 ```
 
-Create the Elastic Beanstalk application and environment with the Docker platform in `us-east-1`. The environment should be load-balanced with an Application Load Balancer. The committed `.ebextensions` file sets the process port and health path.
+Create the Elastic Beanstalk application and environment with the Docker platform in `us-east-1`. The environment should
+be load-balanced with an Application Load Balancer. Set `EnvironmentType=LoadBalanced` and
+`LoadBalancerType=application` when creating the environment; those are create-time settings and should not be kept in
+`.ebextensions` because they break later application-version updates.
+
+The production environment is:
+
+```text
+Application=education-researcher-service
+Environment=education-researcher-api-prod
+Version=prod-20260601-2308
+Default URL=https://education-researcher-api-prod.eba-xpf5qcne.us-east-1.elasticbeanstalk.com
+```
 
 After the first deployment, verify the default Elastic Beanstalk URL before adding the custom domain:
 
@@ -117,7 +133,7 @@ curl https://api.voxaria.io/health
 For a new application version:
 
 ```bash
-git archive --format zip --output education-researcher-service.zip HEAD
+git ls-files | tar -a -c -f education-researcher-service.zip -T -
 ```
 
 Upload the zip as a new Elastic Beanstalk application version and deploy it to the existing production environment. Watch environment events and health until the new version is green, then verify `/health`.
