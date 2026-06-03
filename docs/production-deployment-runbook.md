@@ -76,6 +76,35 @@ ARTIFACT_STORAGE_BUCKET_NAME=education-researcher-prod-artifacts-077317248751
 INTERVIEW_AUDIO_STORAGE_PREFIX=audio
 ```
 
+### June 3, 2026 Production Audio Storage Fix
+
+Production audio uploads were failing because the service was configured for
+`education-researcher-prod-artifacts-077317248751`, but the bucket did not exist. A CDK deployment of
+`EducationResearcherArtifacts-prod` failed because the S3 tag value `audio,exports` contained a comma. The CDK source was
+updated to use the valid tag value `audio_exports`.
+
+The stack is currently stuck in `ROLLBACK_COMPLETE`; the current deployment IAM user does not have
+`cloudformation:DeleteStack`, so the failed stack could not be removed and redeployed. To restore production audio
+immediately, the expected bucket was created directly with the S3 API and configured with:
+
+- S3-managed server-side encryption.
+- Versioning enabled.
+- 730-day lifecycle expiration.
+- Sensitive artifact tags.
+- A bucket policy denying insecure transport.
+
+The same IAM user could not apply S3 public access block or bucket ownership controls because it lacks
+`s3:PutBucketPublicAccessBlock` and `s3:PutBucketOwnershipControls`. Grant those actions, delete the failed
+`EducationResearcherArtifacts-prod` stack, and redeploy the corrected CDK stack so CloudFormation owns the bucket
+configuration.
+
+Verification completed on June 3, 2026:
+
+- `https://api.voxaria.io/health` was green through the production smoke test.
+- A synthetic non-real participant run uploaded `audio/webm` through the production participant API.
+- DynamoDB stored an `interview_audio_asset` with `status=available` and an S3 URI under the production bucket.
+- The analyze/raw-evidence path returned a signed audio URL and range playback returned `206 Partial Content`.
+
 Before enabling real participant audio, attach the S3 least-privilege policy from
 `docs/service-secrets-and-iam.md` to the Elastic Beanstalk instance profile and run a synthetic upload/playback smoke
 test.

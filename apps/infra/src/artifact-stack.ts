@@ -37,7 +37,7 @@ export class EducationResearcherArtifactStack extends Stack {
 
     Tags.of(this.artifactBucket).add("DataClassification", "SensitiveStudyArtifact");
     Tags.of(this.artifactBucket).add("Environment", props.environment);
-    Tags.of(this.artifactBucket).add("ArtifactPrefixes", "audio,exports");
+    Tags.of(this.artifactBucket).add("ArtifactPrefixes", "audio_exports");
 
     new CfnOutput(this, "ArtifactBucketName", {
       value: this.artifactBucket.bucketName
