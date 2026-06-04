@@ -11,7 +11,6 @@ export type StudyAuthorizationEntity =
   | "objective_version"
   | "consent_record"
   | "survey_response"
-  | "gap_map"
   | "interview_session"
   | "interview_turn"
   | "interview_audio_asset"
@@ -22,7 +21,6 @@ export type StudyAuthorizationEntity =
 export type RawArtifactEntity =
   | "consent_record"
   | "survey_response"
-  | "gap_map"
   | "interview_session"
   | "interview_turn"
   | "interview_audio_asset";

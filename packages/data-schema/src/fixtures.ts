@@ -20,8 +20,8 @@ const scoredAt = "2026-05-04T13:00:00.000Z";
 const v1DefaultPersonaStylePrompt = [
   "You are the fixed V1 interviewer for formative education research studies.",
   "Act like a calm, warm, neutral, curious, and non-evaluative research interviewer. Preserve natural conversation, acknowledge briefly, ask one question at a time, and invite concrete examples or clarification when an answer is vague.",
-  "Use the participant's survey responses, the gap map, and the study objectives only to choose high-value follow-up questions. Steer gently toward unresolved gaps, ambiguities, contradictions, and missing evidence without making the participant feel tested or graded.",
-  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or gap map internals. Do not tell the participant how they are performing or imply that the interview is an assessment.",
+  "Use the participant's survey responses and the researcher's interviewer instructions to choose high-value follow-up questions. Steer gently toward clarification, concrete examples, and details that matter for the study without making the participant feel tested or graded.",
+  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or any evaluation strategy. Do not tell the participant how they are performing or imply that the interview is an assessment.",
   "Keep questions participant-safe and focused on the study topic. If the participant seems uncomfortable, give them room to pause or stop."
 ].join("\n\n");
 
@@ -58,7 +58,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       ownerUserId: "user_researcher_001",
       title: "Fixture Formative Study",
       description: "Fixture study for formative education research workflows.",
-      interviewerGoals: "Clarify learner reasoning, elicit concrete examples, and resolve unclear survey evidence.",
+      interviewerInstructions: "Clarify learner reasoning, elicit concrete examples, and resolve unclear survey evidence.",
       defaultFreshnessDays: 14,
       defaultMaxInterviewMinutes: 45,
       activeConsentVersionId: "consent_version_001",
@@ -222,7 +222,7 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       consentVersionId: "consent_version_001",
       personaVersionId: "persona_version_v1_default_001",
       objectiveVersionIds: ["objective_version_001"],
-      interviewerGoals: "Clarify learner reasoning, elicit concrete examples, and resolve unclear survey evidence.",
+      interviewerInstructions: "Clarify learner reasoning, elicit concrete examples, and resolve unclear survey evidence.",
       freshnessDeadlineAt: "2026-05-18T12:00:00.000Z",
       maxInterviewMinutes: 45,
       status: "scored",
@@ -290,34 +290,6 @@ export const FIRST_BUILD_SLICE_FIXTURE = [
       responseText: "I changed my mind after comparing two examples.",
       submittedAt: "2026-05-04T12:20:00.000Z",
       createdAt: "2026-05-04T12:20:00.000Z"
-    }
-  },
-  {
-    tableKey: "runLifecycle",
-    entity: "gap_map",
-    pk: "RUN#run_fixture_001",
-    sk: "GAP_MAP#gap_map_001",
-    gsi3pk: "RUN#run_fixture_001#ARTIFACT#gap_map",
-    gsi3sk: "GAP_MAP#2026-05-04T12:25:00.000Z#gap_map_001",
-    attributes: {
-      id: "gap_map_001",
-      studyId: "study_formative_001",
-      participantSlotId: "slot_fixture_001",
-      runId: "run_fixture_001",
-      surveyVersionId: "survey_version_001",
-      objectiveVersionIds: ["objective_version_001"],
-      status: "generated",
-      modelName: "fake-gap-map",
-      modelVersion: "local-1",
-      serviceRequestId: "req_gap_map_fixture_001",
-      promptVersion: "gap-map-v1",
-      alreadyAnswered: ["The participant noticed a change in thinking."],
-      ambiguities: ["The reason for the change is underspecified."],
-      contradictions: [],
-      missingEvidence: ["Need an example of the comparison."],
-      recommendedProbes: ["What were the two examples you compared?"],
-      generatedAt: "2026-05-04T12:25:00.000Z",
-      createdAt: "2026-05-04T12:25:00.000Z"
     }
   },
   {

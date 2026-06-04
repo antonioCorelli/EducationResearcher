@@ -14,10 +14,9 @@ V1 is not a high-stakes testing system. It supports formative education research
 
 - Let researchers define a study with participant slots, consent settings, survey questions, interview defaults, and scoring objectives.
 - Let participants complete a consent page, long-form survey, and voice-to-voice AI interview with minimal friction.
-- Generate and persist a pre-interview gap map from the survey response.
-- Conduct an AI interview that uses the gap map, survey response, and scoring objectives to probe like a research assistant.
+- Conduct an AI interview that uses the survey response and researcher-provided interviewer instructions to probe like a research assistant.
 - Automatically score each participant run after the interview ends, becomes stale, or is technically interrupted.
-- Preserve raw survey responses, audio, transcript, gap map, scoring outputs, and version metadata.
+- Preserve raw survey responses, audio, transcript, scoring outputs, and version metadata.
 - Export per-objective participant scores to CSV.
 
 ## 3. Non-Goals
@@ -57,7 +56,7 @@ A study-scoped participant identity. It may be researcher-supplied or platform-g
 
 ### Run
 
-A fresh survey/interview cycle for one participant slot. A participant slot can have many runs over time, such as pre/post administrations. A run contains exactly one completed survey attempt, one generated gap map, zero or more interview sessions, and one or more scoring runs.
+A fresh survey/interview cycle for one participant slot. A participant slot can have many runs over time, such as pre/post administrations. A run contains exactly one completed survey attempt, zero or more interview sessions, and one or more scoring runs.
 
 Only researchers can create or authorize new runs. Participants cannot self-reset or create new runs after completion.
 
@@ -114,23 +113,7 @@ Survey edits create new survey versions. Existing runs retain the survey version
 
 During one run, the participant may complete the survey once. A future researcher-authorized run can present a new survey attempt to the same participant slot.
 
-## 9. Gap Map
-
-After survey completion and before the interview, the system generates a gap map for the run. The interview starts automatically; the researcher does not need to approve the gap map before the participant continues.
-
-The gap map must be persisted for later validity analysis.
-
-Gap map contents:
-
-- What the survey already answers.
-- What is ambiguous.
-- What seems contradictory.
-- What is missing relative to the scoring objectives.
-- Which interview questions or probes should target those gaps.
-
-Contradictions in the survey should become priority areas for the interview.
-
-## 10. Interview
+## 9. Interview
 
 The interview is voice-to-voice AI, capped at 45 minutes by default. The participant can stop and resume while the run remains within the freshness window.
 
@@ -141,7 +124,7 @@ The AI should feel like a calm research interviewer, not a test or chatbot quiz.
 - Probe for examples.
 - Clarify vague answers.
 - Avoid sounding evaluative.
-- Avoid revealing grades, scoring objectives, rubrics, or gap map details to the participant.
+- Avoid revealing grades, scoring objectives, rubrics, or evaluation strategy to the participant.
 - Ask follow-ups freely to understand the participant better.
 - Gently steer toward high-value unresolved gaps when needed, without becoming pushy or rapid-fire.
 
@@ -162,7 +145,6 @@ Do not show:
 - Participant speech captions.
 - Rubric.
 - Score.
-- Gap map.
 - Hidden objective progress.
 - Full transcript after completion.
 
@@ -312,7 +294,6 @@ Retained artifacts include:
 - Survey responses.
 - Interview audio.
 - Interview transcripts.
-- Gap maps.
 - Consent records.
 - Survey versions.
 - Objective/rubric versions.
@@ -470,19 +451,6 @@ This is a logical model, not a final physical schema.
 - response_text
 - submitted_at
 
-### gap_maps
-
-- id
-- run_id
-- model_name
-- model_version
-- generated_at
-- already_answered_json
-- ambiguous_json
-- contradictions_json
-- missing_relative_to_objectives_json
-- recommended_probes_json
-
 ### interview_sessions
 
 - id
@@ -620,47 +588,29 @@ The exact state names can be refined during implementation, but the model must d
 
 ## 20. AI Behavior
 
-### Gap Map Pass
-
-Input:
-
-- Survey version and responses.
-- Active objective versions.
-- Study configuration.
-
-Output:
-
-- Already answered areas.
-- Ambiguities.
-- Contradictions.
-- Missing evidence relative to objectives.
-- Recommended probes.
-
 ### Interview Pass
 
 Input:
 
 - Survey responses.
-- Gap map.
-- Objective versions.
+- Interviewer instructions.
 - Fixed v1 interviewer persona.
 - Remaining time and run state.
 
 Behavior:
 
 - Simulate a calm, warm, neutral, curious research assistant.
-- Prioritize survey gaps and contradictions.
+- Prioritize useful clarification and concrete examples.
 - Ask natural follow-ups.
 - Allow participant rambling when useful.
-- Gently steer toward unresolved high-value areas.
-- Do not reveal scoring objectives, grade labels, or hidden gap map internals.
+- Gently steer toward high-value study topics.
+- Do not reveal scoring objectives, grade labels, or evaluation strategy.
 
 ### Scoring Pass
 
 Input:
 
 - Survey responses.
-- Gap map.
 - Transcript.
 - Audio-linked transcript metadata.
 - Objective versions, grade scale, examples, custom prompts, evidence requirements.
@@ -716,7 +666,7 @@ Policy:
 ## 22. Implementation Notes
 
 - Snapshot all configuration used by a run or store immutable version references.
-- Treat gap maps, scoring runs, and citations as auditable artifacts, not ephemeral model outputs.
+- Treat scoring runs and citations as auditable artifacts, not ephemeral model outputs.
 - Keep participant identity study-scoped and minimal.
 - Build tenant isolation early: every researcher query should be scoped by study ownership or membership.
 - Use storage policies that can enforce 2-year retention and researcher-initiated deletion.
@@ -731,9 +681,8 @@ A practical first implementation slice:
 2. Researcher defines consent, survey questions, participant slots, and one or more scoring objectives.
 3. Researcher creates runs for participant slots.
 4. Participant consents and completes survey.
-5. System generates and stores gap map.
-6. Participant completes simulated or real voice interview.
-7. System stores transcript/audio references.
-8. System runs automatic scoring.
-9. Researcher views per-objective participant score with confidence, rationale, evidence, and flags.
-10. Researcher exports CSV.
+5. Participant completes simulated or real voice interview.
+6. System stores transcript/audio references.
+7. System runs automatic scoring.
+8. Researcher views per-objective participant score with confidence, rationale, evidence, and flags.
+9. Researcher exports CSV.

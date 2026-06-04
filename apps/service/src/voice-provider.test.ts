@@ -71,43 +71,7 @@ const promptInput: RealtimeInterviewPromptInput = {
       createdAt: "2026-05-06T12:10:00.000Z"
     }
   ],
-  objectiveVersions: [
-    {
-      id: "objective_version_001",
-      studyId: "study_fixture_001",
-      objectiveKey: "reasoning_quality",
-      versionNumber: 1,
-      title: "Reasoning Quality",
-      description: "Explains reasoning.",
-      gradeScale: ["1", "2"],
-      gradeExamples: [],
-      evidenceRequirements: "Use interview evidence.",
-      sortOrder: 1,
-      isEnabled: true,
-      isActive: true,
-      createdAt: "2026-05-06T12:00:00.000Z"
-    }
-  ],
-  gapMap: {
-    id: "gap_map_001",
-    studyId: "study_fixture_001",
-    participantSlotId: "slot_fixture_001",
-    runId: "run_fixture_001",
-    surveyVersionId: "survey_version_001",
-    objectiveVersionIds: ["objective_version_001"],
-    status: "generated",
-    modelName: "fake-gap-map",
-    modelVersion: "local-1",
-    serviceRequestId: "req_gap_map_001",
-    promptVersion: "gap-map-v1",
-    alreadyAnswered: ["Initial evidence is present."],
-    ambiguities: ["Needs elaboration."],
-    contradictions: [],
-    missingEvidence: ["Need a concrete example."],
-    recommendedProbes: ["Can you share a concrete example?"],
-    generatedAt: "2026-05-06T12:11:00.000Z",
-    createdAt: "2026-05-06T12:11:00.000Z"
-  },
+  interviewerInstructions: "Clarify how the example made the participant's reasoning clearer.",
   personaStylePrompt: "You are a calm research interviewer.",
   remainingSeconds: 1800,
   nowIso: "2026-05-06T12:30:00.000Z"
@@ -118,14 +82,16 @@ describe("realtime voice provider", () => {
     const instructions = buildRealtimeInterviewInstructions(promptInput);
 
     expect(instructions).toContain("I noticed the example made my reasoning clearer.");
-    expect(instructions).toContain("Reasoning Quality");
-    expect(instructions).toContain("Can you share a concrete example?");
+    expect(instructions).toContain("Clarify how the example made the participant's reasoning clearer.");
+    expect(instructions).toContain("Researcher instructions for interviewer planning only");
     expect(instructions).toContain("Remaining interview time: 1800 seconds");
     expect(instructions).toContain("Ask exactly one question at a time.");
     expect(instructions).toContain("Keep spoken responses short");
     expect(instructions).toContain("Reference survey answers naturally");
     expect(instructions).toContain("Do not sound like you are grading");
     expect(instructions).toContain("Do not reveal scoring objectives");
+    expect(instructions).not.toContain("Reasoning Quality");
+    expect(instructions).not.toContain("intermediate artifact");
   });
 
   it("mints an OpenAI realtime client secret without exposing the API key in the response", async () => {

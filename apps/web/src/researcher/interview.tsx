@@ -5,24 +5,24 @@ import { defaultPersonaStylePrompt, defaultPersonaVersionLabel, getPersonaVersio
 
 interface ResearcherInterviewProps {
   readonly activeStudySetupTab: StudySetupTab;
-  readonly interviewerGoals: string;
+  readonly interviewerInstructions: string;
   readonly isSavingStudy: boolean;
   readonly maxInterviewMinutes: number;
   readonly selectedStudy: StudyShell | undefined;
   readonly studyError: string;
-  readonly onInterviewerGoalsChange: (interviewerGoals: string) => void;
+  readonly onInterviewerInstructionsChange: (interviewerInstructions: string) => void;
   readonly onMaxInterviewMinutesChange: (maxInterviewMinutes: number) => void;
   readonly onSaveStudy: (event: FormEvent<HTMLFormElement>) => void;
 }
 
 export function ResearcherInterview({
   activeStudySetupTab,
-  interviewerGoals,
+  interviewerInstructions,
   isSavingStudy,
   maxInterviewMinutes,
   selectedStudy,
   studyError,
-  onInterviewerGoalsChange,
+  onInterviewerInstructionsChange,
   onMaxInterviewMinutesChange,
   onSaveStudy
 }: ResearcherInterviewProps) {
@@ -42,9 +42,9 @@ export function ResearcherInterview({
         <span className="version-pill">Locked {personaVersionLabel}</span>
       </div>
       <p className="muted-copy">
-        Configure the time limit and researcher-defined goals that help the interviewer focus each conversation. The
+        Configure the time limit and study-specific instructions that are passed directly into the interviewer. The
         interviewer persona stays locked to the V1 formative research style so participants get a consistent,
-        non-evaluative interview.
+        non-evaluative conversation.
       </p>
       <label>
         Interview minutes
@@ -60,21 +60,21 @@ export function ResearcherInterview({
         />
       </label>
       <label>
-        Interviewer goals
+        Interviewer instructions
         <textarea
-          aria-describedby="interviewer-goals-hint"
+          aria-describedby="interviewer-instructions-hint"
           disabled={!selectedStudy}
           maxLength={4000}
-          name="interviewer-goals"
-          onChange={(event) => onInterviewerGoalsChange(event.target.value)}
-          placeholder={selectedStudy ? "Clarify where learners got stuck, elicit concrete examples, and confirm the reasoning behind key choices." : "Create or select a study first"}
-          value={interviewerGoals}
+          name="interviewer-instructions"
+          onChange={(event) => onInterviewerInstructionsChange(event.target.value)}
+          placeholder={selectedStudy ? "Clarify where learners got stuck, elicit concrete examples, and follow up on reasoning behind key choices." : "Create or select a study first"}
+          value={interviewerInstructions}
         />
       </label>
-      <p className="muted-copy field-hint" id="interviewer-goals-hint">
-        Describe what the interviewer needs to learn or accomplish by the end of the conversation. Focus on concepts to
-        clarify, experiences to elicit, evidence to confirm, and follow-ups that matter for this study; keep it
-        participant-safe and outcome-focused, not a script.
+      <p className="muted-copy field-hint" id="interviewer-instructions-hint">
+        These instructions are passed to the interviewer as study context for planning follow-up questions. Focus on
+        concepts to clarify, experiences to elicit, and participant-safe follow-ups that matter for this study; do not
+        write a rigid script.
       </p>
       <label>
         Interviewer persona

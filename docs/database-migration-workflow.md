@@ -17,7 +17,7 @@ Source issue: [#4](https://github.com/antonioCorelli/EducationResearcher/issues/
 | Identity Access Table | `identity-access` | `user` records for researchers and authorized admin engineers. |
 | Study Setup Table | `study-setup` | `study` and `participant_slot` records. |
 | Versioned Configuration Table | `versioned-configuration` | Consent versions, survey versions/groups/questions, objective versions/examples, and persona versions. |
-| Run Lifecycle Table | `run-lifecycle` | Runs, consent records, survey responses, gap maps, interview sessions, turns, and audio metadata. |
+| Run Lifecycle Table | `run-lifecycle` | Runs, consent records, survey responses, interview sessions, turns, and audio metadata. |
 | Evidence Scoring Table | `evidence-scoring` | Scoring runs, objective scores, and evidence citations. |
 | Operations Table | `operations` | Operational events and audit logs. |
 
@@ -116,7 +116,7 @@ The first build slice fixture includes:
 - Study shell and participant slot.
 - Consent, survey, objective, grade example, and persona versions.
 - Run with immutable configuration references.
-- Consent record, survey response, gap map, interview session, interview turn, and audio asset.
+- Consent record, survey response, interview session, interview turn, and audio asset.
 - Scoring run, objective score, and evidence citation.
 - Operational event and audit log.
 

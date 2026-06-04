@@ -14,8 +14,8 @@ export const DEFAULT_MAX_INTERVIEW_MINUTES = 45;
 export const V1_DEFAULT_PERSONA_STYLE_PROMPT = [
   "You are the fixed V1 interviewer for formative education research studies.",
   "Act like a calm, warm, neutral, curious, and non-evaluative research interviewer. Preserve natural conversation, acknowledge briefly, ask one question at a time, and invite concrete examples or clarification when an answer is vague.",
-  "Use the participant's survey responses, the gap map, and the study objectives only to choose high-value follow-up questions. Steer gently toward unresolved gaps, ambiguities, contradictions, and missing evidence without making the participant feel tested or graded.",
-  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or gap map internals. Do not tell the participant how they are performing or imply that the interview is an assessment.",
+  "Use the participant's survey responses and the researcher's interviewer instructions to choose high-value follow-up questions. Steer gently toward clarification, concrete examples, and details that matter for the study without making the participant feel tested or graded.",
+  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or any evaluation strategy. Do not tell the participant how they are performing or imply that the interview is an assessment.",
   "Keep questions participant-safe and focused on the study topic. If the participant seems uncomfortable, give them room to pause or stop."
 ].join("\n\n");
 export const V1_DEFAULT_PERSONA = {
@@ -30,7 +30,7 @@ export interface StudyShell {
   readonly ownerUserId: string;
   readonly title: string;
   readonly description?: string;
-  readonly interviewerGoals?: string;
+  readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -51,7 +51,7 @@ export interface StudyShell {
 export interface CreateStudyShellInput {
   readonly title: string;
   readonly description?: string;
-  readonly interviewerGoals?: string;
+  readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
 }
@@ -59,7 +59,7 @@ export interface CreateStudyShellInput {
 export interface UpdateStudyShellInput {
   readonly title?: string;
   readonly description?: string;
-  readonly interviewerGoals?: string;
+  readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
 }
@@ -81,6 +81,7 @@ interface StudyShellItem {
   readonly ownerUserId: string;
   readonly title: string;
   readonly description?: string;
+  readonly interviewerInstructions?: string;
   readonly interviewerGoals?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
@@ -129,7 +130,7 @@ export class StudyShellService {
       ownerUserId: actor.id,
       title: parseTitle(input.title),
       description: parseOptionalDescription(input.description),
-      interviewerGoals: parseOptionalInterviewerGoals(input.interviewerGoals),
+      interviewerInstructions: parseOptionalInterviewerInstructions(input.interviewerInstructions),
       defaultFreshnessDays: parseIntegerSetting(
         input.defaultFreshnessDays,
         "freshness days",
@@ -159,10 +160,10 @@ export class StudyShellService {
       ...study,
       title: input.title === undefined ? study.title : parseTitle(input.title),
       description: input.description === undefined ? study.description : parseOptionalDescription(input.description),
-      interviewerGoals:
-        input.interviewerGoals === undefined
-          ? study.interviewerGoals
-          : parseOptionalInterviewerGoals(input.interviewerGoals),
+      interviewerInstructions:
+        input.interviewerInstructions === undefined
+          ? study.interviewerInstructions
+          : parseOptionalInterviewerInstructions(input.interviewerInstructions),
       defaultFreshnessDays:
         input.defaultFreshnessDays === undefined
           ? study.defaultFreshnessDays
@@ -413,26 +414,26 @@ function parseOptionalDescription(value: string | undefined) {
   return description;
 }
 
-function parseOptionalInterviewerGoals(value: string | undefined) {
+function parseOptionalInterviewerInstructions(value: string | undefined) {
   if (value === undefined) {
     return undefined;
   }
 
   if (typeof value !== "string") {
-    throw new StudyShellValidationError("Interviewer goals must be text.");
+    throw new StudyShellValidationError("Interviewer instructions must be text.");
   }
 
-  const interviewerGoals = value.trim();
+  const interviewerInstructions = value.trim();
 
-  if (!interviewerGoals) {
+  if (!interviewerInstructions) {
     return undefined;
   }
 
-  if (interviewerGoals.length > 4000) {
-    throw new StudyShellValidationError("Interviewer goals must be 4000 characters or fewer.");
+  if (interviewerInstructions.length > 4000) {
+    throw new StudyShellValidationError("Interviewer instructions must be 4000 characters or fewer.");
   }
 
-  return interviewerGoals;
+  return interviewerInstructions;
 }
 
 function parseIntegerSetting(
@@ -479,7 +480,7 @@ function toStudyShellItem(study: StudyShell): StudyShellItem {
     ownerUserId: study.ownerUserId,
     title: study.title,
     ...(study.description ? { description: study.description } : {}),
-    ...(study.interviewerGoals ? { interviewerGoals: study.interviewerGoals } : {}),
+    ...(study.interviewerInstructions ? { interviewerInstructions: study.interviewerInstructions } : {}),
     defaultFreshnessDays: study.defaultFreshnessDays,
     defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes,
     ...(study.activeConsentVersionId ? { activeConsentVersionId: study.activeConsentVersionId } : {}),
@@ -497,7 +498,7 @@ function toStudyShell(item: StudyShellItem): StudyShell {
     ownerUserId: item.ownerUserId,
     title: item.title,
     description: item.description,
-    interviewerGoals: item.interviewerGoals,
+    interviewerInstructions: item.interviewerInstructions ?? item.interviewerGoals,
     defaultFreshnessDays: item.defaultFreshnessDays,
     defaultMaxInterviewMinutes: item.defaultMaxInterviewMinutes,
     activeConsentVersionId: item.activeConsentVersionId,

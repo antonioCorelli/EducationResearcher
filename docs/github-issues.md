@@ -22,8 +22,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 - Foundation issues should land before product slices that require persistence, auth, or workers.
 - Researcher study setup must precede participant slots/runs.
-- Participant consent and survey must precede gap map generation.
-- Gap map generation must precede the real interview orchestration path.
+- Participant consent and survey must precede the real interview orchestration path.
 - Interview artifact persistence must precede scoring citations from interview evidence.
 - Scoring must precede score review and CSV export.
 - Observability, audit logging, and tenant isolation should be added early and expanded as sensitive surfaces ship.
@@ -504,34 +503,33 @@ Keep text participant-safe and avoid diagnostics.
 **Testing Notes**
 E2E test direct navigation to each blocked state.
 
-### [AI Orchestration] Generate and persist survey gap map
+### [AI Orchestration] Pass interviewer instructions through interview context
 
 **Type:** feature  
 **Priority:** P0  
 **Labels:** service, ai, data, mvp, priority:P0
-**Depends on:** [Participant Flow] Render and submit long-form survey; [Researcher Setup] Configure versioned scoring objectives and rubrics
+**Depends on:** [Participant Flow] Render and submit long-form survey; [Researcher Setup] Configure study interview settings
 
 **Problem**
-The interview must be informed by survey evidence, ambiguities, contradictions, and missing evidence relative to scoring objectives.
+The interview must be informed by survey evidence and researcher-provided interviewer instructions without depending on scoring objectives.
 
 **Scope**
-Create AI gap map generation after survey submission, validate structured output, persist gap map JSON fields and model metadata, and make the result available to interview orchestration.
+Pass snapshotted interviewer instructions from study setup into the realtime interview prompt alongside survey evidence and run context.
 
 **Acceptance Criteria**
-- [ ] Gap map job starts after survey completion.
-- [ ] Gap map includes already answered, ambiguous, contradictory, missing, and recommended probe sections.
-- [ ] Contradictions are represented as priority interview targets.
-- [ ] Model name/version and generated timestamp are stored.
-- [ ] Invalid AI output is handled without losing survey data.
+- [ ] Survey completion makes the run ready for interview without an intermediate AI artifact.
+- [ ] Interview prompt includes survey evidence and snapshotted interviewer instructions.
+- [ ] Interview prompt does not include scoring objective context.
+- [ ] Missing optional interviewer instructions are handled safely.
 
 **Out of Scope**
-Researcher approval workflow for gap maps.
+Researcher-selectable personas.
 
 **Implementation Notes**
-Use structured output/schema validation. Store gap maps as auditable artifacts.
+Keep interviewer instructions participant-safe and independent from scoring rubrics.
 
 **Testing Notes**
-Use mocked AI responses for valid, invalid, and provider-failure cases.
+Use mocked realtime provider assertions to verify prompt context.
 
 ### [AI Orchestration] Define fixed V1 interviewer persona prompt version
 
@@ -550,7 +548,7 @@ Seed and reference a default interviewer persona version with style instructions
 - [ ] Default V1 persona exists in data.
 - [ ] New studies/runs reference the active default persona.
 - [ ] Persona instructs the AI to be calm, warm, neutral, curious, and non-evaluative.
-- [ ] Persona instructs the AI not to reveal scoring objectives, rubrics, grades, scores, or gap map internals.
+- [ ] Persona instructs the AI not to reveal scoring objectives, rubrics, grades, scores, or evaluation strategy.
 
 **Out of Scope**
 Researcher-selectable personas.
@@ -569,13 +567,13 @@ Verify seeded persona and run references.
 **Depends on:** [Foundation] Scaffold web app, service, and development conventions
 
 **Problem**
-Gap map and scoring passes need reliable AI calls with metadata, retries, safe error categories, and validated outputs.
+Scoring passes need reliable AI calls with metadata, retries, safe error categories, and validated outputs.
 
 **Scope**
 Implement provider abstraction for non-voice AI calls, schema validation, retry handling, model metadata capture, and safe error categorization.
 
 **Acceptance Criteria**
-- [ ] Gap map and scoring code can call through the abstraction.
+- [ ] Scoring code can call through the abstraction.
 - [ ] Structured output validation rejects malformed responses.
 - [ ] Model name/version and service request IDs are available for persistence.
 - [ ] Provider errors map to safe operational categories.
@@ -594,7 +592,7 @@ Unit test success, malformed output, retryable error, and non-retryable error ca
 **Type:** feature  
 **Priority:** P0  
 **Labels:** service, data, voice, mvp, priority:P0
-**Depends on:** [Participant Runs] Implement run state machine; [AI Orchestration] Generate and persist survey gap map
+**Depends on:** [Participant Runs] Implement run state machine
 
 **Problem**
 The run can include zero or more interview sessions, and participants can pause/resume while the run remains fresh.
@@ -636,7 +634,7 @@ Build the participant interview screen with AI caption, record/stop control, voi
 - [ ] UI has a record button that becomes stop-record while recording.
 - [ ] UI shows participant voice activity.
 - [ ] UI shows AI and participant voice waves.
-- [ ] UI does not show participant captions, full transcript, rubrics, scores, gap map, or objective progress.
+- [ ] UI does not show participant captions, full transcript, rubrics, scores, or objective progress.
 
 **Out of Scope**
 Researcher transcript review UI.
@@ -655,15 +653,15 @@ Use component and E2E tests to verify hidden data is absent from participant UI.
 **Depends on:** [Interview] Build sparse participant voice UI; [AI Orchestration] Define fixed V1 interviewer persona prompt version
 
 **Problem**
-The participant interview must be voice-to-voice and informed by the survey, gap map, objectives, persona, remaining time, and run state.
+The participant interview must be voice-to-voice and informed by the survey, interviewer instructions, persona, remaining time, and run state.
 
 **Scope**
 Connect browser voice UI and service session state to the selected realtime voice provider.
 
 **Acceptance Criteria**
-- [ ] Interview prompt includes survey responses, gap map, objective context, persona, remaining time, and run state.
+- [ ] Interview prompt includes survey responses, interviewer instructions, persona, remaining time, and run state.
 - [ ] AI asks one question at a time and can probe naturally.
-- [ ] AI avoids revealing hidden scoring/gap/rubric details.
+- [ ] AI avoids revealing hidden scoring or rubric details.
 - [ ] Remaining time is available to the interview orchestration.
 - [ ] Connection state is reported to the service for telemetry.
 
@@ -774,7 +772,7 @@ Use time-controlled tests for before, at, and after freshness deadline.
 The system must score every run after completion, staleness, or technical interruption.
 
 **Scope**
-Build automatic scoring job that gathers survey responses, gap map, transcript/audio metadata, objective versions, run flags, and produces validated objective scores.
+Build automatic scoring job that gathers survey responses, transcript/audio metadata, objective versions, run flags, and produces validated objective scores.
 
 **Acceptance Criteria**
 - [ ] Scoring triggers after interview completion.
@@ -1118,7 +1116,7 @@ Test researcher denial, admin access, and audit logs.
 The V1 slice crosses many components and can regress easily without an end-to-end safety net.
 
 **Scope**
-Create an E2E test covering researcher study setup, run creation, participant consent/survey, mocked gap map, mocked/simulated interview, automatic scoring, researcher review, and CSV export.
+Create an E2E test covering researcher study setup, run creation, participant consent/survey, mocked/simulated interview, automatic scoring, researcher review, and CSV export.
 
 **Acceptance Criteria**
 - [ ] Test creates a study with consent, survey, slots, and objectives.

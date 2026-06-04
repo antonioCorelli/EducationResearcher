@@ -21,10 +21,6 @@ import {
   type SaveObjectivesInput
 } from "./objectives.js";
 import {
-  createConfiguredGapMapGenerator,
-  type GapMapGenerator
-} from "./gap-map.js";
-import {
   createConfiguredInterviewAudioStorage,
   type InterviewAudioStorage
 } from "./interview-audio-storage.js";
@@ -107,7 +103,6 @@ interface BuildServerOptions extends FastifyServerOptions {
   readonly authProvider?: AuthProvider;
   readonly consentVersionStore?: ConsentVersionStore;
   readonly corsOrigin?: string | string[];
-  readonly gapMapGenerator?: GapMapGenerator;
   readonly objectiveVersionStore?: ObjectiveVersionStore;
   readonly operationalEventServiceOptions?: OperationalEventServiceOptions;
   readonly operationalEventStore?: OperationalEventStore & AuditLogStore;
@@ -204,7 +199,11 @@ function parseStudyShellInput(body: unknown) {
   return {
     ...("title" in record ? { title: record.title } : {}),
     ...("description" in record ? { description: record.description } : {}),
-    ...("interviewerGoals" in record ? { interviewerGoals: record.interviewerGoals } : {}),
+    ...("interviewerInstructions" in record
+      ? { interviewerInstructions: record.interviewerInstructions }
+      : "interviewerGoals" in record
+        ? { interviewerInstructions: record.interviewerGoals }
+        : {}),
     ...("defaultFreshnessDays" in record ? { defaultFreshnessDays: record.defaultFreshnessDays } : {}),
     ...("defaultMaxInterviewMinutes" in record
       ? { defaultMaxInterviewMinutes: record.defaultMaxInterviewMinutes }
@@ -223,7 +222,7 @@ function coerceCreateStudyShellInput(body: unknown): CreateStudyShellInput {
     return {
       title: input.title,
       description: coerceOptionalText(input.description, "Study description"),
-      interviewerGoals: coerceOptionalText(input.interviewerGoals, "Interviewer goals"),
+      interviewerInstructions: coerceOptionalText(input.interviewerInstructions, "Interviewer instructions"),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
       defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
     };
@@ -243,8 +242,8 @@ function coerceUpdateStudyShellInput(body: unknown): UpdateStudyShellInput {
     return {
       ...(typeof input.title === "string" ? { title: input.title } : {}),
       ...("description" in input ? { description: coerceOptionalText(input.description, "Study description") } : {}),
-      ...("interviewerGoals" in input
-        ? { interviewerGoals: coerceOptionalText(input.interviewerGoals, "Interviewer goals") }
+      ...("interviewerInstructions" in input
+        ? { interviewerInstructions: coerceOptionalText(input.interviewerInstructions, "Interviewer instructions") }
         : {}),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
       defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
@@ -1072,7 +1071,6 @@ export function buildServer(options: BuildServerOptions = {}) {
     authProvider,
     consentVersionStore = createConfiguredConsentVersionStore(),
     corsOrigin = createConfiguredCorsOrigin(),
-    gapMapGenerator = createConfiguredGapMapGenerator(),
     objectiveVersionStore = createConfiguredObjectiveVersionStore(),
     operationalEventServiceOptions,
     operationalEventStore = createConfiguredOperationalEventStore(),
@@ -1117,8 +1115,7 @@ export function buildServer(options: BuildServerOptions = {}) {
       ...runServiceOptions,
       interviewAudioStorage,
       automaticScoringTrigger: runServiceOptions?.automaticScoringTrigger ?? scoringService
-    },
-    gapMapGenerator
+    }
   );
   const surveyService = new SurveyService(surveyVersionStore, studyShellStore);
   const studyAuthorization = new StudyAuthorizationService(

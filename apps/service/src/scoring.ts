@@ -13,7 +13,6 @@ import {
   type AiModelMetadata,
   type StructuredAiProvider
 } from "./ai-provider.js";
-import type { GapMap } from "./gap-map.js";
 import type { ObjectiveVersion, ObjectiveVersionStore } from "./objectives.js";
 import {
   applyRunStatusTransition,
@@ -70,7 +69,6 @@ export interface ScoringGenerationInput {
   readonly surveyResponses: readonly SurveyResponse[];
   readonly interviewTurns?: readonly InterviewTurn[];
   readonly interviewAudioAssets?: readonly InterviewAudioAsset[];
-  readonly gapMap?: GapMap;
   readonly objectiveVersions: readonly ObjectiveVersion[];
   readonly trigger: ScoringTrigger;
 }
@@ -321,7 +319,6 @@ export class ScoringService {
       | "getById"
       | "listByStudy"
       | "listSurveyResponsesByRun"
-      | "listGapMapsByRun"
       | "listInterviewTurnsByRun"
       | "listInterviewAudioAssetsByRun"
       | "updateStatus"
@@ -596,7 +593,6 @@ export class ScoringService {
     const objectiveVersions =
       trigger === "manual_rescore" ? await this.getLatestObjectiveVersionsForRescore(run) : await this.getObjectiveVersionsForRun(run);
     const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
-    const gapMap = (await this.runStore.listGapMapsByRun(run.id)).find((candidate) => candidate.status === "generated");
     const interviewTurns = await this.runStore.listInterviewTurnsByRun(run.id);
     const interviewAudioAssets = await this.runStore.listInterviewAudioAssetsByRun(run.id);
     const generated = await this.scoringGenerator.generate({
@@ -604,7 +600,6 @@ export class ScoringService {
       surveyResponses,
       interviewTurns,
       interviewAudioAssets,
-      ...(gapMap ? { gapMap } : {}),
       objectiveVersions,
       trigger
     });

@@ -27,7 +27,7 @@ This repository now has a foundation scaffold for local development:
 - **Service API:** Node.js, TypeScript, and Fastify.
 - **Service hosting/deploy:** AWS Elastic Beanstalk on the Docker platform.
 - **Primary AWS data services:** DynamoDB for application data and state, S3 for interview audio assets and generated exports.
-- **Local provider mode:** fake providers are required from day one for auth/session, AI gap maps/scoring, voice interviews, and storage-like behavior.
+- **Local provider mode:** fake providers are required from day one for auth/session, AI scoring, voice interviews, and storage-like behavior.
 
 AI and realtime voice model providers are still open decisions. They must be wrapped behind service adapters so local development and tests can run without sending real participant data to external providers.
 
@@ -195,7 +195,7 @@ npm run dev --workspace @education-researcher/service
 Local development and deterministic tests must support fake providers from day one:
 
 - **Fake auth/session:** simulate Cognito researcher/admin claims locally without requiring live AWS login.
-- **Fake AI:** return deterministic gap map and scoring outputs, including malformed-output and provider-failure cases for tests.
+- **Fake AI:** return deterministic scoring outputs, including malformed-output and provider-failure cases for tests.
 - **Fake voice interview:** simulate transcript turns, audio metadata, connection events, interruption states, and completion.
 - **Fake storage:** avoid writing sensitive test artifacts to production AWS resources; use local or isolated test storage behavior.
 
@@ -213,7 +213,7 @@ Important assumptions:
 - DynamoDB records should be keyed and queried around explicit tenant and study/run access patterns.
 - S3 objects for audio and exports must use non-guessable keys and short-lived signed access.
 - CSV exports must defend against spreadsheet formula injection.
-- Participants must never see scoring objectives, rubrics, gap maps, scores, hidden progress, full transcripts, or participant speech captions.
+- Participants must never see scoring objectives, rubrics, scores, hidden progress, full transcripts, or participant speech captions.
 - Researcher-facing errors must avoid vendor names, stack traces, device diagnostics, and raw system details.
 - Admin access to sensitive artifacts must be role-limited and audit logged.
 - Real participant data must not be sent to AI or voice providers until provider, privacy, and data-processing decisions are confirmed.

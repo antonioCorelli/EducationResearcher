@@ -141,7 +141,7 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("AI speaking");
     expect(markup).not.toContain("Repeat question");
     expect(markup).not.toContain("Say that another way");
-    expect(markup).not.toMatch(/participant caption|full transcript|rubric|score|gap map|objective progress/i);
+    expect(markup).not.toMatch(/participant caption|full transcript|rubric|score|objective progress/i);
   });
 
   it("uses a buttonless realtime voice surface for natural conversation", () => {

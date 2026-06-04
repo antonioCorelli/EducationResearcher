@@ -14,7 +14,7 @@ const fixtureStudy: StudyShell = {
   title: "Thinking Strategies",
   description: "Explores how learners explain their reasoning.",
   defaultFreshnessDays: 14,
-  interviewerGoals: "Clarify where learners got stuck and elicit concrete examples.",
+  interviewerInstructions: "Clarify where learners got stuck and elicit concrete examples.",
   defaultMaxInterviewMinutes: 45,
   activePersonaVersionId: "persona_version_v1_default_001",
   persona: {
@@ -94,12 +94,12 @@ describe("researcher setup tab information", () => {
     const markup = renderToStaticMarkup(
       <ResearcherInterview
         activeStudySetupTab="interview"
-        interviewerGoals="Clarify where learners got stuck and elicit concrete examples."
+        interviewerInstructions="Clarify where learners got stuck and elicit concrete examples."
         isSavingStudy={false}
         maxInterviewMinutes={45}
         selectedStudy={fixtureStudy}
         studyError=""
-        onInterviewerGoalsChange={noop}
+        onInterviewerInstructionsChange={noop}
         onMaxInterviewMinutesChange={noop}
         onSaveStudy={noop}
       />
@@ -107,7 +107,7 @@ describe("researcher setup tab information", () => {
 
     expect(markup).toContain("Interview");
     expect(markup).toContain("Interview minutes");
-    expect(markup).toContain("Interviewer goals");
+    expect(markup).toContain("Interviewer instructions");
     expect(markup).toContain("concepts to clarify");
     expect(markup).toContain("Interviewer persona");
     expect(markup).toContain("Locked Persona Version 1");
@@ -193,7 +193,7 @@ describe("researcher setup tab information", () => {
 
     expect(markup).toContain("Versions 1-2");
     expect(markup).toContain("2 enabled");
-    expect(markup).toContain("used by the gap map, interview, and scoring pass");
+    expect(markup).toContain("used by the scoring pass");
     expect(markup).toContain("prior runs keep the versions they used");
   });
 });

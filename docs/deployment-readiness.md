@@ -40,7 +40,6 @@ Data allowed after this gate passes:
 - Consent records.
 - Survey responses.
 - Interview transcripts and audio.
-- Gap maps.
 - Scores, rationales, flags, citations, and exports.
 - Operational telemetry and audit logs that avoid raw sensitive content.
 
@@ -63,7 +62,7 @@ The following gaps block real participant data collection:
 
 - S3-backed artifact storage is implemented, deployed, access-controlled, and used for interview audio and generated exports. Local filesystem storage is not acceptable for real participant data.
 - Production secrets and environment variables are managed outside the repository, including auth, participant token signing, audio link signing, service, storage, AI, voice, and observability secrets.
-- Provider data-processing decisions are documented for AI gap-map/scoring and realtime voice, including what participant data is sent, whether provider retention or training applies, and who approved the pilot use.
+- Provider data-processing decisions are documented for AI scoring and realtime voice, including what participant data is sent, whether provider retention or training applies, and who approved the pilot use.
 - Retention and researcher deletion behavior is documented and operable across DynamoDB records, S3 objects, generated exports, audit logs, operational telemetry, and backups.
 - Backup and restore expectations are documented and tested enough for the pilot, including DynamoDB point-in-time recovery and object-storage recovery behavior.
 - Production observability is configured with structured logs, metrics, traces or equivalent diagnostics, alert thresholds, and alert ownership.

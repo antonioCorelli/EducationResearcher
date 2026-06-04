@@ -44,7 +44,7 @@ export interface StudyShell {
   readonly id: string;
   readonly title: string;
   readonly description?: string;
-  readonly interviewerGoals?: string;
+  readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
   readonly activeConsentVersionId?: string;
@@ -264,7 +264,6 @@ export interface ResearcherSafeRunStatus {
 export interface ResearcherRunArtifactSummary {
   readonly consentRecordCount: number;
   readonly surveyResponseCount: number;
-  readonly gapMapCount: number;
   readonly interviewSessionCount: number;
   readonly interviewTurnCount: number;
   readonly audioAssetCount: number;
@@ -966,7 +965,7 @@ export function App() {
   const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
   const [studyTitle, setStudyTitle] = useState<string>(defaultStudyShellForm.studyTitle);
   const [studyDescription, setStudyDescription] = useState<string>(defaultStudyShellForm.studyDescription);
-  const [interviewerGoals, setInterviewerGoals] = useState<string>(defaultStudyShellForm.interviewerGoals);
+  const [interviewerInstructions, setInterviewerInstructions] = useState<string>(defaultStudyShellForm.interviewerInstructions);
   const [freshnessDays, setFreshnessDays] = useState<number>(defaultStudyShellForm.freshnessDays);
   const [maxInterviewMinutes, setMaxInterviewMinutes] = useState<number>(defaultStudyShellForm.maxInterviewMinutes);
   const [studyError, setStudyError] = useState("");
@@ -1249,7 +1248,7 @@ export function App() {
     setActiveStudySetupTab("shell");
     setStudyTitle(studyShellForm.studyTitle);
     setStudyDescription(studyShellForm.studyDescription);
-    setInterviewerGoals(studyShellForm.interviewerGoals);
+    setInterviewerInstructions(studyShellForm.interviewerInstructions);
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
@@ -1290,7 +1289,7 @@ export function App() {
     setSelectedStudyId(studyShellForm.selectedStudyId);
     setStudyTitle(studyShellForm.studyTitle);
     setStudyDescription(studyShellForm.studyDescription);
-    setInterviewerGoals(studyShellForm.interviewerGoals);
+    setInterviewerInstructions(studyShellForm.interviewerInstructions);
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
     setStudyError("");
@@ -1383,7 +1382,7 @@ export function App() {
           body: JSON.stringify({
             title: studyTitle,
             description: studyDescription,
-            interviewerGoals,
+            interviewerInstructions,
             defaultFreshnessDays: freshnessDays,
             defaultMaxInterviewMinutes: maxInterviewMinutes
           })
@@ -2558,11 +2557,11 @@ export function App() {
           <ResearcherInterview
             activeStudySetupTab={activeStudySetupTab}
             isSavingStudy={isSavingStudy}
-            interviewerGoals={interviewerGoals}
+            interviewerInstructions={interviewerInstructions}
             maxInterviewMinutes={maxInterviewMinutes}
             selectedStudy={selectedStudy}
             studyError={studyError}
-            onInterviewerGoalsChange={setInterviewerGoals}
+            onInterviewerInstructionsChange={setInterviewerInstructions}
             onMaxInterviewMinutesChange={setMaxInterviewMinutes}
             onSaveStudy={handleSaveStudy}
           />

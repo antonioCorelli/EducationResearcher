@@ -78,7 +78,6 @@ describe("data domain schema", () => {
         "run",
         "consent_record",
         "survey_response",
-        "gap_map",
         "interview_session",
         "interview_turn",
         "interview_audio_asset",
@@ -136,7 +135,7 @@ describe("data domain schema", () => {
     expect(stylePrompt).toContain("calm, warm, neutral, curious, and non-evaluative");
     expect(stylePrompt).toContain("ask one question at a time");
     expect(stylePrompt).toContain("Do not reveal scoring objectives, rubrics, grades, scores");
-    expect(stylePrompt).toContain("gap map internals");
+    expect(stylePrompt).toContain("interviewer instructions");
   });
 
   it("defines participant access token records without storing raw bearer tokens", () => {
@@ -228,28 +227,17 @@ describe("data domain schema", () => {
   });
 
   it("captures AI model metadata and safe provider categories", () => {
-    const gapMapDefinition = getEntityDefinition("gap_map")?.definition;
     const scoringRunDefinition = getEntityDefinition("scoring_run")?.definition;
     const operationalEventDefinition = getEntityDefinition("operational_event")?.definition;
-    const gapMap = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "gap_map");
     const scoringRun = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "scoring_run");
     const operationalEvent = FIRST_BUILD_SLICE_FIXTURE.find((record) => record.entity === "operational_event");
 
-    expect(gapMapDefinition?.requiredAttributes).toEqual(
-      expect.arrayContaining(["modelName", "modelVersion", "serviceRequestId", "promptVersion"])
-    );
     expect(scoringRunDefinition?.requiredAttributes).toEqual(
       expect.arrayContaining(["modelName", "modelVersion", "serviceRequestId", "promptVersion"])
     );
     expect(operationalEventDefinition?.statusAttributes).toEqual(
       expect.arrayContaining(["modelApiErrorCategory", "technicalFailureCategory"])
     );
-    expect(gapMap?.attributes).toMatchObject({
-      modelName: "fake-gap-map",
-      modelVersion: "local-1",
-      serviceRequestId: "req_gap_map_fixture_001",
-      promptVersion: "gap-map-v1"
-    });
     expect(scoringRun?.attributes).toMatchObject({
       modelName: "fake-scoring",
       modelVersion: "local-1",

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AuthProvider, AuthTokens, SessionUser } from "./auth.js";
 import { InMemoryConsentVersionStore } from "./consent.js";
-import type { GapMapGenerationInput, GapMapGeneratorOutput } from "./gap-map.js";
 import { InMemoryObjectiveVersionStore } from "./objectives.js";
 import { InMemoryOperationalEventStore } from "./operational-events.js";
 import { InMemoryParticipantSlotStore } from "./participant-slots.js";
@@ -45,24 +44,6 @@ function createFakeAuthProvider(): AuthProvider {
       }
 
       return researcher;
-    }
-  };
-}
-
-function createFirstBuildSliceGapMapGenerator() {
-  return {
-    async generate(input: GapMapGenerationInput): Promise<GapMapGeneratorOutput> {
-      return {
-        modelName: "fake-gap-map",
-        modelVersion: "local-1",
-        serviceRequestId: "req_gap_map_first_build_slice",
-        promptVersion: "gap-map-v1",
-        alreadyAnswered: ["The participant noticed a change in thinking."],
-        ambiguities: ["The reason for the change is underspecified."],
-        contradictions: [],
-        missingEvidence: input.objectiveVersions.map((objective) => `Need an example for ${objective.title}.`),
-        recommendedProbes: ["What were the two examples you compared?"]
-      };
     }
   };
 }
@@ -133,7 +114,6 @@ describe("end-to-end first build slice", () => {
       authProvider,
       logger: false,
       consentVersionStore: consentStore,
-      gapMapGenerator: createFirstBuildSliceGapMapGenerator(),
       objectiveVersionStore: objectiveStore,
       operationalEventStore: operationalStore,
       participantAccessTokenStore,
@@ -145,7 +125,6 @@ describe("end-to-end first build slice", () => {
       realtimeVoiceProvider: new FakeRealtimeVoiceProvider(),
       runServiceOptions: {
         createConsentRecordId: () => "consent_record_001",
-        createGapMapId: () => "gap_map_001",
         createInterviewAudioAssetId: () => "interview_audio_asset_001",
         createInterviewSessionId: () => "interview_session_001",
         createInterviewTurnId: () => `interview_turn_00${++interviewTurnSequence}`,
@@ -322,11 +301,6 @@ describe("end-to-end first build slice", () => {
     });
     expect(participantSurveyResponse.statusCode).toBe(201);
     expect(participantSurveyResponse.json()).toMatchObject({
-      gapMap: {
-        id: "gap_map_001",
-        modelName: "fake-gap-map",
-        recommendedProbes: ["What were the two examples you compared?"]
-      },
       run: {
         status: "survey_completed"
       },
@@ -441,7 +415,6 @@ describe("end-to-end first build slice", () => {
             artifactSummary: {
               consentRecordCount: 1,
               surveyResponseCount: 1,
-              gapMapCount: 1,
               interviewSessionCount: 1,
               interviewTurnCount: 2,
               audioAssetCount: 1,

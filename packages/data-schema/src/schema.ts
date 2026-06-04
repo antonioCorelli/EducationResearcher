@@ -24,7 +24,6 @@ export type DataDomainEntity =
   | "run"
   | "consent_record"
   | "survey_response"
-  | "gap_map"
   | "interview_session"
   | "interview_turn"
   | "interview_audio_asset"
@@ -365,7 +364,7 @@ export const DATA_DOMAIN_TABLES = [
     sharedLanguageName: "Run Lifecycle Table",
     cdkConstructId: "RunLifecycleTable",
     tableNameSuffix: "run-lifecycle",
-    description: "Runs, consent records, survey responses, gap maps, interview sessions, turns, and audio metadata.",
+    description: "Runs, consent records, survey responses, interview sessions, turns, and audio metadata.",
     partitionKey: "pk",
     sortKey: "sk",
     indexes: [
@@ -533,39 +532,6 @@ export const DATA_DOMAIN_TABLES = [
             attribute: "surveyQuestionId",
             references: "survey_question",
             relationship: "Survey question answered."
-          }
-        ]
-      },
-      {
-        entity: "gap_map",
-        description: "Persisted AI output identifying answered areas, ambiguities, contradictions, missing evidence, and probes.",
-        partitionKeyPattern: "RUN#<run_id>",
-        sortKeyPattern: "GAP_MAP#<gap_map_id>",
-        requiredAttributes: [
-          "id",
-          "studyId",
-          "participantSlotId",
-          "runId",
-          "surveyVersionId",
-          "objectiveVersionIds",
-          "status",
-          "modelName",
-          "modelVersion",
-          "serviceRequestId",
-          "promptVersion",
-          "alreadyAnswered",
-          "ambiguities",
-          "contradictions",
-          "missingEvidence",
-          "recommendedProbes"
-        ],
-        statusAttributes: ["status"],
-        timestampAttributes: ["generatedAt", "createdAt"],
-        references: [
-          {
-            attribute: "runId",
-            references: "run",
-            relationship: "Parent run."
           }
         ]
       },

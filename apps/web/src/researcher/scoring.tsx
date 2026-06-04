@@ -99,8 +99,7 @@ export function ResearcherScoring({
       </div>
       <p className="muted-copy">
         Define the objectives, grade labels, examples, evidence requirements, and optional scoring prompts used by the
-        gap map, interview, and scoring pass. Objective edits create new versions while prior runs keep the versions
-        they used.
+        scoring pass. Objective edits create new versions while prior runs keep the versions they used.
       </p>
       <div className="objective-list">
         {objectiveDrafts.map((objective, objectiveIndex) => {

@@ -129,7 +129,6 @@ function createDashboardSlot(
     artifactSummary: {
       consentRecordCount: 1,
       surveyResponseCount: 2,
-      gapMapCount: 1,
       interviewSessionCount: 1,
       interviewTurnCount: 3,
       audioAssetCount: 1,

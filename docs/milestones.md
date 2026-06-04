@@ -6,7 +6,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 ### Goal
 
-Deliver the first build slice: a researcher can create a study, configure consent/survey/objectives, create participant slots and runs, a participant can consent and complete the survey/interview flow, the system can generate a gap map and score the run, and the researcher can review scores/evidence and export CSV.
+Deliver the first build slice: a researcher can create a study, configure consent/survey/objectives, create participant slots and runs, a participant can consent and complete the survey/interview flow, the system can score the run, and the researcher can review scores/evidence and export CSV.
 
 ### Included Issues
 
@@ -26,7 +26,6 @@ Deliver the first build slice: a researcher can create a study, configure consen
 - [Participant Flow] Capture participant consent record
 - [Participant Flow] Render and submit long-form survey
 - [Participant Flow] Add participant completion and blocked-state screens
-- [AI Orchestration] Generate and persist survey gap map
 - [AI Orchestration] Define fixed V1 interviewer persona prompt version
 - [AI Orchestration] Build AI provider abstraction and structured output validation
 - [Interview] Implement interview session lifecycle
@@ -52,7 +51,7 @@ Deliver the first build slice: a researcher can create a study, configure consen
 - Sensitive researcher data is study-scoped and protected by service authorization.
 - Participant access works without accounts and is scoped to authorized runs.
 - Configuration used by runs is versioned or immutable by reference.
-- Gap maps, transcripts/audio metadata, scoring runs, citations, and CSV exports are persisted.
+- Transcripts/audio metadata, scoring runs, citations, and CSV exports are persisted.
 - Stale and technical interruption paths preserve captured data and still trigger scoring.
 - The core flow has automated tests using fake AI/voice adapters.
 - Docs describe local setup, commands, provider assumptions, and remaining open questions.

@@ -61,7 +61,7 @@ This is the initial shared vocabulary for the product and codebase. Prefer these
 | Survey Version | Versioned set of long-form survey questions and groups. |
 | Survey Group | Optional visible grouping label for survey questions. |
 | Survey Question | Required long-form free-text question. Closed-ended question types are out of scope. |
-| Scoring Objective | Researcher-defined rating objective used by the gap map, interview context, and scoring pass. |
+| Scoring Objective | Researcher-defined rating objective used by the scoring pass. |
 | Objective Version | Versioned scoring objective that preserves scoring history when objectives change. |
 | Objective Key | Stable identifier connecting versions of the same scoring objective over time. |
 | Rubric | Researcher-defined scoring guidance, including grade scale, examples, evidence requirements, and optional prompt text. |
@@ -83,7 +83,7 @@ This is the initial shared vocabulary for the product and codebase. Prefer these
 | Created | Initial run state before consent. |
 | Consented | Run state after consent is captured. |
 | Survey In Progress | Run state while the participant is completing survey questions. |
-| Survey Completed | Run state after survey submission and before or during gap map generation. |
+| Survey Completed | Run state after survey submission and before interview start. |
 | Interview In Progress | Run state while an interview session is active. |
 | Interview Paused | Run state when the participant may resume later within the freshness window. |
 | Interview Completed | Run state after the interview finishes. |
@@ -100,7 +100,6 @@ This is the initial shared vocabulary for the product and codebase. Prefer these
 | --- | --- |
 | Consent Page | First participant screen in a run, rendering the run's consent version. |
 | Long-Form Survey | Free-text survey with required sentence-to-paragraph responses. |
-| Gap Map Waiting State | Possible participant transition state while the system prepares the interview after survey submission. |
 | Sparse Voice UI | Participant interview UI with AI caption, record/stop control, voice indications, and waves only. |
 | AI Question Caption | Participant-visible caption/transcript for the AI question only. |
 | Record Button | Participant control that can become a stop-record control. |
@@ -112,18 +111,13 @@ This is the initial shared vocabulary for the product and codebase. Prefer these
 
 | Concept | Initial meaning |
 | --- | --- |
-| AI Orchestration Layer | Service boundary for gap map, interview, scoring, prompt/version tracking, validation, retries, and error categorization. |
-| Gap Map Pass | AI pass after survey completion that identifies answered areas, ambiguities, contradictions, missing evidence, and recommended probes. |
-| Gap Map | Persisted AI artifact used to guide the interview and support later validity analysis. |
-| Already Answered Areas | Gap map section for what the survey already answers. |
-| Ambiguity | Gap map section for unclear or underspecified survey evidence. |
-| Contradiction | Gap map section for conflicting evidence, treated as a priority interview target. |
-| Missing Evidence | Gap map section for what is missing relative to scoring objectives. |
+| AI Orchestration Layer | Service boundary for interview, scoring, prompt/version tracking, validation, retries, and error categorization. |
 | Recommended Probe | Suggested interview question or follow-up targeting a gap. |
-| Interview Pass | AI behavior during the voice interview using survey responses, gap map, objectives, persona, time remaining, and run state. |
+| Interviewer Instructions | Researcher-provided study context passed to the interviewer agent to guide follow-up questions independently from scoring objectives. |
+| Interview Pass | AI behavior during the voice interview using survey responses, interviewer instructions, persona, time remaining, and run state. |
 | Scoring Pass | AI pass that scores available survey/interview evidence against objective versions. |
-| Structured Output Validation | Validation of AI gap map and scoring responses before persistence. |
-| Model Metadata | Stored model name, version, prompt/version metadata, timestamps, and related scoring/gap map details. |
+| Structured Output Validation | Validation of AI scoring responses before persistence. |
+| Model Metadata | Stored model name, version, prompt/version metadata, timestamps, and related scoring details. |
 | Provider Error Category | Safe operational category for AI/model/voice failures, without leaking raw provider diagnostics. |
 
 ## Interview
@@ -196,18 +190,18 @@ This is the initial shared vocabulary for the product and codebase. Prefer these
 | Participant Web App | React/Vite token-scoped surface for consent, survey, interview, recovery, and completion. |
 | Service API | Node.js/TypeScript/Fastify API that owns durable product behavior and authorization. |
 | Run Orchestration Service | Service logic for run transitions, freshness enforcement, interruption handling, and scoring triggers. |
-| Background Worker | Worker or scheduled-job capability for gap maps, scoring, stale sweeps, exports, retention, and cleanup. |
+| Background Worker | Worker or scheduled-job capability for scoring, stale sweeps, exports, retention, and cleanup. |
 | DynamoDB | Planned primary data store for application records, artifacts, run state, telemetry, and audit logs. |
 | S3 | Planned object storage for interview audio assets and generated exports. |
 | AWS Amplify | Planned frontend hosting/deploy target. |
 | Amazon Cognito | Planned researcher/admin auth provider. |
 | AWS App Runner | Planned service API hosting/deploy target. |
-| AI Model Provider | Open provider decision for gap map and scoring passes. |
+| AI Model Provider | Open provider decision for scoring passes. |
 | Realtime Voice Provider | Open provider decision for voice-to-voice interview. |
 | Observability Provider | Open provider decision for logs, metrics, traces, and alerts. |
-| Fake Provider Mode | Deterministic local/test mode for auth/session, AI gap map/scoring, voice interview, and storage-like behavior. |
+| Fake Provider Mode | Deterministic local/test mode for auth/session, AI scoring, voice interview, and storage-like behavior. |
 | Fake Auth/Session Provider | Local/test provider that simulates Cognito identities and roles. |
-| Fake AI Gap Map/Scoring Provider | Local/test provider returning deterministic structured outputs and safe failure categories. |
+| Fake AI Scoring Provider | Local/test provider returning deterministic structured scoring outputs and safe failure categories. |
 | Fake Voice Interview Provider | Local/test provider simulating transcript turns, audio metadata, interruptions, and completion. |
 | Fake Storage Provider | Local/test provider avoiding production AWS writes while preserving service contracts. |
 | Adapter Boundary | Small interface around an external provider so local tests and future provider changes remain isolated. |
@@ -222,7 +216,7 @@ This is the initial shared vocabulary for the product and codebase. Prefer these
 | Identity Access Table | Data domain table for researcher and authorized admin engineer user records. |
 | Study Setup Table | Data domain table for study shells and participant slots. |
 | Versioned Configuration Table | Data domain table for immutable consent, survey, objective, grade example, and persona versions. |
-| Run Lifecycle Table | Data domain table for runs and raw run artifacts such as consent records, survey responses, gap maps, interview sessions, turns, and audio metadata. |
+| Run Lifecycle Table | Data domain table for runs and raw run artifacts such as consent records, survey responses, interview sessions, turns, and audio metadata. |
 | Evidence Scoring Table | Data domain table for scoring runs, objective scores, and evidence citations. |
 | Operations Table | Data domain table for operational events and audit logs. |
 | Schema Contract | Versioned TypeScript metadata defining data domain tables, primary keys, indexes, entity fields, relationship references, and local fixtures. |
@@ -257,7 +251,6 @@ Use these names when discussing unresolved choices:
 - Backup and restore strategy
 - Researcher study setup flow
 - Participant draft survey saving
-- Gap map waiting UX
 - Participant recovery states
 - Interview pause control
 - AI thank-you presentation

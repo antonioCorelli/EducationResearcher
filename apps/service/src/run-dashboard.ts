@@ -15,7 +15,6 @@ export interface ResearcherSafeRunStatus {
 export interface ResearcherRunArtifactSummary {
   readonly consentRecordCount: number;
   readonly surveyResponseCount: number;
-  readonly gapMapCount: number;
   readonly interviewSessionCount: number;
   readonly interviewTurnCount: number;
   readonly audioAssetCount: number;
@@ -60,7 +59,6 @@ export class RunDashboardService {
       | "listByStudy"
       | "listConsentRecordsByRun"
       | "listSurveyResponsesByRun"
-      | "listGapMapsByRun"
       | "listInterviewSessionsByRun"
       | "listInterviewTurnsByRun"
       | "listInterviewAudioAssetsByRun"
@@ -104,7 +102,6 @@ export class RunDashboardService {
     const [
       consentRecords,
       surveyResponses,
-      gapMaps,
       interviewSessions,
       interviewTurns,
       audioAssets,
@@ -112,7 +109,6 @@ export class RunDashboardService {
     ] = await Promise.all([
       this.runStore.listConsentRecordsByRun(run.id),
       this.runStore.listSurveyResponsesByRun(run.id),
-      this.runStore.listGapMapsByRun(run.id),
       this.runStore.listInterviewSessionsByRun(run.id),
       this.runStore.listInterviewTurnsByRun(run.id),
       this.runStore.listInterviewAudioAssetsByRun(run.id),
@@ -130,7 +126,6 @@ export class RunDashboardService {
       artifactSummary: summarizeArtifacts({
         consentRecordCount: consentRecords.length,
         surveyResponseCount: surveyResponses.length,
-        gapMapCount: gapMaps.length,
         interviewSessions,
         interviewTurnCount: interviewTurns.length,
         audioAssets
@@ -178,7 +173,6 @@ export function toResearcherSafeRunStatus(status: RunStatus): ResearcherSafeRunS
 function summarizeArtifacts(input: {
   readonly consentRecordCount: number;
   readonly surveyResponseCount: number;
-  readonly gapMapCount: number;
   readonly interviewSessions: readonly InterviewSession[];
   readonly interviewTurnCount: number;
   readonly audioAssets: readonly InterviewAudioAsset[];
@@ -186,7 +180,6 @@ function summarizeArtifacts(input: {
   return {
     consentRecordCount: input.consentRecordCount,
     surveyResponseCount: input.surveyResponseCount,
-    gapMapCount: input.gapMapCount,
     interviewSessionCount: input.interviewSessions.length,
     interviewTurnCount: input.interviewTurnCount,
     audioAssetCount: input.audioAssets.length,

@@ -40,11 +40,11 @@ V1 is for formative research and should not be positioned as high-stakes assessm
    - Opens the assigned run link.
    - Accepts consent through checkmark or electronic signature.
    - Completes required long-form survey questions once for that run.
-   - The system persists responses and generates a gap map.
+   - The system persists responses and makes the run ready for interview.
 
 4. **Participant completes AI interview**
    - Interview starts after survey completion without researcher approval.
-   - The AI uses the survey, gap map, objectives, persona, remaining time, and run state.
+   - The AI uses the survey, interviewer instructions, persona, remaining time, and run state.
    - Participant can pause and resume while the run remains fresh.
    - The UI stays sparse and participant-safe.
 
@@ -65,7 +65,6 @@ V1 is for formative research and should not be positioned as high-stakes assessm
 - Immutable or versioned consent, survey, objective, rubric, prompt, and persona configuration.
 - Consent capture with rendered consent snapshot.
 - Required long-form survey collection.
-- Gap map generation and persistence.
 - Voice-to-voice AI interview with pause/resume.
 - Interview artifact persistence: audio references, transcript turns, timing metadata, and session status.
 - Run freshness and staleness enforcement.
@@ -84,14 +83,13 @@ V1 is for formative research and should not be positioned as high-stakes assessm
 - Interviewer persona is locked to the V1 default style.
 - Participants do not have accounts and cannot self-create or reset runs.
 - Participant slots can have many researcher-authorized runs over time.
-- A run has exactly one completed survey attempt, one generated gap map, zero or more interview sessions, and one or more scoring runs.
+- A run has exactly one completed survey attempt, zero or more interview sessions, and one or more scoring runs.
 - Survey questions are long-form free text only.
 - Survey edits create new versions; existing runs retain their original survey version.
 - Consent records capture study, slot, run, consent version, method, timestamp, and rendered accepted text.
-- Gap maps are generated after survey completion, before interview, and persisted.
-- Interviews must not reveal rubrics, scoring objectives, grade labels, scores, or gap map internals.
+- Interviews must not reveal rubrics, scoring objectives, grade labels, scores, or evaluation strategy.
 - Participant interview UI shows AI captions, record/stop control, and voice activity/waves only.
-- Participant interview UI does not show participant speech captions, full transcript, rubric, score, gap map, or hidden progress.
+- Participant interview UI does not show participant speech captions, full transcript, rubric, score, or hidden progress.
 - Stale runs preserve data, block continuation, require researcher-authorized new runs, and still score available data with stale/partial flags.
 - Technical failures preserve captured data, offer retry/resume when possible, mark partial/interrupted states when needed, and still score available evidence.
 - Researcher-facing failure statuses are participant-safe and do not include vendor names, stack traces, or device diagnostics.
@@ -109,7 +107,7 @@ V1 is for formative research and should not be positioned as high-stakes assessm
 - Authentication is required for researchers and admin engineers even though participant accounts are out of scope.
 - Participant run links need unguessable, scoped access tokens or equivalent.
 - Core service logic needs explicit state transitions for runs and interview sessions.
-- Background jobs or durable workflows are needed for gap map generation, staleness checks, scoring, exports, retention, and deletion.
+- Background jobs or durable workflows are needed for staleness checks, scoring, exports, retention, and deletion.
 - AI calls need prompt/version tracking, schema validation, retry policy, and failure categorization.
 - Audio storage needs access controls, signed URLs, retention policy, and citation-friendly timing metadata.
 - CSV export needs deterministic column definitions and escaping for rationale/citation fields.
@@ -138,7 +136,7 @@ V1 is for formative research and should not be positioned as high-stakes assessm
 - **Voice integration reliability:** real-time audio, transcription, turn-taking, and model availability may be the highest implementation risk.
 - **Evidence integrity:** citations must remain stable across rescoring and link cleanly back to raw survey, transcript, and audio artifacts.
 - **Tenant isolation:** researcher data separation must be designed early because the product handles sensitive research artifacts.
-- **AI output quality:** gap maps and scores need strong schemas, validation, and confidence/flag behavior to be useful.
+- **AI output quality:** scores need strong schemas, validation, and confidence/flag behavior to be useful.
 - **Participant safety and trust:** the product must avoid evaluative language, hidden scoring exposure, and misleading consent claims.
 - **Run state complexity:** stale, partial, paused, interrupted, completed, and scored states affect UX, scoring, exports, and researcher interpretation.
 - **Retention and deletion:** 2-year retention plus researcher deletion touches database rows, object storage, exports, logs, telemetry, and backups.

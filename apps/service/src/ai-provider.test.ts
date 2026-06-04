@@ -26,7 +26,7 @@ describe("structured AI provider executor", () => {
     await expect(
       executeStructuredAiCall({
         provider,
-        request: { passKind: "gap_map", promptVersion: "prompt-v1", input: {} },
+        request: { passKind: "scoring", promptVersion: "prompt-v1", input: {} },
         validate: (output, metadata) => ({ output, metadata })
       })
     ).resolves.toMatchObject({
@@ -57,7 +57,7 @@ describe("structured AI provider executor", () => {
     await expect(
       executeStructuredAiCall({
         provider,
-        request: { passKind: "gap_map", promptVersion: "prompt-v1", input: {} },
+        request: { passKind: "scoring", promptVersion: "prompt-v1", input: {} },
         validate: () => {
           throw new StructuredOutputValidationError("Malformed response.");
         }

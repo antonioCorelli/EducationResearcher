@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { AiProviderError, type StructuredAiProvider } from "./ai-provider.js";
-import type { GapMap } from "./gap-map.js";
 import { InMemoryObjectiveVersionStore, type ObjectiveVersion } from "./objectives.js";
 import { InMemoryRunStore, type InterviewAudioAsset, type InterviewTurn, type Run, type SurveyResponse } from "./runs.js";
 import {
@@ -58,27 +57,6 @@ const surveyResponse: SurveyResponse = {
   responseText: "I noticed that the example changed my reasoning.",
   submittedAt: "2026-05-06T12:10:00.000Z",
   createdAt: "2026-05-06T12:10:00.000Z"
-};
-
-const gapMap: GapMap = {
-  id: "gap_map_001",
-  studyId: "study_fixture_001",
-  participantSlotId: "slot_fixture_001",
-  runId: "run_fixture_001",
-  surveyVersionId: "survey_version_001",
-  objectiveVersionIds: ["objective_version_001"],
-  status: "generated",
-  modelName: "fake-gap-map",
-  modelVersion: "local-1",
-  serviceRequestId: "req_gap_map",
-  promptVersion: "gap-map-v1",
-  alreadyAnswered: [],
-  ambiguities: [],
-  contradictions: [],
-  missingEvidence: [],
-  recommendedProbes: [],
-  generatedAt: "2026-05-06T12:20:00.000Z",
-  createdAt: "2026-05-06T12:20:00.000Z"
 };
 
 const metadata = {
@@ -199,7 +177,7 @@ describe("AI provider scoring generator", () => {
       generator.generate({
         run,
         surveyResponses: [surveyResponse],
-        gapMap,
+
         objectiveVersions: [objective],
         trigger: "automatic"
       })
@@ -238,7 +216,7 @@ describe("AI provider scoring generator", () => {
             createdAt: "2026-05-06T12:30:00.000Z"
           }
         ],
-        gapMap,
+
         objectiveVersions: [objective],
         trigger: "automatic"
       })
@@ -292,7 +270,7 @@ describe("AI provider scoring generator", () => {
       generator.generate({
         run,
         surveyResponses: [surveyResponse],
-        gapMap,
+
         objectiveVersions: [objective],
         trigger: "automatic"
       })
@@ -318,7 +296,7 @@ describe("AI provider scoring generator", () => {
       generator.generate({
         run,
         surveyResponses: [surveyResponse],
-        gapMap,
+
         objectiveVersions: [objective],
         trigger: "automatic"
       })
@@ -690,7 +668,6 @@ describe("automatic scoring job", () => {
   it("scores a completed interview run, persists scores and citations, and marks the run scored", async () => {
     const runStore = new InMemoryRunStore([{ ...run, status: "created" }]);
     await runStore.submitSurvey([surveyResponse], { ...run, status: "survey_completed" }, "created");
-    await runStore.saveGapMap(gapMap);
     await runStore.createInterviewSession(
       {
         id: "interview_session_001",

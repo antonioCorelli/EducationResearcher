@@ -14,7 +14,7 @@ The following implementation decisions are confirmed for the first scaffold:
 - **Service API:** Node.js, TypeScript, and Fastify.
 - **Service hosting/deploy:** AWS Elastic Beanstalk on the Docker platform.
 - **Primary AWS data services:** DynamoDB for application records and run state, S3 for interview audio assets and generated exports.
-- **Local/test provider mode:** fake providers are required from day one for auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
+- **Local/test provider mode:** fake providers are required from day one for auth/session, AI scoring, voice interview behavior, and storage-like behavior.
 - **DynamoDB physical model:** table per data domain, defined through a shared TypeScript schema contract.
 - **Infrastructure as code:** AWS CDK.
 - **Local database workflow:** DynamoDB Local with create, reset, and seed commands.
@@ -33,9 +33,9 @@ This fits the PRD because the core product behavior is not just screens; it is d
 - **Participant web app:** React/Vite token-scoped consent, survey, voice interview, pause/resume, recovery, and thank-you flow, deployed with AWS Amplify.
 - **Service API:** Node.js/TypeScript/Fastify endpoints for studies, configuration versions, slots, runs, artifacts, scoring, exports, and admin support, deployed with AWS Elastic Beanstalk on the Docker platform.
 - **Run orchestration service:** explicit state transitions, freshness enforcement, technical interruption handling, and scoring triggers.
-- **AI orchestration layer:** gap map pass, interview pass/session integration, scoring pass, model metadata, prompt versioning, schema validation, retries, and error categorization.
+- **AI orchestration layer:** interview pass/session integration, scoring pass, model metadata, prompt versioning, schema validation, retries, and error categorization.
 - **Realtime voice adapter:** browser audio capture/playback, transcription, voice response, turn handling, connection state, and resume behavior.
-- **Background worker:** gap map generation, scoring, stale-run sweeps, CSV generation, retention/deletion jobs, and operational cleanup.
+- **Background worker:** scoring, stale-run sweeps, CSV generation, retention/deletion jobs, and operational cleanup.
 - **DynamoDB:** authoritative study, run, artifact metadata, versioning, citations, audit logs, and telemetry records.
 - **S3 object storage:** interview audio assets and any generated export files.
 - **Admin/support surface:** privileged support tooling for operational events and carefully audited raw artifact access.
@@ -62,9 +62,9 @@ This fits the PRD because the core product behavior is not just screens; it is d
 - Render consent and collect checkmark or electronic signature.
 - Render required free-text survey questions.
 - Submit survey once for the run.
-- Transition automatically into interview once the gap map is ready.
+- Transition automatically into interview after survey completion.
 - Provide sparse voice UI: AI caption, record/stop control, participant voice indication, AI voice wave, participant voice wave.
-- Hide participant captions, transcript, rubrics, scores, gap map, and objective progress.
+- Hide participant captions, transcript, rubrics, scores, and objective progress.
 - Show calm retry/resume states for recoverable failures.
 - Show stale, completed, unable-to-continue, and thank-you states.
 
@@ -83,7 +83,7 @@ This fits the PRD because the core product behavior is not just screens; it is d
 - Snapshot active configuration references onto runs.
 - Persist consent records and rendered consent snapshots.
 - Persist survey responses and enforce one survey attempt per run.
-- Generate and store gap maps after survey completion.
+- Preserve survey responses and transition participants directly into interview readiness after survey completion.
 - Start, pause, resume, complete, and interrupt interview sessions.
 - Persist transcript turns, audio asset metadata, timing metadata, and session summaries.
 - Trigger scoring when interviews complete, runs become stale, or technical interruptions prevent continuation.
@@ -103,7 +103,7 @@ The initial data domain tables are:
 - **Identity Access Table:** `user` records for researchers and authorized admin engineers.
 - **Study Setup Table:** `study` and `participant_slot` records.
 - **Versioned Configuration Table:** `consent_version`, `survey_version`, `survey_group`, `survey_question`, `objective_version`, `objective_grade_example`, and `interviewer_persona_version` records.
-- **Run Lifecycle Table:** `run`, `consent_record`, `survey_response`, `gap_map`, `interview_session`, `interview_turn`, and `interview_audio_asset` records.
+- **Run Lifecycle Table:** `run`, `consent_record`, `survey_response`, `interview_session`, `interview_turn`, and `interview_audio_asset` records.
 - **Evidence Scoring Table:** `scoring_run`, `objective_score`, and `evidence_citation` records.
 - **Operations Table:** `operational_event` and `audit_log` records.
 
@@ -131,7 +131,7 @@ Important data properties:
 - **AWS Elastic Beanstalk:** Docker-based hosting for the Fastify service API behind an Application Load Balancer.
 - **DynamoDB:** study, run, versioned configuration, artifact metadata, scoring, telemetry, and audit records.
 - **S3:** audio and export storage with signed access.
-- **AI model provider:** gap map and scoring generation with structured output support; final provider not yet selected.
+- **AI model provider:** scoring generation with structured output support; final provider not yet selected.
 - **Realtime voice AI provider:** voice-to-voice interview, transcription, audio playback, and connection state; final provider not yet selected.
 - **Observability provider:** logs, metrics, traces, and alerting.
 - **Email or link distribution provider:** optional if V1 sends participant links rather than relying on researcher distribution.
@@ -143,7 +143,7 @@ Provider choices not listed above remain open and should be finalized before rea
 Fake providers are required from day one for local development, automated tests, and deterministic demos:
 
 - **Fake auth/session:** simulate Cognito researcher/admin identities and role claims without requiring live AWS login.
-- **Fake AI gap map/scoring:** return deterministic structured outputs, malformed outputs, and safe provider-error categories.
+- **Fake AI scoring:** return deterministic structured outputs, malformed outputs, and safe provider-error categories.
 - **Fake voice interview:** simulate transcript turns, audio metadata, connection state, recoverable interruption, technical interruption, and completion.
 - **Fake storage:** avoid production AWS writes in local/test flows while preserving the same service-level contract used by S3-backed storage.
 
@@ -161,7 +161,7 @@ Real providers should be selected through environment configuration and accessed
 - Protect audio assets and exports with signed, short-lived access.
 - Validate AI structured outputs before persistence.
 - Sanitize CSV exports against spreadsheet formula injection.
-- Keep scoring, hidden objectives, rubrics, gap map internals, and transcripts out of participant UI.
+- Keep scoring, hidden objectives, rubrics, and transcripts out of participant UI.
 - Define deletion behavior across database, object storage, exports, logs, telemetry, and backups.
 
 ## Error Handling Approach
@@ -179,18 +179,18 @@ Real providers should be selected through environment configuration and accessed
 ## Observability And Logging Needs
 
 - Structured logs with request ID, service request ID, run ID, participant slot ID, study ID, and actor type where appropriate.
-- Metrics for AI latency, voice connection state, retries, scoring completion, gap map failures, stale transitions, and export failures.
+- Metrics for AI latency, voice connection state, retries, scoring completion, stale transitions, and export failures.
 - Audit logs for researcher/admin access, study changes, run creation, raw artifact access, deletion, and rescoring.
 - Operational events for browser/device basics, timestamps, audio state, model/API error category, latency, retry count, and service request IDs.
-- Alerts for elevated interview interruption rates, failed scoring jobs, failed gap map jobs, retention job failures, and export job failures.
+- Alerts for elevated interview interruption rates, failed scoring jobs, retention job failures, and export job failures.
 
 ## Testing Strategy
 
 - **Unit tests:** state machine transitions, authorization helpers, versioning rules, CSV generation, scoring output validation, citation resolution, retention filters.
-- **Service integration tests:** study setup, run creation, consent/survey submission, gap map persistence, interview session state, automatic scoring triggers, manual rescoring, export.
+- **Service integration tests:** study setup, run creation, consent/survey submission, interview session state, automatic scoring triggers, manual rescoring, export.
 - **Frontend component tests:** researcher forms, participant consent/survey flow, participant voice UI states, status displays, score/evidence drilldown.
 - **End-to-end tests:** first build slice from study creation through participant completion, scoring, review, and CSV export.
-- **Contract tests:** AI gap map/scoring schemas and voice adapter event handling.
+- **Contract tests:** AI scoring schemas and voice adapter event handling.
 - **Security tests:** tenant isolation, participant token scope, stale/completed run blocking, admin audit logging, CSV injection.
 - **Failure tests:** microphone failure, disconnect, transcription/model outage, scoring failure/retry, stale sweep.
 

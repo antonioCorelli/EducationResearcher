@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import type { GapMap } from "./gap-map.js";
-import type { ObjectiveVersion } from "./objectives.js";
 import type { InterviewSession, Run, SurveyResponse } from "./runs.js";
 import type { SurveyVersion } from "./survey.js";
 
@@ -23,8 +21,7 @@ export interface RealtimeInterviewPromptInput {
   readonly interviewSession: InterviewSession;
   readonly surveyVersion: SurveyVersion;
   readonly surveyResponses: readonly SurveyResponse[];
-  readonly objectiveVersions: readonly ObjectiveVersion[];
-  readonly gapMap?: GapMap;
+  readonly interviewerInstructions?: string;
   readonly personaStylePrompt: string;
   readonly remainingSeconds: number;
   readonly nowIso: string;
@@ -248,29 +245,7 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     prompt: question.prompt,
     response: responsesByQuestionId.get(question.id) ?? ""
   }));
-  const objectiveContext = input.objectiveVersions.map((objective, index) => ({
-    objectiveNumber: index + 1,
-    title: objective.title,
-    description: objective.description,
-    evidenceRequirements: objective.evidenceRequirements
-  }));
-  const gapMapContext = input.gapMap
-    ? {
-        status: input.gapMap.status,
-        alreadyAnswered: input.gapMap.alreadyAnswered,
-        ambiguities: input.gapMap.ambiguities,
-        contradictions: input.gapMap.contradictions,
-        missingEvidence: input.gapMap.missingEvidence,
-        recommendedProbes: input.gapMap.recommendedProbes
-      }
-    : {
-        status: "missing",
-        alreadyAnswered: [],
-        ambiguities: [],
-        contradictions: [],
-        missingEvidence: [],
-        recommendedProbes: []
-      };
+  const interviewerInstructions = input.interviewerInstructions?.trim() || "No study-specific interviewer instructions were provided.";
 
   return [
     input.personaStylePrompt,
@@ -282,9 +257,9 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     "- Probe naturally for concrete examples, clarification, contradictions, and missing evidence.",
     "- Briefly acknowledge answers, then continue with the next most useful follow-up.",
     "- Reference survey answers naturally, for example: \"Earlier, you said science feels useful when it connects to real problems...\"",
-    "- When the session starts, begin by asking a concise opening question based on the survey evidence and gap map.",
+    "- When the session starts, begin by asking a concise opening question based on the survey evidence and researcher instructions.",
     "- Avoid technical or uncanny phrases such as \"I analyzed your prior responses\" or \"I detected uncertainty.\"",
-    "- Do not reveal scoring objectives, rubrics, grades, hidden progress, gap map internals, or any evaluation strategy.",
+    "- Do not reveal scoring objectives, rubrics, grades, hidden progress, or any evaluation strategy.",
     "- If time is nearly over, ask the single highest-value remaining question and then close warmly.",
     "",
     `Run state: ${input.run.status}`,
@@ -294,11 +269,8 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     "Survey evidence:",
     JSON.stringify(surveyEvidence, null, 2),
     "",
-    "Objective context for interviewer planning only:",
-    JSON.stringify(objectiveContext, null, 2),
-    "",
-    "Gap map for interviewer planning only:",
-    JSON.stringify(gapMapContext, null, 2)
+    "Researcher instructions for interviewer planning only:",
+    interviewerInstructions
   ].join("\n");
 }
 

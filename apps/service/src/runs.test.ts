@@ -23,7 +23,6 @@ import {
   type AutomaticRunScoringTriggerInput,
   type StaleRunScoringTriggerInput
 } from "./runs.js";
-import type { GapMapGenerator } from "./gap-map.js";
 import type { SurveyVersion } from "./survey.js";
 
 function createFixtureRun(overrides: Partial<Run> = {}): Run {
@@ -130,11 +129,10 @@ function createSurveyVersion(): SurveyVersion {
 function createParticipantRunService(input: {
   readonly runStore: InMemoryRunStore;
   readonly createInterviewSessionId?: () => string;
-  readonly gapMapGenerator?: GapMapGenerator;
   readonly now?: () => Date;
 }) {
   const rawToken = createParticipantAccessTokenForTest({
-    tokenId: "token_fixture_gap_map",
+    tokenId: "token_fixture_participant",
     runId: "run_fixture_001",
     participantSlotId: "slot_fixture_001",
     secret: "test-participant-secret"
@@ -146,8 +144,8 @@ function createParticipantRunService(input: {
       input.runStore,
       new InMemoryParticipantAccessTokenStore([
         {
-          id: "participant_access_token_gap_map",
-          tokenId: "token_fixture_gap_map",
+          id: "participant_access_token_fixture",
+          tokenId: "token_fixture_participant",
           tokenHash: hashParticipantAccessTokenForTest(rawToken),
           studyId: "study_fixture_001",
           participantSlotId: "slot_fixture_001",
@@ -162,13 +160,11 @@ function createParticipantRunService(input: {
       new InMemoryConsentVersionStore(),
       new InMemorySurveyVersionStore([createSurveyVersion()]),
       {
-        createGapMapId: () => "gap_map_fixture_001",
         createInterviewSessionId: input.createInterviewSessionId,
         createSurveyResponseId: () => "survey_response_fixture_001",
         now: input.now ?? (() => new Date("2026-05-06T12:20:00.000Z")),
         participantAccessTokenSecret: "test-participant-secret"
-      },
-      input.gapMapGenerator
+      }
     )
   };
 }
@@ -423,27 +419,6 @@ describe("run freshness enforcement", () => {
       }),
       "consented"
     );
-    await runStore.saveGapMap({
-      id: "gap_map_stale_001",
-      studyId: "study_fixture_001",
-      participantSlotId: "slot_fixture_001",
-      runId: "run_fixture_001",
-      surveyVersionId: "survey_version_active",
-      objectiveVersionIds: ["objective_version_001"],
-      status: "generated",
-      modelName: "fake-gap-map",
-      modelVersion: "local-1",
-      serviceRequestId: "fake-gap-map-request",
-      promptVersion: "gap-map-v1",
-      alreadyAnswered: ["The survey captured a change in reasoning."],
-      ambiguities: [],
-      contradictions: [],
-      missingEvidence: ["Need interview evidence."],
-      recommendedProbes: ["What example changed your reasoning?"],
-      generatedAt: "2026-05-19T12:01:00.000Z",
-      createdAt: "2026-05-19T12:01:00.000Z"
-    });
-
     const result = await service.sweepStaleRunsForStudy("study_fixture_001");
 
     expect(result.staleRuns).toEqual([
@@ -456,12 +431,6 @@ describe("run freshness enforcement", () => {
     expect(await runStore.getById("run_future_001")).toMatchObject({ status: "survey_completed" });
     expect(await runStore.getById("run_other_study_001")).toMatchObject({ status: "survey_completed" });
     expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toEqual([surveyResponse]);
-    expect(await runStore.listGapMapsByRun("run_fixture_001")).toEqual([
-      expect.objectContaining({
-        id: "gap_map_stale_001",
-        status: "generated"
-      })
-    ]);
     expect(scoringTriggers).toEqual([
       expect.objectContaining({
         previousStatus: "survey_completed",
@@ -493,8 +462,8 @@ describe("run freshness enforcement", () => {
   });
 });
 
-describe("gap map generation", () => {
-  it("generates and persists a structured gap map after survey completion", async () => {
+describe("survey to interview readiness", () => {
+  it("stores the survey and returns interview readiness without generating an intermediate artifact", async () => {
     const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
     const { rawToken, service } = createParticipantRunService({ runStore });
     const result = await service.submitParticipantSurvey(rawToken, {
@@ -506,127 +475,84 @@ describe("gap map generation", () => {
       ]
     });
 
-    expect(result.gapMap).toMatchObject({
-      id: "gap_map_fixture_001",
-      runId: "run_fixture_001",
-      surveyVersionId: "survey_version_active",
-      objectiveVersionIds: ["objective_version_001"],
-      status: "generated",
-      modelName: "fake-gap-map",
-      modelVersion: "local-1",
-      serviceRequestId: "fake-gap-map-request",
-      promptVersion: "gap-map-v1",
-      generatedAt: "2026-05-06T12:20:00.000Z",
-      contradictions: [
+    expect(result).toMatchObject({
+      run: {
+        status: "survey_completed",
+        remainingInterviewSeconds: 2700
+      },
+      surveyResponses: [
         {
-          priority: "high"
+          id: "survey_response_fixture_001",
+          responseText: "I noticed the diagram first, but I am not sure why the labels changed my reasoning."
         }
       ]
     });
-    expect(await runStore.listGapMapsByRun("run_fixture_001")).toEqual([result.gapMap]);
+    expect(result).not.toHaveProperty(["gap", "Map"].join(""));
   });
 
-  it("passes snapshot interviewer goals into gap map generation", async () => {
-    const runStore = new InMemoryRunStore([
-      createFixtureRun({
-        status: "consented",
-        interviewerGoals: "Clarify learner confidence and gather concrete examples."
-      })
-    ]);
-    const capturedInputs: string[] = [];
-    const { rawToken, service } = createParticipantRunService({
-      runStore,
-      gapMapGenerator: {
-        async generate(input) {
-          capturedInputs.push(input.interviewerGoals ?? "");
-
-          return {
-            modelName: "fake-gap-map",
-            modelVersion: "local-1",
-            serviceRequestId: "fake-gap-map-request",
-            promptVersion: "gap-map-v1",
-            alreadyAnswered: ["Survey response provides initial evidence."],
-            ambiguities: [],
-            contradictions: [],
-            missingEvidence: ["Need an example."],
-            recommendedProbes: ["Can you share an example?"]
-          };
+  it("passes snapshot interviewer instructions into realtime interview context", async () => {
+    const activeRun = createFixtureRun({
+      status: "interview_in_progress",
+      interviewerInstructions: "Clarify learner confidence and gather concrete examples."
+    });
+    const runStore = new InMemoryRunStore([activeRun]);
+    const capturedInstructions: string[] = [];
+    await runStore.submitSurvey(
+      [
+        {
+          id: "survey_response_fixture_001",
+          studyId: activeRun.studyId,
+          participantSlotId: activeRun.participantSlotId,
+          runId: activeRun.id,
+          surveyVersionId: activeRun.surveyVersionId,
+          surveyQuestionId: "survey_question_001",
+          responseText: "I noticed the diagram first.",
+          submittedAt: "2026-05-06T12:16:00.000Z",
+          createdAt: "2026-05-06T12:16:00.000Z"
         }
+      ],
+      activeRun,
+      "interview_in_progress"
+    );
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_active_001",
+        studyId: activeRun.studyId,
+        participantSlotId: activeRun.participantSlotId,
+        runId: activeRun.id,
+        sessionNumber: 1,
+        status: "active",
+        startedAt: "2026-05-06T12:18:00.000Z",
+        createdAt: "2026-05-06T12:18:00.000Z",
+        updatedAt: "2026-05-06T12:18:00.000Z"
+      },
+      activeRun,
+      "interview_in_progress"
+    );
+    const { rawToken, service } = createParticipantRunService({
+      runStore
+    });
+
+    await service.createParticipantRealtimeVoiceSession(rawToken, {
+      async createSession(request) {
+        capturedInstructions.push(request.instructions);
+
+        return {
+          provider: "fake",
+          model: "fake-realtime",
+          voice: "fake-voice",
+          clientSecret: "client-secret",
+          realtimeUrl: "https://api.openai.com/v1/realtime/calls",
+          serviceRequestId: "req_realtime_fixture_001",
+          promptVersion: request.promptVersion
+        };
       }
     });
 
-    await service.submitParticipantSurvey(rawToken, {
-      responses: [
-        {
-          surveyQuestionId: "survey_question_001",
-          responseText: "I noticed the diagram first."
-        }
-      ]
-    });
-
-    expect(capturedInputs).toEqual(["Clarify learner confidence and gather concrete examples."]);
-  });
-
-  it("persists a failed gap map artifact when AI output is invalid without losing survey data", async () => {
-    const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
-    const { rawToken, service } = createParticipantRunService({
-      runStore,
-      gapMapGenerator: {
-        async generate() {
-          return {
-            modelName: "fake-gap-map",
-            modelVersion: "local-1",
-            alreadyAnswered: "not a list"
-          };
-        }
-      }
-    });
-    const result = await service.submitParticipantSurvey(rawToken, {
-      responses: [
-        {
-          surveyQuestionId: "survey_question_001",
-          responseText: "I noticed the diagram first."
-        }
-      ]
-    });
-
-    expect(result.run.status).toBe("survey_completed");
-    expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toHaveLength(1);
-    expect(result.gapMap).toMatchObject({
-      status: "failed",
-      failureCategory: "invalid_ai_output",
-      modelName: "unknown",
-      modelVersion: "unknown",
-      serviceRequestId: "unknown",
-      promptVersion: "unknown"
-    });
-  });
-
-  it("persists a failed gap map artifact when the AI provider fails without losing survey data", async () => {
-    const runStore = new InMemoryRunStore([createFixtureRun({ status: "consented" })]);
-    const { rawToken, service } = createParticipantRunService({
-      runStore,
-      gapMapGenerator: {
-        async generate() {
-          throw new Error("provider unavailable");
-        }
-      }
-    });
-    const result = await service.submitParticipantSurvey(rawToken, {
-      responses: [
-        {
-          surveyQuestionId: "survey_question_001",
-          responseText: "I noticed the diagram first."
-        }
-      ]
-    });
-
-    expect(result.run.status).toBe("survey_completed");
-    expect(await runStore.listSurveyResponsesByRun("run_fixture_001")).toHaveLength(1);
-    expect(result.gapMap).toMatchObject({
-      status: "failed",
-      failureCategory: "provider_failure"
-    });
+    expect(capturedInstructions[0]).toContain("Clarify learner confidence and gather concrete examples.");
+    expect(capturedInstructions[0]).toContain("Researcher instructions for interviewer planning only");
+    expect(capturedInstructions[0]).not.toContain("Reasoning Quality");
+    expect(capturedInstructions[0]).not.toContain("intermediate artifact");
   });
 });
 
@@ -828,8 +754,8 @@ describe("interview session lifecycle", () => {
       runStore,
       new InMemoryParticipantAccessTokenStore([
         {
-          id: "participant_access_token_gap_map",
-          tokenId: "token_fixture_gap_map",
+          id: "participant_access_token_fixture",
+          tokenId: "token_fixture_participant",
           tokenHash: hashParticipantAccessTokenForTest(rawToken),
           studyId: "study_fixture_001",
           participantSlotId: "slot_fixture_001",
@@ -936,8 +862,8 @@ describe("interview session lifecycle", () => {
       runStore,
       new InMemoryParticipantAccessTokenStore([
         {
-          id: "participant_access_token_gap_map",
-          tokenId: "token_fixture_gap_map",
+          id: "participant_access_token_fixture",
+          tokenId: "token_fixture_participant",
           tokenHash: hashParticipantAccessTokenForTest(rawToken),
           studyId: "study_fixture_001",
           participantSlotId: "slot_fixture_001",
@@ -993,8 +919,8 @@ describe("interview session lifecycle", () => {
       runStore,
       new InMemoryParticipantAccessTokenStore([
         {
-          id: "participant_access_token_gap_map",
-          tokenId: "token_fixture_gap_map",
+          id: "participant_access_token_fixture",
+          tokenId: "token_fixture_participant",
           tokenHash: hashParticipantAccessTokenForTest(rawToken),
           studyId: "study_fixture_001",
           participantSlotId: "slot_fixture_001",

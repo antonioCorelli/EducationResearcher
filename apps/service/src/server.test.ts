@@ -112,7 +112,7 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
     id: "study_fixture_001",
     ownerUserId: researcher.id,
     title: "Fixture Study",
-    interviewerGoals: "Clarify learner reasoning and prompt for concrete examples.",
+    interviewerInstructions: "Clarify learner reasoning and prompt for concrete examples.",
     defaultFreshnessDays: 14,
     defaultMaxInterviewMinutes: 45,
     activeConsentVersionId: undefined,
@@ -1298,7 +1298,7 @@ describe("researcher study shell routes", () => {
       payload: {
         title: "  New Formative Study  ",
         description: "  Optional context for this formative study.  ",
-        interviewerGoals: "  Clarify misconceptions and elicit concrete examples.  "
+        interviewerInstructions: "  Clarify misconceptions and elicit concrete examples.  "
       }
     });
 
@@ -1308,7 +1308,7 @@ describe("researcher study shell routes", () => {
         ownerUserId: researcher.id,
         title: "New Formative Study",
         description: "Optional context for this formative study.",
-        interviewerGoals: "Clarify misconceptions and elicit concrete examples.",
+        interviewerInstructions: "Clarify misconceptions and elicit concrete examples.",
         defaultFreshnessDays: 14,
         defaultMaxInterviewMinutes: 45,
         activePersonaVersionId: "persona_version_v1_default_001",
@@ -1344,7 +1344,7 @@ describe("researcher study shell routes", () => {
     await server.close();
   });
 
-  it("edits title, description, interviewer goals, freshness days, and max interview minutes", async () => {
+  it("edits title, description, interviewer instructions, freshness days, and max interview minutes", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
     const operationsStore = new InMemoryOperationalEventStore();
     const server = buildServer({
@@ -1362,7 +1362,7 @@ describe("researcher study shell routes", () => {
       payload: {
         title: "Updated Study",
         description: " Updated study context for participants and researchers. ",
-        interviewerGoals: " Clarify key reasoning gaps and prompt for specific experiences. ",
+        interviewerInstructions: " Clarify key reasoning gaps and prompt for specific experiences. ",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30
       }
@@ -1374,7 +1374,7 @@ describe("researcher study shell routes", () => {
         id: "study_fixture_001",
         title: "Updated Study",
         description: "Updated study context for participants and researchers.",
-        interviewerGoals: "Clarify key reasoning gaps and prompt for specific experiences.",
+        interviewerInstructions: "Clarify key reasoning gaps and prompt for specific experiences.",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30,
         activePersonaVersionId: "persona_version_v1_default_001",
@@ -1435,10 +1435,10 @@ describe("researcher study shell routes", () => {
     await server.close();
   });
 
-  it("clears optional interviewer goals when they are saved as blank", async () => {
+  it("clears optional interviewer instructions when they are saved as blank", async () => {
     const store = new InMemoryStudyShellStore([
       createFixtureStudy({
-        interviewerGoals: "Existing interviewer goals."
+        interviewerInstructions: "Existing interviewer instructions."
       })
     ]);
     const server = buildServer({
@@ -1453,13 +1453,13 @@ describe("researcher study shell routes", () => {
         authorization: `Bearer ${tokens.accessToken}`
       },
       payload: {
-        interviewerGoals: "   "
+        interviewerInstructions: "   "
       }
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().study.interviewerGoals).toBeUndefined();
-    expect((await store.getById("study_fixture_001"))?.interviewerGoals).toBeUndefined();
+    expect(response.json().study.interviewerInstructions).toBeUndefined();
+    expect((await store.getById("study_fixture_001"))?.interviewerInstructions).toBeUndefined();
 
     await server.close();
   });
@@ -2062,7 +2062,7 @@ describe("researcher run routes", () => {
           surveyVersionId: "survey_version_active",
           personaVersionId: "persona_version_v1_default_001",
           objectiveVersionIds: ["objective_version_002", "objective_version_001"],
-          interviewerGoals: "Clarify learner reasoning and prompt for concrete examples.",
+          interviewerInstructions: "Clarify learner reasoning and prompt for concrete examples.",
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
           maxInterviewMinutes: 45,
           status: "created",
@@ -5015,7 +5015,10 @@ describe("participant interview routes", () => {
       participantSlotId: "slot_fixture_001",
       secret: "test-participant-secret"
     });
-    const run = createFixtureRun({ status: "survey_completed" });
+    const run = createFixtureRun({
+      status: "survey_completed",
+      interviewerInstructions: "Clarify how the worked example changed the participant's reasoning."
+    });
     const runStore = new InMemoryRunStore([run]);
     const surveyVersion = createFixtureSurveyVersion();
     const objectiveVersion = createFixtureObjectiveVersion();
@@ -5054,27 +5057,6 @@ describe("participant interview routes", () => {
       run,
       "survey_completed"
     );
-    await runStore.saveGapMap({
-      id: "gap_map_realtime_001",
-      studyId: run.studyId,
-      participantSlotId: run.participantSlotId,
-      runId: run.id,
-      surveyVersionId: run.surveyVersionId,
-      objectiveVersionIds: run.objectiveVersionIds,
-      status: "generated",
-      modelName: "fake-gap-map",
-      modelVersion: "local-1",
-      serviceRequestId: "req_gap_map_realtime_001",
-      promptVersion: "gap-map-v1",
-      alreadyAnswered: ["The survey gives initial evidence."],
-      ambiguities: ["The causal explanation needs clarification."],
-      contradictions: [],
-      missingEvidence: ["Need a concrete example for reasoning quality."],
-      recommendedProbes: ["Could you share a concrete example?"],
-      generatedAt: "2026-05-06T12:11:00.000Z",
-      createdAt: "2026-05-06T12:11:00.000Z"
-    });
-
     const server = buildServer({
       authProvider: createFakeAuthProvider(),
       logger: false,
@@ -5145,11 +5127,12 @@ describe("participant interview routes", () => {
       }
     });
     expect(capturedInstructions[0]).toContain("I noticed that the worked example changed");
-    expect(capturedInstructions[0]).toContain("Reasoning Quality");
-    expect(capturedInstructions[0]).toContain("Could you share a concrete example?");
+    expect(capturedInstructions[0]).toContain("Clarify how the worked example changed the participant's reasoning.");
     expect(capturedInstructions[0]).toContain("Remaining interview time: 2700 seconds");
     expect(capturedInstructions[0]).toContain("Run state: interview_in_progress");
     expect(capturedInstructions[0]).toContain("Do not reveal scoring objectives");
+    expect(capturedInstructions[0]).not.toContain("Reasoning Quality");
+    expect(capturedInstructions[0]).not.toContain("intermediate artifact");
     expect(connectionState.statusCode).toBe(204);
     expect(await operationalEventStore.listByRun("run_fixture_001")).toEqual([
       expect.objectContaining({

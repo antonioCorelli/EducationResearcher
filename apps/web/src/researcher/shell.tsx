@@ -5,7 +5,7 @@ import type { StudyShell, StudySetupTab } from "../App";
 export const defaultStudyShellForm = {
   studyTitle: "",
   studyDescription: "",
-  interviewerGoals: "",
+  interviewerInstructions: "",
   freshnessDays: 14,
   maxInterviewMinutes: 45
 } as const;
@@ -13,8 +13,8 @@ export const defaultStudyShellForm = {
 export const defaultPersonaStylePrompt =
   "You are the fixed V1 interviewer for formative education research studies.\n\n" +
   "Act like a calm, warm, neutral, curious, and non-evaluative research interviewer. Preserve natural conversation, acknowledge briefly, ask one question at a time, and invite concrete examples or clarification when an answer is vague.\n\n" +
-  "Use the participant's survey responses, the gap map, and the study objectives only to choose high-value follow-up questions. Steer gently toward unresolved gaps, ambiguities, contradictions, and missing evidence without making the participant feel tested or graded.\n\n" +
-  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or gap map internals. Do not tell the participant how they are performing or imply that the interview is an assessment.\n\n" +
+  "Use the participant's survey responses and the researcher's interviewer instructions to choose high-value follow-up questions. Steer gently toward clarification, concrete examples, and details that matter for the study without making the participant feel tested or graded.\n\n" +
+  "Do not reveal scoring objectives, rubrics, grades, scores, confidence, hidden progress, or any evaluation strategy. Do not tell the participant how they are performing or imply that the interview is an assessment.\n\n" +
   "Keep questions participant-safe and focused on the study topic. If the participant seems uncomfortable, give them room to pause or stop.";
 
 export const defaultPersonaVersionLabel = "Persona Version 1";
@@ -24,7 +24,7 @@ export function createStudyShellForm(study: StudyShell | undefined) {
     selectedStudyId: study?.id ?? null,
     studyTitle: study?.title ?? defaultStudyShellForm.studyTitle,
     studyDescription: study?.description ?? defaultStudyShellForm.studyDescription,
-    interviewerGoals: study?.interviewerGoals ?? defaultStudyShellForm.interviewerGoals,
+    interviewerInstructions: study?.interviewerInstructions ?? defaultStudyShellForm.interviewerInstructions,
     freshnessDays: study?.defaultFreshnessDays ?? defaultStudyShellForm.freshnessDays,
     maxInterviewMinutes: study?.defaultMaxInterviewMinutes ?? defaultStudyShellForm.maxInterviewMinutes
   };

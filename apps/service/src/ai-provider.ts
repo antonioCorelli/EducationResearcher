@@ -1,4 +1,4 @@
-export type AiPassKind = "gap_map" | "scoring";
+export type AiPassKind = "scoring";
 
 export type AiProviderErrorCategory =
   | "rate_limited"

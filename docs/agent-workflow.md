@@ -11,7 +11,7 @@ This repo is currently in planning stage. Future Codex/agent sessions should use
    - Study setup and versioned configuration.
    - Participant slots, runs, and state machine.
    - Participant consent/survey flow.
-   - Gap map, interview, scoring, review, and export.
+   - Interview, scoring, review, and export.
 4. If multiple issues are available, choose the one that unblocks the most downstream issues.
 5. If a requirement is ambiguous, check `docs/open-questions.md` and mark any assumption in the issue/PR notes.
 
@@ -62,7 +62,7 @@ For AI/voice work:
 - Use fake providers for deterministic tests.
 - Validate structured AI outputs.
 - Test provider error categories.
-- Verify participant UI does not expose hidden objectives, rubrics, scoring, gap maps, or full transcripts.
+- Verify participant UI does not expose hidden objectives, rubrics, scoring, or full transcripts.
 
 For data/export work:
 
@@ -78,7 +78,7 @@ For data/export work:
 - Do not add participant accounts or post-completion participant portals.
 - Do not add closed-ended survey question types.
 - Do not add researcher-selectable interviewer personas in V1.
-- Do not expose rubrics, scores, objectives, gap map internals, participant captions, or full transcripts to participants.
+- Do not expose rubrics, scores, objectives, participant captions, or full transcripts to participants.
 - Do not expose vendor names, stack traces, device diagnostics, or detailed system errors to researchers or participants.
 - Do not send real participant data to an AI/voice provider until provider, privacy, and data-handling decisions are confirmed.
 - Do not broaden admin access without role checks and audit logging.

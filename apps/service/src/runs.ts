@@ -8,16 +8,8 @@ import {
   UpdateCommand
 } from "@aws-sdk/lib-dynamodb";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { toAiProviderError } from "./ai-provider.js";
 import type { ConsentMethod, ConsentVersion, ConsentVersionStore } from "./consent.js";
-import {
-  createConfiguredGapMapGenerator,
-  parseGapMapGeneratorOutput,
-  type GapMap,
-  type GapMapFailureCategory,
-  type GapMapGenerator
-} from "./gap-map.js";
-import type { ObjectiveVersion, ObjectiveVersionStore } from "./objectives.js";
+import type { ObjectiveVersionStore } from "./objectives.js";
 import type { ParticipantSlotStore } from "./participant-slots.js";
 import { V1_DEFAULT_PERSONA_STYLE_PROMPT, type StudyShell } from "./study-shell.js";
 import type { SurveyQuestion, SurveyVersion, SurveyVersionStore } from "./survey.js";
@@ -76,7 +68,7 @@ export interface Run {
   readonly surveyVersionId: string;
   readonly personaVersionId: string;
   readonly objectiveVersionIds: readonly string[];
-  readonly interviewerGoals?: string;
+  readonly interviewerInstructions?: string;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
   readonly status: RunStatus;
@@ -226,8 +218,6 @@ export interface InterviewAudioAsset {
   readonly createdAt: string;
 }
 
-export type { GapMap } from "./gap-map.js";
-
 export interface RunStore {
   getById(runId: string): Promise<Run | undefined>;
   listByStudy(studyId: string): Promise<Run[]>;
@@ -235,7 +225,6 @@ export interface RunStore {
   listStaleCandidatesByStudy(studyId: string, now: Date): Promise<Run[]>;
   listConsentRecordsByRun(runId: string): Promise<ConsentRecord[]>;
   listSurveyResponsesByRun(runId: string): Promise<SurveyResponse[]>;
-  listGapMapsByRun(runId: string): Promise<GapMap[]>;
   listInterviewSessionsByRun(runId: string): Promise<InterviewSession[]>;
   listInterviewTurnsByRun(runId: string): Promise<InterviewTurn[]>;
   listInterviewAudioAssetsByRun(runId: string): Promise<InterviewAudioAsset[]>;
@@ -271,7 +260,6 @@ export interface RunStore {
     readonly turns: readonly InterviewTurn[];
     readonly audioAsset?: InterviewAudioAsset;
   }>;
-  saveGapMap(gapMap: GapMap): Promise<GapMap>;
 }
 
 export interface ParticipantAccessTokenStore {
@@ -324,6 +312,7 @@ interface RunItem {
   readonly surveyVersionId: string;
   readonly personaVersionId: string;
   readonly objectiveVersionIds?: readonly string[];
+  readonly interviewerInstructions?: string;
   readonly interviewerGoals?: string;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
@@ -386,33 +375,6 @@ interface SurveyResponseItem {
   readonly surveyQuestionId: string;
   readonly responseText: string;
   readonly submittedAt: string;
-  readonly createdAt: string;
-}
-
-interface GapMapItem {
-  readonly entity: "gap_map";
-  readonly pk: string;
-  readonly sk: string;
-  readonly gsi3pk: string;
-  readonly gsi3sk: string;
-  readonly id: string;
-  readonly studyId: string;
-  readonly participantSlotId: string;
-  readonly runId: string;
-  readonly surveyVersionId: string;
-  readonly objectiveVersionIds: readonly string[];
-  readonly status: "generated" | "failed";
-  readonly modelName: string;
-  readonly modelVersion: string;
-  readonly serviceRequestId: string;
-  readonly promptVersion: string;
-  readonly alreadyAnswered: readonly string[];
-  readonly ambiguities: readonly string[];
-  readonly contradictions: readonly unknown[];
-  readonly missingEvidence: readonly string[];
-  readonly recommendedProbes: readonly string[];
-  readonly failureCategory?: GapMapFailureCategory;
-  readonly generatedAt: string;
   readonly createdAt: string;
 }
 
@@ -499,7 +461,6 @@ export interface RunServiceOptions {
   readonly now?: () => Date;
   readonly createRunId?: () => string;
   readonly createConsentRecordId?: () => string;
-  readonly createGapMapId?: () => string;
   readonly createInterviewAudioAssetId?: () => string;
   readonly createInterviewSessionId?: () => string;
   readonly createInterviewTurnId?: () => string;
@@ -517,7 +478,6 @@ export class RunService {
   private readonly now: () => Date;
   private readonly createRunId: () => string;
   private readonly createConsentRecordId: () => string;
-  private readonly createGapMapId: () => string;
   private readonly createInterviewAudioAssetId: () => string;
   private readonly createInterviewSessionId: () => string;
   private readonly createInterviewTurnId: () => string;
@@ -537,13 +497,11 @@ export class RunService {
     private readonly objectiveVersionStore: Pick<ObjectiveVersionStore, "listByStudy">,
     private readonly consentVersionStore: Pick<ConsentVersionStore, "listByStudy">,
     private readonly surveyVersionStore: Pick<SurveyVersionStore, "listByStudy">,
-    options: RunServiceOptions = {},
-    private readonly gapMapGenerator: GapMapGenerator = createConfiguredGapMapGenerator()
+    options: RunServiceOptions = {}
   ) {
     this.now = options.now ?? (() => new Date());
     this.createRunId = options.createRunId ?? (() => `run_${randomUUID()}`);
     this.createConsentRecordId = options.createConsentRecordId ?? (() => `consent_record_${randomUUID()}`);
-    this.createGapMapId = options.createGapMapId ?? (() => `gap_map_${randomUUID()}`);
     this.createInterviewAudioAssetId =
       options.createInterviewAudioAssetId ?? (() => `interview_audio_asset_${randomUUID()}`);
     this.createInterviewSessionId = options.createInterviewSessionId ?? (() => `interview_session_${randomUUID()}`);
@@ -615,7 +573,7 @@ export class RunService {
         surveyVersionId: study.activeSurveyVersionId,
         personaVersionId: study.activePersonaVersionId,
         objectiveVersionIds: activeObjectiveVersionIds,
-        interviewerGoals: study.interviewerGoals,
+        interviewerInstructions: study.interviewerInstructions,
         freshnessDeadlineAt: addDays(this.now(), study.defaultFreshnessDays).toISOString(),
         maxInterviewMinutes: study.defaultMaxInterviewMinutes,
         status: "created",
@@ -724,12 +682,8 @@ export class RunService {
     const submittedRun = applyRunStatusTransition(startedRun, "survey_completed", this.now());
 
     const result = await this.runStore.submitSurvey(surveyResponses, submittedRun, run.status);
-    const gapMap = await this.generateAndPersistGapMap(result.run, surveyVersion, result.surveyResponses);
 
-    return {
-      ...(await this.withRemainingInterviewTime(result)),
-      gapMap
-    };
+    return this.withRemainingInterviewTime(result);
   }
 
   async startParticipantInterview(rawToken: string) {
@@ -917,17 +871,12 @@ export class RunService {
     const remainingSeconds = await this.requireInterviewTimeRemaining(run);
     const surveyVersion = await this.getRunSurveyVersion(run);
     const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
-    const objectiveVersions = await this.getRunObjectiveVersions(run);
-    const latestGeneratedGapMap = (await this.runStore.listGapMapsByRun(run.id)).find(
-      (gapMap) => gapMap.status === "generated"
-    );
     const promptInput = {
       run,
       interviewSession,
       surveyVersion,
       surveyResponses,
-      objectiveVersions,
-      ...(latestGeneratedGapMap ? { gapMap: latestGeneratedGapMap } : {}),
+      ...(run.interviewerInstructions ? { interviewerInstructions: run.interviewerInstructions } : {}),
       personaStylePrompt: V1_DEFAULT_PERSONA_STYLE_PROMPT,
       remainingSeconds,
       nowIso: this.now().toISOString()
@@ -1295,17 +1244,6 @@ export class RunService {
     return surveyVersion;
   }
 
-  private async getRunObjectiveVersions(run: Run) {
-    const versionsById = new Map((await this.objectiveVersionStore.listByStudy(run.studyId)).map((version) => [version.id, version]));
-    const objectiveVersions = run.objectiveVersionIds.map((objectiveVersionId) => versionsById.get(objectiveVersionId));
-
-    if (objectiveVersions.some((version) => !version)) {
-      throw new ParticipantAccessError();
-    }
-
-    return objectiveVersions as ObjectiveVersion[];
-  }
-
   private async getActiveInterviewSession(runId: string) {
     return (await this.runStore.listInterviewSessionsByRun(runId)).find((session) => session.status === "active");
   }
@@ -1322,64 +1260,6 @@ export class RunService {
     }
 
     return activeSession;
-  }
-
-  private async generateAndPersistGapMap(
-    run: Run,
-    surveyVersion: SurveyVersion,
-    surveyResponses: readonly SurveyResponse[]
-  ) {
-    const generatedAt = this.now().toISOString();
-
-    try {
-      const objectiveVersions = await this.getRunObjectiveVersions(run);
-      const output = parseGapMapGeneratorOutput(
-        await this.gapMapGenerator.generate({
-          run,
-          surveyVersion,
-          surveyResponses,
-          objectiveVersions,
-          interviewerGoals: run.interviewerGoals
-        })
-      );
-
-      return this.runStore.saveGapMap({
-        id: this.createGapMapId(),
-        studyId: run.studyId,
-        participantSlotId: run.participantSlotId,
-        runId: run.id,
-        surveyVersionId: run.surveyVersionId,
-        objectiveVersionIds: run.objectiveVersionIds,
-        status: "generated",
-        ...output,
-        generatedAt,
-        createdAt: generatedAt
-      });
-    } catch (error) {
-      const failureCategory: GapMapFailureCategory = toAiProviderError(error).safeCategory;
-
-      return this.runStore.saveGapMap({
-        id: this.createGapMapId(),
-        studyId: run.studyId,
-        participantSlotId: run.participantSlotId,
-        runId: run.id,
-        surveyVersionId: run.surveyVersionId,
-        objectiveVersionIds: run.objectiveVersionIds,
-        status: "failed",
-        modelName: "unknown",
-        modelVersion: "unknown",
-        serviceRequestId: toAiProviderError(error).serviceRequestId ?? "unknown",
-        promptVersion: "unknown",
-        alreadyAnswered: [],
-        ambiguities: [],
-        contradictions: [],
-        missingEvidence: [],
-        recommendedProbes: [],
-        failureCategory,
-        generatedAt,
-        createdAt: generatedAt
-      });
-    }
   }
 }
 
@@ -1434,12 +1314,6 @@ export class InMemoryRunStore implements RunStore {
       .sort((left, right) => left.surveyQuestionId.localeCompare(right.surveyQuestionId));
   }
 
-  async listGapMapsByRun(runId: string) {
-    return [...this.gapMaps.values()]
-      .filter((gapMap) => gapMap.runId === runId)
-      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
-  }
-
   async listInterviewSessionsByRun(runId: string) {
     return [...this.interviewSessions.values()]
       .filter((session) => session.runId === runId)
@@ -1488,7 +1362,6 @@ export class InMemoryRunStore implements RunStore {
 
   private readonly consentRecords = new Map<string, ConsentRecord>();
   private readonly surveyResponses = new Map<string, SurveyResponse>();
-  private readonly gapMaps = new Map<string, GapMap>();
   private readonly interviewSessions = new Map<string, InterviewSession>();
   private readonly interviewTurns = new Map<string, InterviewTurn>();
   private readonly interviewAudioAssets = new Map<string, InterviewAudioAsset>();
@@ -1596,11 +1469,6 @@ export class InMemoryRunStore implements RunStore {
       interviewSession: session,
       run
     };
-  }
-
-  async saveGapMap(gapMap: GapMap) {
-    this.gapMaps.set(gapMap.id, gapMap);
-    return gapMap;
   }
 
   async saveInterviewArtifacts(input: {
@@ -1820,24 +1688,6 @@ export class DynamoDbRunStore implements RunStore {
       .filter((item) => item.entity === "survey_response")
       .map((item) => toSurveyResponse(item as SurveyResponseItem))
       .sort((left, right) => left.surveyQuestionId.localeCompare(right.surveyQuestionId));
-  }
-
-  async listGapMapsByRun(runId: string) {
-    const response = await this.documentClient.send(
-      new QueryCommand({
-        TableName: this.tableName,
-        KeyConditionExpression: "pk = :run AND begins_with(sk, :gapMapPrefix)",
-        ExpressionAttributeValues: {
-          ":run": `RUN#${runId}`,
-          ":gapMapPrefix": "GAP_MAP#"
-        }
-      })
-    );
-
-    return (response.Items ?? [])
-      .filter((item) => item.entity === "gap_map")
-      .map((item) => toGapMap(item as GapMapItem))
-      .sort((left, right) => right.generatedAt.localeCompare(left.generatedAt));
   }
 
   async listInterviewSessionsByRun(runId: string) {
@@ -2142,18 +1992,6 @@ export class DynamoDbRunStore implements RunStore {
       interviewSession: session,
       run
     };
-  }
-
-  async saveGapMap(gapMap: GapMap) {
-    await this.documentClient.send(
-      new PutCommand({
-        TableName: this.tableName,
-        Item: toGapMapItem(gapMap),
-        ConditionExpression: "attribute_not_exists(pk) AND attribute_not_exists(sk)"
-      })
-    );
-
-    return gapMap;
   }
 
   async saveInterviewArtifacts(input: {
@@ -2939,7 +2777,7 @@ function toRunItem(run: Run): RunItem {
     surveyVersionId: run.surveyVersionId,
     personaVersionId: run.personaVersionId,
     objectiveVersionIds: run.objectiveVersionIds,
-    ...(run.interviewerGoals ? { interviewerGoals: run.interviewerGoals } : {}),
+    ...(run.interviewerInstructions ? { interviewerInstructions: run.interviewerInstructions } : {}),
     freshnessDeadlineAt: run.freshnessDeadlineAt,
     maxInterviewMinutes: run.maxInterviewMinutes,
     status: run.status,
@@ -2962,7 +2800,7 @@ function toRun(item: RunItem): Run {
     surveyVersionId: item.surveyVersionId,
     personaVersionId: item.personaVersionId,
     objectiveVersionIds: item.objectiveVersionIds ?? [],
-    interviewerGoals: item.interviewerGoals,
+    interviewerInstructions: item.interviewerInstructions ?? item.interviewerGoals,
     freshnessDeadlineAt: item.freshnessDeadlineAt,
     maxInterviewMinutes: item.maxInterviewMinutes,
     status: item.status,
@@ -3073,59 +2911,6 @@ function toSurveyResponse(item: SurveyResponseItem): SurveyResponse {
     surveyQuestionId: item.surveyQuestionId,
     responseText: item.responseText,
     submittedAt: item.submittedAt,
-    createdAt: item.createdAt
-  };
-}
-
-function toGapMapItem(gapMap: GapMap): GapMapItem {
-  return {
-    entity: "gap_map",
-    pk: `RUN#${gapMap.runId}`,
-    sk: `GAP_MAP#${gapMap.id}`,
-    gsi3pk: `RUN#${gapMap.runId}#ARTIFACT#gap_map`,
-    gsi3sk: `GAP_MAP#${gapMap.generatedAt}#${gapMap.id}`,
-    id: gapMap.id,
-    studyId: gapMap.studyId,
-    participantSlotId: gapMap.participantSlotId,
-    runId: gapMap.runId,
-    surveyVersionId: gapMap.surveyVersionId,
-    objectiveVersionIds: gapMap.objectiveVersionIds,
-    status: gapMap.status,
-    modelName: gapMap.modelName,
-    modelVersion: gapMap.modelVersion,
-    serviceRequestId: gapMap.serviceRequestId,
-    promptVersion: gapMap.promptVersion,
-    alreadyAnswered: gapMap.alreadyAnswered,
-    ambiguities: gapMap.ambiguities,
-    contradictions: gapMap.contradictions,
-    missingEvidence: gapMap.missingEvidence,
-    recommendedProbes: gapMap.recommendedProbes,
-    ...(gapMap.failureCategory ? { failureCategory: gapMap.failureCategory } : {}),
-    generatedAt: gapMap.generatedAt,
-    createdAt: gapMap.createdAt
-  };
-}
-
-function toGapMap(item: GapMapItem): GapMap {
-  return {
-    id: item.id,
-    studyId: item.studyId,
-    participantSlotId: item.participantSlotId,
-    runId: item.runId,
-    surveyVersionId: item.surveyVersionId,
-    objectiveVersionIds: item.objectiveVersionIds,
-    status: item.status,
-    modelName: item.modelName,
-    modelVersion: item.modelVersion,
-    serviceRequestId: item.serviceRequestId,
-    promptVersion: item.promptVersion,
-    alreadyAnswered: item.alreadyAnswered,
-    ambiguities: item.ambiguities,
-    contradictions: item.contradictions as GapMap["contradictions"],
-    missingEvidence: item.missingEvidence,
-    recommendedProbes: item.recommendedProbes,
-    ...(item.failureCategory ? { failureCategory: item.failureCategory } : {}),
-    generatedAt: item.generatedAt,
     createdAt: item.createdAt
   };
 }

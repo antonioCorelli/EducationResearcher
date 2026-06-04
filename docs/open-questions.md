@@ -11,7 +11,7 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 - Service API stack: Node.js, TypeScript, and Fastify.
 - Service API hosting/deploy: AWS Elastic Beanstalk on the Docker platform.
 - Primary AWS storage direction: DynamoDB for application data/state and S3 for audio assets and generated exports.
-- Fake providers are required from day one for local development and deterministic tests, including auth/session, AI gap map/scoring, voice interview behavior, and storage-like behavior.
+- Fake providers are required from day one for local development and deterministic tests, including auth/session, AI scoring, voice interview behavior, and storage-like behavior.
 - DynamoDB physical data model: table per data domain.
 - Local database mode: DynamoDB Local with create, reset, and seed commands.
 - Migration workflow: AWS CDK table/index definitions plus a versioned schema contract and fixture workflow.
@@ -39,9 +39,9 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 - What key and index refinements are needed as service access patterns become concrete?
 - What CDK stack boundaries should define Amplify, Cognito, Elastic Beanstalk supporting IAM, S3, and any later worker infrastructure?
 - How should signed S3 access be generated, scoped, expired, and audited for audio and exports?
-- Which AI model provider should handle gap map and scoring passes?
+- Which AI model provider should handle scoring passes?
 - Which realtime voice provider should handle voice-to-voice interviews?
-- How should background jobs be implemented for gap maps, scoring, stale sweeps, exports, retention, and deletion?
+- How should background jobs be implemented for scoring, stale sweeps, exports, retention, and deletion?
 - What schema validation library should be used for AI structured outputs?
 - How should service request IDs be generated and propagated across frontend, service, workers, and providers?
 - What backup and restore strategy applies to sensitive study artifacts?
@@ -50,7 +50,6 @@ Source PRD: `docs/v1-prd-and-data-model.md`
 
 - What should the researcher study setup flow look like: wizard, tabs, or editable sections?
 - Should the participant survey support draft saving or only final submission?
-- How should the participant UI indicate "gap map is being generated" between survey and interview?
 - What exact participant recovery states should be shown for microphone permission denial, disconnect, voice unavailable, and stale run?
 - Should the sparse interview UI include a pause button, or is stop/resume represented through the record control?
 - How should the AI thank-you be presented after interview completion: spoken, captioned, static screen, or all three?
