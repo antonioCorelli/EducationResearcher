@@ -94,6 +94,29 @@ describe("realtime voice provider", () => {
     expect(instructions).not.toContain("intermediate artifact");
   });
 
+  it("includes prior interview questions and answers when creating fresh realtime context", () => {
+    const instructions = buildRealtimeInterviewInstructions({
+      ...promptInput,
+      interviewTurns: [
+        {
+          sequenceNumber: 1,
+          speaker: "ai",
+          text: "Can you tell me what made the example clearer?"
+        },
+        {
+          sequenceNumber: 2,
+          speaker: "participant",
+          text: "The labels helped me connect each step to the equation."
+        }
+      ]
+    });
+
+    expect(instructions).toContain("Interview history so far");
+    expect(instructions).toContain("Can you tell me what made the example clearer?");
+    expect(instructions).toContain("The labels helped me connect each step to the equation.");
+    expect(instructions).toContain("Do not ask the participant to repeat answers already captured");
+  });
+
   it("mints an OpenAI realtime client secret without exposing the API key in the response", async () => {
     const requests: Array<{ readonly url: string; readonly init: RequestInit }> = [];
     const provider = new OpenAiRealtimeVoiceProvider({

@@ -57,6 +57,7 @@ import {
   toSafeParticipantAccessResponse,
   toSafeRunValidationResponse,
   type CaptureParticipantConsentInput,
+  type CreateRealtimeVoiceSessionInput,
   type CreateRunsInput,
   type InterruptInterviewInput,
   type ParticipantAccessTokenStore,
@@ -722,6 +723,28 @@ function coerceSaveInterviewArtifactsInput(body: unknown): SaveInterviewArtifact
     turns: record.turns,
     audioAsset: record.audioAsset,
     transcriptTokenCount: record.transcriptTokenCount
+  };
+}
+
+function coerceCreateRealtimeVoiceSessionInput(body: unknown): CreateRealtimeVoiceSessionInput {
+  if (body === undefined) {
+    return {};
+  }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw {
+      statusCode: 400,
+      body: {
+        error: "Bad Request",
+        message: "Realtime session context is invalid."
+      }
+    };
+  }
+
+  const record = body as Record<string, unknown>;
+
+  return {
+    currentTurns: record.currentTurns
   };
 }
 
@@ -2105,7 +2128,8 @@ export function buildServer(options: BuildServerOptions = {}) {
       try {
         const result = await runService.createParticipantRealtimeVoiceSession(
           request.params.accessToken,
-          realtimeVoiceProvider
+          realtimeVoiceProvider,
+          coerceCreateRealtimeVoiceSessionInput(request.body)
         );
 
         await operationalEventService.recordRealtimeSessionCreated({

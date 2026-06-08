@@ -16,6 +16,7 @@ import type { SurveyQuestion, SurveyVersion, SurveyVersionStore } from "./survey
 import {
   REALTIME_INTERVIEW_PROMPT_VERSION,
   buildRealtimeInterviewInstructions,
+  type RealtimeInterviewContextTurn,
   type RealtimeVoiceProvider
 } from "./voice-provider.js";
 import {
@@ -127,6 +128,10 @@ export interface SaveInterviewArtifactsInput {
   readonly turns?: unknown;
   readonly audioAsset?: unknown;
   readonly transcriptTokenCount?: unknown;
+}
+
+export interface CreateRealtimeVoiceSessionInput {
+  readonly currentTurns?: unknown;
 }
 
 export interface SaveInterviewAudioUploadInput {
@@ -860,7 +865,11 @@ export class RunService {
     return this.withRemainingInterviewTime(result);
   }
 
-  async createParticipantRealtimeVoiceSession(rawToken: string, voiceProvider: RealtimeVoiceProvider) {
+  async createParticipantRealtimeVoiceSession(
+    rawToken: string,
+    voiceProvider: RealtimeVoiceProvider,
+    input: CreateRealtimeVoiceSessionInput = {}
+  ) {
     const run = await this.resolveParticipantRun(rawToken);
 
     if (run.status !== "interview_in_progress") {
@@ -871,11 +880,15 @@ export class RunService {
     const remainingSeconds = await this.requireInterviewTimeRemaining(run);
     const surveyVersion = await this.getRunSurveyVersion(run);
     const surveyResponses = await this.runStore.listSurveyResponsesByRun(run.id);
+    const persistedInterviewTurns = await this.runStore.listInterviewTurnsByRun(run.id);
+    const currentInterviewTurns = parseRealtimeSessionCurrentTurns(input.currentTurns);
+    const interviewTurns = mergeRealtimeInterviewContextTurns(persistedInterviewTurns, currentInterviewTurns);
     const promptInput = {
       run,
       interviewSession,
       surveyVersion,
       surveyResponses,
+      interviewTurns,
       ...(run.interviewerInstructions ? { interviewerInstructions: run.interviewerInstructions } : {}),
       personaStylePrompt: V1_DEFAULT_PERSONA_STYLE_PROMPT,
       remainingSeconds,
@@ -2545,6 +2558,34 @@ function parseInterviewAudioAsset(value: unknown) {
     ...(record.byteSize !== undefined ? { byteSize: parseOptionalNonNegativeInteger(record.byteSize, "Audio byte size") } : {}),
     status: parseInterviewAudioAssetStatus(record.status)
   };
+}
+
+function parseRealtimeSessionCurrentTurns(value: unknown): RealtimeInterviewContextTurn[] {
+  return parseInterviewTurns(value).map((turn) => ({
+    speaker: turn.speaker,
+    text: turn.text
+  }));
+}
+
+function mergeRealtimeInterviewContextTurns(
+  persistedTurns: readonly Pick<InterviewTurn, "sequenceNumber" | "speaker" | "text">[],
+  currentTurns: readonly RealtimeInterviewContextTurn[]
+): RealtimeInterviewContextTurn[] {
+  const persistedContextTurns = persistedTurns.map((turn, index) => ({
+    speaker: turn.speaker,
+    text: turn.text,
+    sequenceNumber: turn.sequenceNumber ?? index + 1
+  }));
+  const highestPersistedSequenceNumber = persistedContextTurns.reduce(
+    (highest, turn) => Math.max(highest, turn.sequenceNumber),
+    0
+  );
+  const currentContextTurns = currentTurns.map((turn, index) => ({
+    ...turn,
+    sequenceNumber: highestPersistedSequenceNumber + index + 1
+  }));
+
+  return [...persistedContextTurns, ...currentContextTurns];
 }
 
 function parseInterviewAudioUpload(input: SaveInterviewAudioUploadInput, maxInterviewAudioUploadBytes: number) {

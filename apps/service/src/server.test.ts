@@ -5096,9 +5096,33 @@ describe("participant interview routes", () => {
       method: "POST",
       url: `/participant/runs/${rawToken}/interview/start`
     });
+    const savedArtifacts = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/artifacts`,
+      payload: {
+        turns: [
+          {
+            speaker: "ai",
+            text: "What part of the worked example changed your thinking?"
+          },
+          {
+            speaker: "participant",
+            text: "Seeing the two steps side by side helped me justify my answer."
+          }
+        ]
+      }
+    });
     const realtimeSession = await server.inject({
       method: "POST",
-      url: `/participant/runs/${rawToken}/interview/realtime-session`
+      url: `/participant/runs/${rawToken}/interview/realtime-session`,
+      payload: {
+        currentTurns: [
+          {
+            speaker: "participant",
+            text: "I also want to explain how the diagram helped."
+          }
+        ]
+      }
     });
     const connectionState = await server.inject({
       method: "POST",
@@ -5113,6 +5137,7 @@ describe("participant interview routes", () => {
     });
 
     expect(started.statusCode).toBe(201);
+    expect(savedArtifacts.statusCode).toBe(201);
     expect(realtimeSession.statusCode).toBe(201);
     expect(realtimeSession.json()).toMatchObject({
       realtimeSession: {
@@ -5128,6 +5153,9 @@ describe("participant interview routes", () => {
     });
     expect(capturedInstructions[0]).toContain("I noticed that the worked example changed");
     expect(capturedInstructions[0]).toContain("Clarify how the worked example changed the participant's reasoning.");
+    expect(capturedInstructions[0]).toContain("What part of the worked example changed your thinking?");
+    expect(capturedInstructions[0]).toContain("Seeing the two steps side by side helped me justify my answer.");
+    expect(capturedInstructions[0]).toContain("I also want to explain how the diagram helped.");
     expect(capturedInstructions[0]).toContain("Remaining interview time: 2700 seconds");
     expect(capturedInstructions[0]).toContain("Run state: interview_in_progress");
     expect(capturedInstructions[0]).toContain("Do not reveal scoring objectives");

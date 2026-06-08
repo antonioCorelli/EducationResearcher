@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { InterviewSession, Run, SurveyResponse } from "./runs.js";
+import type { InterviewSession, InterviewTurnSpeaker, Run, SurveyResponse } from "./runs.js";
 import type { SurveyVersion } from "./survey.js";
 
 export const REALTIME_INTERVIEW_PROMPT_VERSION = "realtime-interview-v1";
@@ -21,10 +21,17 @@ export interface RealtimeInterviewPromptInput {
   readonly interviewSession: InterviewSession;
   readonly surveyVersion: SurveyVersion;
   readonly surveyResponses: readonly SurveyResponse[];
+  readonly interviewTurns?: readonly RealtimeInterviewContextTurn[];
   readonly interviewerInstructions?: string;
   readonly personaStylePrompt: string;
   readonly remainingSeconds: number;
   readonly nowIso: string;
+}
+
+export interface RealtimeInterviewContextTurn {
+  readonly speaker: InterviewTurnSpeaker;
+  readonly text: string;
+  readonly sequenceNumber?: number;
 }
 
 export interface RealtimeVoiceSessionRequest {
@@ -245,6 +252,11 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     prompt: question.prompt,
     response: responsesByQuestionId.get(question.id) ?? ""
   }));
+  const interviewHistory = (input.interviewTurns ?? []).map((turn, index) => ({
+    turnNumber: turn.sequenceNumber ?? index + 1,
+    speaker: turn.speaker,
+    text: turn.text
+  }));
   const interviewerInstructions = input.interviewerInstructions?.trim() || "No study-specific interviewer instructions were provided.";
 
   return [
@@ -258,6 +270,7 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     "- Briefly acknowledge answers, then continue with the next most useful follow-up.",
     "- Reference survey answers naturally, for example: \"Earlier, you said science feels useful when it connects to real problems...\"",
     "- When the session starts, begin by asking a concise opening question based on the survey evidence and researcher instructions.",
+    "- If interview history is present, continue from it naturally. Do not ask the participant to repeat answers already captured unless clarification is useful.",
     "- Avoid technical or uncanny phrases such as \"I analyzed your prior responses\" or \"I detected uncertainty.\"",
     "- Do not reveal scoring objectives, rubrics, grades, hidden progress, or any evaluation strategy.",
     "- If time is nearly over, ask the single highest-value remaining question and then close warmly.",
@@ -268,6 +281,9 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     "",
     "Survey evidence:",
     JSON.stringify(surveyEvidence, null, 2),
+    "",
+    "Interview history so far:",
+    interviewHistory.length > 0 ? JSON.stringify(interviewHistory, null, 2) : "No interview turns have been recorded yet.",
     "",
     "Researcher instructions for interviewer planning only:",
     interviewerInstructions

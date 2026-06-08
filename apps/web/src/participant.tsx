@@ -330,7 +330,7 @@ export function Participant() {
     const startedAt = performance.now();
 
     try {
-      const realtimeSession = await fetchRealtimeVoiceSession(accessToken);
+      const realtimeSession = await fetchRealtimeVoiceSession(accessToken, pendingInterviewTurnsRef.current);
       activeServiceRequestId = realtimeSession.serviceRequestId;
       setRealtimeServiceRequestId(realtimeSession.serviceRequestId);
       await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connecting", {
@@ -2672,9 +2672,18 @@ async function fetchParticipantAccess(accessToken: string) {
   };
 }
 
-async function fetchRealtimeVoiceSession(accessToken: string) {
+async function fetchRealtimeVoiceSession(accessToken: string, currentTurns: readonly PendingInterviewTurn[] = []) {
   const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/realtime-session`, {
-    method: "POST"
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      currentTurns: currentTurns.map((turn) => ({
+        speaker: turn.speaker,
+        text: turn.text
+      }))
+    })
   });
   const payload = (await response.json()) as {
     realtimeSession?: RealtimeVoiceSession;
