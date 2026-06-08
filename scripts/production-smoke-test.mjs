@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { chromium } from "playwright";
 
 const defaultTimeoutMs = 10_000;
 
@@ -62,18 +64,22 @@ function optionalUrlEnv(name, fallback) {
   return new URL(process.env[name]?.trim() || fallback);
 }
 
-function assertSafeCredentialUrl(url) {
+function assertSafeCredentialTargetUrl(url, label) {
   const localHosts = new Set(["127.0.0.1", "localhost", "::1"]);
 
   if (url.protocol === "https:" || localHosts.has(url.hostname)) {
     return;
   }
 
-  throw new Error(`Refusing to send smoke-test credentials to non-HTTPS API origin: ${url.origin}`);
+  throw new Error(`Refusing to send smoke-test credentials to non-HTTPS ${label} origin: ${url.origin}`);
+}
+
+function getTimeoutMs() {
+  return Number.parseInt(process.env.PRODUCTION_SMOKE_TIMEOUT_MS ?? `${defaultTimeoutMs}`, 10);
 }
 
 async function fetchWithTimeout(url, options = {}) {
-  const timeoutMs = Number.parseInt(process.env.PRODUCTION_SMOKE_TIMEOUT_MS ?? `${defaultTimeoutMs}`, 10);
+  const timeoutMs = getTimeoutMs();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -131,70 +137,59 @@ async function verifyApiHealth(apiUrl) {
   }
 }
 
-async function signIn(apiUrl, username, password) {
-  const signInUrl = new URL("/auth/sign-in", apiUrl);
-  const response = await fetchWithTimeout(signInUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      email: username,
-      password
-    })
-  });
-  await expectOk(response, `POST ${signInUrl.href}`);
+function getArtifactDirectory() {
+  const artifactDirectory = process.env.PRODUCTION_SMOKE_ARTIFACT_DIR?.trim();
 
-  const payload = await readJson(response, "Sign-in response was not JSON.");
-  const accessToken = payload?.tokens?.accessToken;
-
-  if (typeof accessToken !== "string" || !accessToken) {
-    throw new Error("Sign-in response did not include an access token.");
-  }
-
-  return accessToken;
+  return artifactDirectory || null;
 }
 
-async function verifyAuthenticatedWorkspace(apiUrl, accessToken) {
-  const sessionUrl = new URL("/researcher/session", apiUrl);
-  const studiesUrl = new URL("/researcher/studies", apiUrl);
+async function saveFailureScreenshot(page) {
+  const artifactDirectory = getArtifactDirectory();
 
-  const sessionResponse = await fetchWithTimeout(sessionUrl, {
-    headers: {
-      authorization: `Bearer ${accessToken}`
-    }
-  });
-  await expectOk(sessionResponse, `GET ${sessionUrl.href}`);
-
-  const sessionPayload = await readJson(sessionResponse, "Session response was not JSON.");
-
-  if (typeof sessionPayload?.user?.id !== "string" || sessionPayload.user.role !== "researcher") {
-    throw new Error("Session response did not include an authenticated researcher.");
+  if (!artifactDirectory) {
+    return;
   }
 
-  const studiesResponse = await fetchWithTimeout(studiesUrl, {
-    headers: {
-      authorization: `Bearer ${accessToken}`
-    }
+  mkdirSync(artifactDirectory, { recursive: true });
+  await page.screenshot({
+    fullPage: true,
+    path: join(artifactDirectory, "production-smoke-failure.png")
   });
-  await expectOk(studiesResponse, `GET ${studiesUrl.href}`);
-
-  const studiesPayload = await readJson(studiesResponse, "Studies response was not JSON.");
-
-  if (!Array.isArray(studiesPayload.studies)) {
-    throw new Error("Studies response did not include a studies array.");
-  }
 }
 
-async function signOut(apiUrl, accessToken) {
-  const signOutUrl = new URL("/auth/sign-out", apiUrl);
+async function verifyUiLogin(webUrl, username, password) {
+  const browser = await chromium.launch({
+    headless: process.env.PRODUCTION_SMOKE_HEADLESS !== "false"
+  });
+  const page = await browser.newPage();
+  page.setDefaultTimeout(getTimeoutMs());
 
-  await fetchWithTimeout(signOutUrl, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`
+  try {
+    await page.goto(webUrl.href, { waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: /researcher sign in/iu }).waitFor();
+    await page.getByLabel(/^email$/iu).fill(username);
+    await page.getByLabel(/^password$/iu).fill(password);
+    await page.getByRole("button", { name: /^sign in$/iu }).click();
+    await page.waitForURL((url) => url.pathname === "/researcher");
+    await page.getByRole("heading", { name: /welcome/iu }).waitFor();
+
+    const welcomeNameInput = page.getByLabel("Preferred welcome name");
+    const isWelcomeNameRequired = await welcomeNameInput.isVisible({ timeout: 1_000 }).catch(() => false);
+
+    if (isWelcomeNameRequired) {
+      await welcomeNameInput.fill("Smoke Test");
+      await page.getByRole("button", { name: /^confirm$/iu }).click();
     }
-  }).catch(() => undefined);
+
+    await page.getByText("Researcher workspace", { exact: true }).waitFor();
+    await page.getByRole("button", { name: /^sign out$/iu }).waitFor();
+    await page.getByRole("button", { name: /^sign out$/iu }).click();
+  } catch (error) {
+    await saveFailureScreenshot(page).catch(() => undefined);
+    throw error;
+  } finally {
+    await browser.close();
+  }
 }
 
 async function runSmokeTest() {
@@ -204,23 +199,18 @@ async function runSmokeTest() {
   const apiUrl = optionalUrlEnv("PRODUCTION_SMOKE_API_URL", "https://api.voxaria.io");
   const username = requiredEnv("VOXARIA_SMOKE_USERNAME");
   const password = requiredEnv("VOXARIA_SMOKE_PASSWORD");
-  assertSafeCredentialUrl(apiUrl);
+  assertSafeCredentialTargetUrl(webUrl, "web app");
+  assertSafeCredentialTargetUrl(apiUrl, "API");
 
   await verifyWebApp(webUrl);
   await verifyApiHealth(apiUrl);
-
-  const accessToken = await signIn(apiUrl, username, password);
-
-  try {
-    await verifyAuthenticatedWorkspace(apiUrl, accessToken);
-  } finally {
-    await signOut(apiUrl, accessToken);
-  }
+  await verifyUiLogin(webUrl, username, password);
 }
 
 function getRetrySettings() {
   return {
     attempts: Number.parseInt(process.env.PRODUCTION_SMOKE_ATTEMPTS ?? "1", 10),
+    initialDelayMs: Number.parseInt(process.env.PRODUCTION_SMOKE_INITIAL_DELAY_MS ?? "0", 10),
     delayMs: Number.parseInt(process.env.PRODUCTION_SMOKE_DELAY_MS ?? "0", 10)
   };
 }
@@ -230,9 +220,15 @@ function delay(ms) {
 }
 
 async function main() {
-  const { attempts, delayMs } = getRetrySettings();
+  const { attempts, delayMs, initialDelayMs } = getRetrySettings();
   const maxAttempts = Number.isFinite(attempts) && attempts > 0 ? attempts : 1;
+  const firstRunDelayMs = Number.isFinite(initialDelayMs) && initialDelayMs > 0 ? initialDelayMs : 0;
   const retryDelayMs = Number.isFinite(delayMs) && delayMs > 0 ? delayMs : 0;
+
+  if (firstRunDelayMs > 0) {
+    console.log(`Waiting ${firstRunDelayMs}ms before starting the production smoke test.`);
+    await delay(firstRunDelayMs);
+  }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {

@@ -10,16 +10,24 @@ on:
       - completed
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   smoke:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
+      AWS_REGION: us-east-1
       PRODUCTION_SMOKE_WEB_URL: https://voxaria.io
       PRODUCTION_SMOKE_API_URL: https://api.voxaria.io
+      PRODUCTION_SMOKE_ARTIFACT_DIR: .local/production-smoke
       PRODUCTION_SMOKE_ATTEMPTS: 12
+      PRODUCTION_SMOKE_INITIAL_DELAY_MS: 180000
       PRODUCTION_SMOKE_DELAY_MS: 30000
+      PRODUCTION_SMOKE_AWS_ROLE_ARN: ${{ secrets.PRODUCTION_SMOKE_AWS_ROLE_ARN }}
       VOXARIA_SMOKE_USERNAME: ${{ secrets.VOXARIA_SMOKE_USERNAME }}
       VOXARIA_SMOKE_PASSWORD: ${{ secrets.VOXARIA_SMOKE_PASSWORD }}
 
@@ -33,6 +41,42 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install smoke browser
+        run: npx playwright install --with-deps chromium
 
       - name: Run production smoke test
         run: npm run smoke:prod
+
+      - name: Upload smoke failure screenshot
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-smoke-failure
+          path: .local/production-smoke
+          if-no-files-found: ignore
+
+      - name: Configure AWS credentials for smoke metric
+        if: ${{ always() && env.PRODUCTION_SMOKE_AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PRODUCTION_SMOKE_AWS_ROLE_ARN }}
+
+      - name: Publish successful UI smoke metric
+        if: ${{ success() && env.PRODUCTION_SMOKE_AWS_ROLE_ARN != '' }}
+        run: |
+          aws cloudwatch put-metric-data \
+            --namespace EducationResearcher/ProductionSmoke \
+            --metric-data 'MetricName=UiLoginFailure,Dimensions=[{Name=Environment,Value=prod}],Value=0,Unit=Count'
+
+      - name: Publish failed UI smoke metric
+        if: ${{ failure() && env.PRODUCTION_SMOKE_AWS_ROLE_ARN != '' }}
+        run: |
+          aws cloudwatch put-metric-data \
+            --namespace EducationResearcher/ProductionSmoke \
+            --metric-data 'MetricName=UiLoginFailure,Dimensions=[{Name=Environment,Value=prod}],Value=1,Unit=Count'

@@ -200,6 +200,16 @@ The production Amplify app was created from the GitHub repository on June 1, 202
 The first three Amplify release jobs for `main` completed build, deploy, and verify successfully. The default domain
 returns `200 OK` for `/` and for participant deep links such as `/participant/runs/test-token`.
 
+## Production UI Smoke Testing And Alerts
+
+The repository includes a browser-based production smoke test that signs in through the live researcher login page with a
+non-real smoke test user. The `Production Smoke` GitHub Actions workflow runs after successful `main` CI, installs
+Playwright Chromium, and retries while Amplify finishes deploying the latest build.
+
+The CDK app includes `EducationResearcherOperations-prod`, which defines the SNS topic and CloudWatch alarm for the UI
+login smoke metric. See `docs/production-ui-smoke-testing.md` for the required GitHub secrets, GitHub OIDC role, SMS
+subscription parameter, and manual alarm verification steps.
+
 ## DNS And TLS
 
 Source issue: [#67](https://github.com/antonioCorelli/EducationResearcher/issues/67)

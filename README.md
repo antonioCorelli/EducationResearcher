@@ -83,14 +83,16 @@ npm run build
 Run the production smoke test locally after creating `.env.production-smoke.local` from `.env.production-smoke.example`:
 
 ```bash
+npx playwright install chromium
 npm run smoke:prod
 ```
 
 The smoke test checks that `https://voxaria.io` returns the web app shell, `https://api.voxaria.io/health` is healthy,
-the configured researcher can sign in, and authenticated researcher data can load. The local
-`.env.production-smoke.local` file is ignored by git. In GitHub, store the same credentials as repository secrets named
-`VOXARIA_SMOKE_USERNAME` and `VOXARIA_SMOKE_PASSWORD`; the `Production Smoke` workflow runs after successful `main` CI
-and can also be started manually.
+the configured non-real researcher can sign in through the live browser login page, and the signed-in researcher
+workspace renders. The local `.env.production-smoke.local` file is ignored by git. In GitHub, store the same credentials
+as repository secrets named `VOXARIA_SMOKE_USERNAME` and `VOXARIA_SMOKE_PASSWORD`; the `Production Smoke` workflow runs
+after successful `main` CI and can also be started manually. The workflow can publish a CloudWatch metric that drives an
+SNS SMS alarm; setup steps are in `docs/production-ui-smoke-testing.md`.
 
 ## Deployment Readiness
 
