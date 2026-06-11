@@ -105,6 +105,12 @@ textarea {
   min-height: 144px;
 }
 
+.participant-survey-draft-status {
+  margin: -6px 0 0;
+  color: #52606f;
+  font-size: 0.9rem;
+}
+
 .participant-status-panel {
   display: grid;
   gap: 8px;

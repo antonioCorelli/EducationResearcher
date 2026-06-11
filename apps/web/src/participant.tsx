@@ -102,9 +102,12 @@ type TechnicalFailureCategory =
   | "transcription_unavailable"
   | "model_api_unavailable"
   | "unknown";
+type SurveyDraftSaveStatus = "idle" | "restored" | "saving" | "saved" | "unavailable";
 
 const speechPauseVoiceLevelThreshold = 0.025;
 const speechPauseSilenceMs = 6500;
+const surveyDraftAutosaveDelayMs = 8000;
+const surveyDraftStorageKeyPrefix = "education-researcher:participant-survey-draft:v1";
 
 interface RealtimeVoiceSession {
   readonly provider: "fake" | "openai";
@@ -124,6 +127,10 @@ export function Participant() {
   const [isSubmittingConsent, setIsSubmittingConsent] = useState(false);
   const [surveyResponses, setSurveyResponses] = useState<Record<string, string>>({});
   const [surveyError, setSurveyError] = useState("");
+  const [surveyDraftSaveState, setSurveyDraftSaveState] = useState<{
+    readonly status: SurveyDraftSaveStatus;
+    readonly savedAt?: string;
+  }>({ status: "idle" });
   const [isSubmittingSurvey, setIsSubmittingSurvey] = useState(false);
   const [isSurveyConfirmationOpen, setIsSurveyConfirmationOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -147,6 +154,8 @@ export function Participant() {
   const pendingInterviewAudioUploadsRef = useRef<PendingInterviewAudioUpload[]>([]);
   const unpairedParticipantAudioUploadsRef = useRef<PendingInterviewAudioUpload[]>([]);
   const unpairedParticipantTurnsRef = useRef<PendingInterviewTurn[]>([]);
+  const latestSurveyResponsesRef = useRef<Record<string, string>>({});
+  const lastPersistedSurveyDraftSnapshotRef = useRef<string | undefined>(undefined);
   const [interviewResponseMode, setInterviewResponseMode] = useState<InterviewResponseMode>("natural");
   const interviewResponseModeRef = useRef<InterviewResponseMode>("natural");
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
@@ -197,16 +206,89 @@ export function Participant() {
     }
 
     const surveyVersion = accessState.surveyVersion;
+    const accessToken = getParticipantAccessTokenFromPath();
+    const questions = getSurveyQuestions(surveyVersion);
+    const restoredDraft = accessToken
+      ? readStoredSurveyDraft(getSurveyDraftStorage(), accessToken, surveyVersion.id, questions)
+      : undefined;
 
     setSurveyResponses((currentResponses) => {
-      const nextResponses = { ...currentResponses };
+      const nextResponses = createSurveyResponsesForVersion(surveyVersion, currentResponses, restoredDraft?.responses);
 
-      for (const question of getSurveyQuestions(surveyVersion)) {
-        nextResponses[question.id] ??= "";
-      }
+      lastPersistedSurveyDraftSnapshotRef.current = createSurveyDraftSnapshot(nextResponses, questions);
 
       return nextResponses;
     });
+
+    if (restoredDraft) {
+      setSurveyDraftSaveState({ status: "restored", savedAt: restoredDraft.savedAt });
+    }
+  }, [accessState]);
+
+  useEffect(() => {
+    latestSurveyResponsesRef.current = surveyResponses;
+  }, [surveyResponses]);
+
+  useEffect(() => {
+    if (!shouldAutosaveSurveyDraft(accessState)) {
+      return;
+    }
+
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    if (!accessToken) {
+      return;
+    }
+
+    const surveyVersion = accessState.surveyVersion;
+    const questions = getSurveyQuestions(surveyVersion);
+    const snapshot = createSurveyDraftSnapshot(surveyResponses, questions);
+
+    if (snapshot === lastPersistedSurveyDraftSnapshotRef.current) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSurveyDraftSaveState({ status: "saving" });
+      const result = persistSurveyDraft(getSurveyDraftStorage(), accessToken, surveyVersion.id, questions, surveyResponses);
+
+      if (result.status === "saved" || result.status === "cleared") {
+        lastPersistedSurveyDraftSnapshotRef.current = snapshot;
+        setSurveyDraftSaveState(result.status === "saved" ? { status: "saved", savedAt: result.savedAt } : { status: "idle" });
+      } else {
+        setSurveyDraftSaveState({ status: "unavailable" });
+      }
+    }, surveyDraftAutosaveDelayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [accessState, surveyResponses]);
+
+  useEffect(() => {
+    if (!shouldAutosaveSurveyDraft(accessState)) {
+      return;
+    }
+
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    if (!accessToken) {
+      return;
+    }
+
+    const confirmedAccessToken = accessToken;
+    const surveyVersion = accessState.surveyVersion;
+    const questions = getSurveyQuestions(surveyVersion);
+
+    function persistLatestSurveyDraft() {
+      persistSurveyDraft(getSurveyDraftStorage(), confirmedAccessToken, surveyVersion.id, questions, latestSurveyResponsesRef.current);
+    }
+
+    window.addEventListener("pagehide", persistLatestSurveyDraft);
+    window.addEventListener("beforeunload", persistLatestSurveyDraft);
+
+    return () => {
+      window.removeEventListener("pagehide", persistLatestSurveyDraft);
+      window.removeEventListener("beforeunload", persistLatestSurveyDraft);
+    };
   }, [accessState]);
 
   useEffect(() => {
@@ -774,7 +856,7 @@ export function Participant() {
         body: JSON.stringify({
           responses: questions.map((question) => ({
             surveyQuestionId: question.id,
-            responseText: surveyResponses[question.id]
+            responseText: surveyResponses[question.id] ?? ""
           }))
         })
       });
@@ -787,6 +869,9 @@ export function Participant() {
         throw new Error(payload.message ?? "Unable to submit survey.");
       }
 
+      clearStoredSurveyDraft(getSurveyDraftStorage(), accessToken, accessState.surveyVersion.id);
+      lastPersistedSurveyDraftSnapshotRef.current = undefined;
+      setSurveyDraftSaveState({ status: "idle" });
       setIsSurveyConfirmationOpen(false);
       setAccessState({ status: "ready", run: payload.run });
     } catch (error) {
@@ -869,6 +954,7 @@ export function Participant() {
           isConfirmationOpen={isSurveyConfirmationOpen}
           isSubmittingSurvey={isSubmittingSurvey}
           layoutItems={getSurveyLayoutItems(accessState.surveyVersion)}
+          surveyDraftSaveState={surveyDraftSaveState}
           surveyError={surveyError}
           surveyResponses={surveyResponses}
           onCancelSubmit={() => setIsSurveyConfirmationOpen(false)}
@@ -2550,6 +2636,7 @@ export function ParticipantSurveyScreen({
   onChangeResponse,
   onConfirmSubmit,
   onSubmit,
+  surveyDraftSaveState,
   surveyError,
   surveyResponses
 }: {
@@ -2560,9 +2647,15 @@ export function ParticipantSurveyScreen({
   readonly onChangeResponse: (questionId: string, value: string) => void;
   readonly onConfirmSubmit: () => void;
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  readonly surveyDraftSaveState: {
+    readonly status: SurveyDraftSaveStatus;
+    readonly savedAt?: string;
+  };
   readonly surveyError: string;
   readonly surveyResponses: Record<string, string>;
 }) {
+  const draftStatusLabel = getSurveyDraftStatusLabel(surveyDraftSaveState);
+
   return (
     <main className="app-shell participant-shell">
       <section className="workspace-panel participant-survey-panel" aria-labelledby="participant-title">
@@ -2598,6 +2691,11 @@ export function ParticipantSurveyScreen({
               )
             )}
           </div>
+          {draftStatusLabel ? (
+            <p aria-live="polite" className="participant-survey-draft-status">
+              {draftStatusLabel}
+            </p>
+          ) : null}
           {surveyError ? <p className="form-error">{surveyError}</p> : null}
           <button className="primary-button" disabled={isSubmittingSurvey} type="submit">
             {isSubmittingSurvey ? "Submitting survey" : "Submit survey"}
@@ -3139,6 +3237,186 @@ function getSurveyQuestions(surveyVersion: SurveyVersion) {
       ? [item.question]
       : item.group.questions.slice().sort((left, right) => left.sortOrder - right.sortOrder)
   );
+}
+
+function shouldAutosaveSurveyDraft(
+  accessState: ParticipantAccessState
+): accessState is Extract<ParticipantAccessState, { status: "ready" }> & { readonly surveyVersion: SurveyVersion } {
+  return (
+    accessState.status === "ready" &&
+    Boolean(accessState.surveyVersion) &&
+    (accessState.run.status === "consented" || accessState.run.status === "survey_in_progress")
+  );
+}
+
+function getSurveyDraftStorage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function createSurveyResponsesForVersion(
+  surveyVersion: SurveyVersion,
+  currentResponses: Record<string, string>,
+  restoredResponses: Record<string, string> = {}
+) {
+  const nextResponses: Record<string, string> = {};
+
+  for (const question of getSurveyQuestions(surveyVersion)) {
+    nextResponses[question.id] = currentResponses[question.id] ?? restoredResponses[question.id] ?? "";
+  }
+
+  return nextResponses;
+}
+
+type SurveyDraftStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
+
+interface StoredSurveyDraft {
+  readonly surveyVersionId: string;
+  readonly responses: Record<string, string>;
+  readonly savedAt: string;
+}
+
+export function createSurveyDraftStorageKey(accessToken: string, surveyVersionId: string) {
+  return `${surveyDraftStorageKeyPrefix}:${encodeURIComponent(accessToken)}:${encodeURIComponent(surveyVersionId)}`;
+}
+
+export function readStoredSurveyDraft(
+  storage: SurveyDraftStorage | undefined,
+  accessToken: string,
+  surveyVersionId: string,
+  questions: readonly Pick<SurveyQuestion, "id">[]
+): StoredSurveyDraft | undefined {
+  if (!storage) {
+    return undefined;
+  }
+
+  try {
+    const rawValue = storage.getItem(createSurveyDraftStorageKey(accessToken, surveyVersionId));
+
+    if (!rawValue) {
+      return undefined;
+    }
+
+    const parsedValue = JSON.parse(rawValue) as Partial<StoredSurveyDraft>;
+
+    if (!parsedValue || parsedValue.surveyVersionId !== surveyVersionId || typeof parsedValue.savedAt !== "string") {
+      return undefined;
+    }
+
+    const responses = normalizeSurveyDraftResponses(parsedValue.responses, questions);
+
+    if (!hasAnySurveyDraftResponse(responses)) {
+      return undefined;
+    }
+
+    return {
+      surveyVersionId,
+      responses,
+      savedAt: parsedValue.savedAt
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function persistSurveyDraft(
+  storage: SurveyDraftStorage | undefined,
+  accessToken: string,
+  surveyVersionId: string,
+  questions: readonly Pick<SurveyQuestion, "id">[],
+  responses: Record<string, string>,
+  now: () => Date = () => new Date()
+): { readonly status: "saved"; readonly savedAt: string } | { readonly status: "cleared" } | { readonly status: "unavailable" } {
+  if (!storage) {
+    return { status: "unavailable" };
+  }
+
+  const key = createSurveyDraftStorageKey(accessToken, surveyVersionId);
+  const normalizedResponses = normalizeSurveyDraftResponses(responses, questions);
+
+  try {
+    if (!hasAnySurveyDraftResponse(normalizedResponses)) {
+      storage.removeItem(key);
+      return { status: "cleared" };
+    }
+
+    const savedAt = now().toISOString();
+
+    storage.setItem(
+      key,
+      JSON.stringify({
+        surveyVersionId,
+        responses: normalizedResponses,
+        savedAt
+      })
+    );
+
+    return { status: "saved", savedAt };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+function clearStoredSurveyDraft(storage: SurveyDraftStorage | undefined, accessToken: string, surveyVersionId: string) {
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.removeItem(createSurveyDraftStorageKey(accessToken, surveyVersionId));
+  } catch {
+    return;
+  }
+}
+
+export function normalizeSurveyDraftResponses(
+  responses: unknown,
+  questions: readonly Pick<SurveyQuestion, "id">[]
+): Record<string, string> {
+  const normalizedResponses: Record<string, string> = {};
+  const responseRecord = responses && typeof responses === "object" && !Array.isArray(responses) ? responses : {};
+
+  for (const question of questions) {
+    const value = (responseRecord as Record<string, unknown>)[question.id];
+
+    normalizedResponses[question.id] = typeof value === "string" ? value.slice(0, 20000) : "";
+  }
+
+  return normalizedResponses;
+}
+
+export function createSurveyDraftSnapshot(
+  responses: Record<string, string>,
+  questions: readonly Pick<SurveyQuestion, "id">[]
+) {
+  return JSON.stringify(normalizeSurveyDraftResponses(responses, questions));
+}
+
+function hasAnySurveyDraftResponse(responses: Record<string, string>) {
+  return Object.values(responses).some((response) => response.trim());
+}
+
+function getSurveyDraftStatusLabel(state: { readonly status: SurveyDraftSaveStatus; readonly savedAt?: string }) {
+  if (state.status === "restored") {
+    return "Restored saved draft";
+  }
+
+  if (state.status === "saving") {
+    return "Saving draft";
+  }
+
+  if (state.status === "saved") {
+    return "Draft saved locally";
+  }
+
+  if (state.status === "unavailable") {
+    return "Draft autosave is unavailable in this browser";
+  }
+
+  return "";
 }
 
 function getParticipantAccessTokenFromPath() {

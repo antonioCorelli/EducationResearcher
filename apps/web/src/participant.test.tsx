@@ -6,10 +6,15 @@ import {
   ParticipantInterviewScreen,
   createInterviewArtifactBatches,
   createInterviewAudioUploadHeaders,
+  createSurveyDraftStorageKey,
+  createSurveyDraftSnapshot,
   createRealtimeResponseModeSessionUpdate,
   createRealtimeTypedAnswerEvents,
   getSupportedInterviewAudioMimeType,
+  normalizeSurveyDraftResponses,
+  persistSurveyDraft,
   parseRealtimeAiTranscriptUpdate,
+  readStoredSurveyDraft,
   shouldShowInterviewCardBackButton,
   shouldNoticeStudentPause,
   shouldPausePushToTalkForAiSpeech,
@@ -39,6 +44,7 @@ describe("ParticipantSurveyScreen", () => {
         isConfirmationOpen
         isSubmittingSurvey={false}
         layoutItems={surveyLayoutItems}
+        surveyDraftSaveState={{ status: "idle" }}
         surveyError=""
         surveyResponses={{ survey_question_001: "Working through examples helped." }}
         onCancelSubmit={noop}
@@ -61,6 +67,7 @@ describe("ParticipantSurveyScreen", () => {
         isConfirmationOpen={false}
         isSubmittingSurvey={false}
         layoutItems={surveyLayoutItems}
+        surveyDraftSaveState={{ status: "saved", savedAt: "2026-06-11T12:00:00.000Z" }}
         surveyError=""
         surveyResponses={{ survey_question_001: "Working through examples helped." }}
         onCancelSubmit={noop}
@@ -71,10 +78,117 @@ describe("ParticipantSurveyScreen", () => {
     );
 
     expect(markup).toContain("Submit survey");
+    expect(markup).toContain("Draft saved locally");
     expect(markup).not.toContain("can no longer be edited");
     expect(markup).not.toContain("role=\"dialog\"");
   });
 });
+
+describe("survey draft persistence", () => {
+  it("keys drafts by participant token and immutable survey version", () => {
+    expect(createSurveyDraftStorageKey("token/with spaces", "survey_version_001")).toBe(
+      "education-researcher:participant-survey-draft:v1:token%2Fwith%20spaces:survey_version_001"
+    );
+  });
+
+  it("normalizes drafts to known survey questions only", () => {
+    expect(
+      normalizeSurveyDraftResponses(
+        {
+          survey_question_001: "A saved answer",
+          unknown_question: "Unexpected",
+          survey_question_002: 42
+        },
+        [{ id: "survey_question_001" }, { id: "survey_question_002" }]
+      )
+    ).toEqual({
+      survey_question_001: "A saved answer",
+      survey_question_002: ""
+    });
+  });
+
+  it("persists and restores a partial survey draft", () => {
+    const storage = new FakeStorage();
+    const result = persistSurveyDraft(
+      storage,
+      "participant_token_001",
+      "survey_version_active",
+      [{ id: "survey_question_001" }, { id: "survey_question_002" }],
+      {
+        survey_question_001: "First answer",
+        survey_question_002: ""
+      },
+      () => new Date("2026-06-11T12:00:00.000Z")
+    );
+
+    expect(result).toEqual({ status: "saved", savedAt: "2026-06-11T12:00:00.000Z" });
+    expect(
+      readStoredSurveyDraft(storage, "participant_token_001", "survey_version_active", [
+        { id: "survey_question_001" },
+        { id: "survey_question_002" }
+      ])
+    ).toEqual({
+      surveyVersionId: "survey_version_active",
+      savedAt: "2026-06-11T12:00:00.000Z",
+      responses: {
+        survey_question_001: "First answer",
+        survey_question_002: ""
+      }
+    });
+  });
+
+  it("ignores drafts from another survey version and clears empty drafts", () => {
+    const storage = new FakeStorage();
+    const draftKey = createSurveyDraftStorageKey("participant_token_001", "survey_version_active");
+
+    storage.setItem(
+      draftKey,
+      JSON.stringify({
+        surveyVersionId: "survey_version_old",
+        savedAt: "2026-06-11T12:00:00.000Z",
+        responses: {
+          survey_question_001: "Old answer"
+        }
+      })
+    );
+
+    expect(readStoredSurveyDraft(storage, "participant_token_001", "survey_version_active", [{ id: "survey_question_001" }])).toBeUndefined();
+    expect(
+      persistSurveyDraft(storage, "participant_token_001", "survey_version_active", [{ id: "survey_question_001" }], {
+        survey_question_001: "   "
+      })
+    ).toEqual({ status: "cleared" });
+    expect(storage.getItem(draftKey)).toBeNull();
+  });
+
+  it("creates stable draft snapshots in survey question order", () => {
+    expect(
+      createSurveyDraftSnapshot(
+        {
+          survey_question_002: "Second",
+          survey_question_001: "First"
+        },
+        [{ id: "survey_question_001" }, { id: "survey_question_002" }]
+      )
+    ).toBe('{"survey_question_001":"First","survey_question_002":"Second"}');
+  });
+});
+
+class FakeStorage {
+  private readonly values = new Map<string, string>();
+
+  getItem(key: string) {
+    return this.values.get(key) ?? null;
+  }
+
+  removeItem(key: string) {
+    this.values.delete(key);
+  }
+
+  setItem(key: string, value: string) {
+    this.values.set(key, value);
+  }
+}
 
 describe("ParticipantInterviewScreen", () => {
   it("starts with a low-friction onboarding flow before the interview begins", () => {
