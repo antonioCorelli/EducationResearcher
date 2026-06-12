@@ -94,11 +94,13 @@ describe("researcher setup tab information", () => {
     const markup = renderToStaticMarkup(
       <ResearcherInterview
         activeStudySetupTab="interview"
+        allowWrittenInterviewResponses
         interviewerInstructions="Clarify where learners got stuck and elicit concrete examples."
         isSavingStudy={false}
         maxInterviewMinutes={45}
         selectedStudy={fixtureStudy}
         studyError=""
+        onAllowWrittenInterviewResponsesChange={noop}
         onInterviewerInstructionsChange={noop}
         onMaxInterviewMinutesChange={noop}
         onSaveStudy={noop}
@@ -110,6 +112,8 @@ describe("researcher setup tab information", () => {
     expect(markup).toContain("Interviewer instructions");
     expect(markup).toContain("concepts to clarify");
     expect(markup).toContain("Interviewer persona");
+    expect(markup).toContain("Allow written responses in interviews");
+    expect(markup).toContain("checked");
     expect(markup).toContain("Locked Persona Version 1");
     expect(markup).toContain("V1 default research interviewer");
   });

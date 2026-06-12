@@ -115,6 +115,7 @@ function createFixtureStudy(overrides: Partial<StudyShell> = {}): StudyShell {
     interviewerInstructions: "Clarify learner reasoning and prompt for concrete examples.",
     defaultFreshnessDays: 14,
     defaultMaxInterviewMinutes: 45,
+    allowWrittenInterviewResponses: true,
     activeConsentVersionId: undefined,
     activeSurveyVersionId: undefined,
     activePersonaVersionId: "persona_version_v1_default_001",
@@ -143,6 +144,7 @@ function createFixtureRun(overrides: Partial<Run> = {}): Run {
     objectiveVersionIds: ["objective_version_001"],
     freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
     maxInterviewMinutes: 45,
+    allowWrittenInterviewResponses: true,
     status: "created",
     currentRunForSlot: true,
     createdAt: "2026-05-06T12:00:00.000Z",
@@ -472,6 +474,7 @@ describe("participant routes", () => {
         status: "created",
         freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
         maxInterviewMinutes: 45,
+        allowWrittenInterviewResponses: true,
         remainingInterviewSeconds: 2700
       },
       consentVersion: {
@@ -1270,6 +1273,7 @@ describe("participant routes", () => {
           status,
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
           maxInterviewMinutes: 45,
+          allowWrittenInterviewResponses: true,
           remainingInterviewSeconds: 2700
         }
       });
@@ -1311,6 +1315,7 @@ describe("researcher study shell routes", () => {
         interviewerInstructions: "Clarify misconceptions and elicit concrete examples.",
         defaultFreshnessDays: 14,
         defaultMaxInterviewMinutes: 45,
+        allowWrittenInterviewResponses: true,
         activePersonaVersionId: "persona_version_v1_default_001",
         persona: {
           name: "v1_default",
@@ -1336,7 +1341,8 @@ describe("researcher study shell routes", () => {
         action: "create",
         metadata: {
           defaultFreshnessDays: 14,
-          defaultMaxInterviewMinutes: 45
+          defaultMaxInterviewMinutes: 45,
+          allowWrittenInterviewResponses: true
         }
       })
     ]);
@@ -1344,7 +1350,7 @@ describe("researcher study shell routes", () => {
     await server.close();
   });
 
-  it("edits title, description, interviewer instructions, freshness days, and max interview minutes", async () => {
+  it("edits title, description, interviewer instructions, freshness days, max interview minutes, and written interview responses", async () => {
     const store = new InMemoryStudyShellStore([createFixtureStudy()]);
     const operationsStore = new InMemoryOperationalEventStore();
     const server = buildServer({
@@ -1364,7 +1370,8 @@ describe("researcher study shell routes", () => {
         description: " Updated study context for participants and researchers. ",
         interviewerInstructions: " Clarify key reasoning gaps and prompt for specific experiences. ",
         defaultFreshnessDays: 21,
-        defaultMaxInterviewMinutes: 30
+        defaultMaxInterviewMinutes: 30,
+        allowWrittenInterviewResponses: false
       }
     });
 
@@ -1377,6 +1384,7 @@ describe("researcher study shell routes", () => {
         interviewerInstructions: "Clarify key reasoning gaps and prompt for specific experiences.",
         defaultFreshnessDays: 21,
         defaultMaxInterviewMinutes: 30,
+        allowWrittenInterviewResponses: false,
         activePersonaVersionId: "persona_version_v1_default_001",
         persona: {
           locked: true
@@ -1393,7 +1401,8 @@ describe("researcher study shell routes", () => {
         metadata: {
           accessPath: "owner",
           defaultFreshnessDays: 21,
-          defaultMaxInterviewMinutes: 30
+          defaultMaxInterviewMinutes: 30,
+          allowWrittenInterviewResponses: false
         }
       })
     ]);
@@ -2065,6 +2074,7 @@ describe("researcher run routes", () => {
           interviewerInstructions: "Clarify learner reasoning and prompt for concrete examples.",
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
           maxInterviewMinutes: 45,
+          allowWrittenInterviewResponses: true,
           status: "created",
           currentRunForSlot: true,
           participantAccessUrl:
@@ -2109,6 +2119,7 @@ describe("researcher run routes", () => {
       objectiveVersionIds: ["objective_version_old"],
       freshnessDeadlineAt: "2026-05-12T12:00:00.000Z",
       maxInterviewMinutes: 45,
+      allowWrittenInterviewResponses: true,
       status: "scored",
       currentRunForSlot: true,
       createdAt: "2026-05-01T12:00:00.000Z",
@@ -2161,6 +2172,7 @@ describe("researcher run routes", () => {
       objectiveVersionIds: ["objective_version_001"],
       freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
       maxInterviewMinutes: 45,
+      allowWrittenInterviewResponses: true,
       status: "technical_interruption",
       currentRunForSlot: true,
       createdAt: "2026-05-06T12:00:00.000Z",

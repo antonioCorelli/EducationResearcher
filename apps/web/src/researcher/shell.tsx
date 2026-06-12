@@ -7,7 +7,8 @@ export const defaultStudyShellForm = {
   studyDescription: "",
   interviewerInstructions: "",
   freshnessDays: 14,
-  maxInterviewMinutes: 45
+  maxInterviewMinutes: 45,
+  allowWrittenInterviewResponses: true
 } as const;
 
 export const defaultPersonaStylePrompt =
@@ -26,7 +27,9 @@ export function createStudyShellForm(study: StudyShell | undefined) {
     studyDescription: study?.description ?? defaultStudyShellForm.studyDescription,
     interviewerInstructions: study?.interviewerInstructions ?? defaultStudyShellForm.interviewerInstructions,
     freshnessDays: study?.defaultFreshnessDays ?? defaultStudyShellForm.freshnessDays,
-    maxInterviewMinutes: study?.defaultMaxInterviewMinutes ?? defaultStudyShellForm.maxInterviewMinutes
+    maxInterviewMinutes: study?.defaultMaxInterviewMinutes ?? defaultStudyShellForm.maxInterviewMinutes,
+    allowWrittenInterviewResponses:
+      study?.allowWrittenInterviewResponses ?? defaultStudyShellForm.allowWrittenInterviewResponses
   };
 }
 

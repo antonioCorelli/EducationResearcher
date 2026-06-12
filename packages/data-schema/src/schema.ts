@@ -153,6 +153,7 @@ export const DATA_DOMAIN_TABLES = [
           "title",
           "defaultFreshnessDays",
           "defaultMaxInterviewMinutes",
+          "allowWrittenInterviewResponses",
           "activePersonaVersionId"
         ],
         statusAttributes: ["status"],
@@ -403,6 +404,7 @@ export const DATA_DOMAIN_TABLES = [
           "objectiveVersionIds",
           "freshnessDeadlineAt",
           "maxInterviewMinutes",
+          "allowWrittenInterviewResponses",
           "status",
           "currentRunForSlot"
         ],

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode, type UIEvent } from "react";
 
 const serviceBaseUrl = import.meta.env.VITE_SERVICE_BASE_URL ?? "http://127.0.0.1:4000";
 
@@ -64,6 +64,7 @@ interface ParticipantRunSummary {
   readonly status: RunStatus;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
+  readonly allowWrittenInterviewResponses: boolean;
   readonly remainingInterviewSeconds: number;
 }
 
@@ -91,7 +92,6 @@ type InterviewUiState =
   | "student_paused"
   | "transcript_review"
   | "paused"
-  | "break_prompt"
   | "completed";
 type RealtimeConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
 type RealtimeVoiceActivity = "idle" | "ai_speaking" | "participant_speaking";
@@ -123,6 +123,7 @@ interface RealtimeVoiceSession {
 export function Participant() {
   const [accepted, setAccepted] = useState(false);
   const [signatureText, setSignatureText] = useState("");
+  const [hasScrolledConsentText, setHasScrolledConsentText] = useState(false);
   const [consentError, setConsentError] = useState("");
   const [isSubmittingConsent, setIsSubmittingConsent] = useState(false);
   const [surveyResponses, setSurveyResponses] = useState<Record<string, string>>({});
@@ -228,6 +229,12 @@ export function Participant() {
   useEffect(() => {
     latestSurveyResponsesRef.current = surveyResponses;
   }, [surveyResponses]);
+
+  useEffect(() => {
+    if (accessState.status === "ready" && accessState.run.status === "created") {
+      setHasScrolledConsentText(false);
+    }
+  }, [accessState]);
 
   useEffect(() => {
     if (!shouldAutosaveSurveyDraft(accessState)) {
@@ -780,6 +787,11 @@ export function Participant() {
       return;
     }
 
+    if (!hasScrolledConsentText) {
+      setConsentError("Please review the full consent form before continuing.");
+      return;
+    }
+
     setIsSubmittingConsent(true);
 
     try {
@@ -905,43 +917,19 @@ export function Participant() {
   if (accessState.status === "ready") {
     if (accessState.run.status === "created" && accessState.consentVersion) {
       return (
-        <main className="app-shell participant-shell">
-          <section className="workspace-panel participant-consent-panel" aria-labelledby="participant-title">
-            <p className="eyebrow">Participant consent</p>
-            <h1 id="participant-title">Study consent</h1>
-            <div className="participant-consent-text">{accessState.consentVersion.consentText}</div>
-            <form className="participant-consent-form" onSubmit={submitConsent}>
-              {accessState.consentVersion.consentMethod === "checkmark" ? (
-                <label className="participant-consent-option">
-                  <input
-                    checked={accepted}
-                    disabled={isSubmittingConsent}
-                    onChange={(event) => setAccepted(event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>I have read the consent information and agree to participate.</span>
-                </label>
-              ) : (
-                <label>
-                  Electronic signature
-                  <input
-                    autoComplete="name"
-                    disabled={isSubmittingConsent}
-                    maxLength={200}
-                    onChange={(event) => setSignatureText(event.target.value)}
-                    required
-                    type="text"
-                    value={signatureText}
-                  />
-                </label>
-              )}
-              {consentError ? <p className="form-error">{consentError}</p> : null}
-              <button className="primary-button" disabled={isSubmittingConsent} type="submit">
-                {isSubmittingConsent ? "Submitting consent" : "Continue"}
-              </button>
-            </form>
-          </section>
-        </main>
+        <ParticipantConsentScreen
+          accepted={accepted}
+          consentError={consentError}
+          consentMethod={accessState.consentVersion.consentMethod}
+          consentText={accessState.consentVersion.consentText}
+          hasScrolledConsentText={hasScrolledConsentText}
+          isSubmittingConsent={isSubmittingConsent}
+          signatureText={signatureText}
+          onAcceptedChange={setAccepted}
+          onConsentTextScrollStateChange={setHasScrolledConsentText}
+          onSignatureTextChange={setSignatureText}
+          onSubmit={submitConsent}
+        />
       );
     }
 
@@ -990,6 +978,7 @@ export function Participant() {
           realtimeConnectionState={realtimeConnectionState}
           realtimeVoiceActivity={realtimeVoiceActivity}
           remainingInterviewSeconds={accessState.run.remainingInterviewSeconds}
+          allowWrittenResponses={accessState.run.allowWrittenInterviewResponses}
           onComplete={() => void submitInterviewAction("complete")}
           onConfirmAnswer={confirmInterviewAnswer}
           onFinishPushToTalkAnswer={finishPushToTalkAnswer}
@@ -1028,8 +1017,102 @@ export function Participant() {
   );
 }
 
+export function ParticipantConsentScreen({
+  accepted,
+  consentError,
+  consentMethod,
+  consentText,
+  hasScrolledConsentText,
+  isSubmittingConsent,
+  signatureText,
+  onAcceptedChange,
+  onConsentTextScrollStateChange,
+  onSignatureTextChange,
+  onSubmit
+}: {
+  readonly accepted: boolean;
+  readonly consentError: string;
+  readonly consentMethod: ConsentMethod;
+  readonly consentText: string;
+  readonly hasScrolledConsentText: boolean;
+  readonly isSubmittingConsent: boolean;
+  readonly signatureText: string;
+  readonly onAcceptedChange: (accepted: boolean) => void;
+  readonly onConsentTextScrollStateChange: (hasScrolledConsentText: boolean) => void;
+  readonly onSignatureTextChange: (signatureText: string) => void;
+  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const consentTextRef = useRef<HTMLDivElement>(null);
+  const canSubmitConsent = hasScrolledConsentText && !isSubmittingConsent;
+
+  useEffect(() => {
+    const consentTextElement = consentTextRef.current;
+
+    if (consentTextElement && hasScrolledToConsentBottom(consentTextElement)) {
+      onConsentTextScrollStateChange(true);
+    }
+  }, [consentText, onConsentTextScrollStateChange]);
+
+  function handleConsentTextScroll(event: UIEvent<HTMLDivElement>) {
+    if (hasScrolledToConsentBottom(event.currentTarget)) {
+      onConsentTextScrollStateChange(true);
+    }
+  }
+
+  return (
+    <main className="app-shell participant-shell">
+      <section className="workspace-panel participant-consent-panel" aria-labelledby="participant-title">
+        <p className="eyebrow">Participant consent</p>
+        <h1 id="participant-title">Study consent</h1>
+        <div
+          className="participant-consent-text"
+          onScroll={handleConsentTextScroll}
+          ref={consentTextRef}
+          tabIndex={0}
+        >
+          {consentText}
+        </div>
+        <form className="participant-consent-form" onSubmit={onSubmit}>
+          {consentMethod === "checkmark" ? (
+            <label className="participant-consent-option">
+              <input
+                checked={accepted}
+                disabled={isSubmittingConsent}
+                onChange={(event) => onAcceptedChange(event.target.checked)}
+                type="checkbox"
+              />
+              <span>I have read the consent information and agree to participate.</span>
+            </label>
+          ) : (
+            <label>
+              Please sign below
+              <input
+                autoComplete="name"
+                disabled={isSubmittingConsent}
+                maxLength={200}
+                onChange={(event) => onSignatureTextChange(event.target.value)}
+                required
+                type="text"
+                value={signatureText}
+              />
+            </label>
+          )}
+          {!hasScrolledConsentText ? (
+            <p className="muted-copy field-hint">Review the full consent form to continue.</p>
+          ) : null}
+          {consentError ? <p className="form-error">{consentError}</p> : null}
+          <button className="primary-button" disabled={!canSubmitConsent} type="submit">
+            {isSubmittingConsent ? "Submitting consent" : "Continue"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
 export function ParticipantInterviewScreen({
   aiQuestion,
+  allowWrittenResponses = true,
   error,
   initialResponseMode,
   initialUiState,
@@ -1054,6 +1137,7 @@ export function ParticipantInterviewScreen({
   retryCount
 }: {
   readonly aiQuestion: string;
+  readonly allowWrittenResponses?: boolean;
   readonly error: string;
   readonly initialResponseMode?: InterviewResponseMode;
   readonly initialUiState?: InterviewUiState;
@@ -1079,7 +1163,9 @@ export function ParticipantInterviewScreen({
 }) {
   const isActive = mode === "active";
   const hasRecoverableFailure = isActive && realtimeConnectionState === "failed";
-  const [responseMode, setResponseMode] = useState<InterviewResponseMode>(initialResponseMode ?? "natural");
+  const [responseMode, setResponseMode] = useState<InterviewResponseMode>(
+    normalizeInterviewResponseModeForWrittenPermission(initialResponseMode ?? "natural", allowWrittenResponses)
+  );
   const [uiState, setUiState] = useState<InterviewUiState>(() =>
     normalizeInterviewUiStateForResponseMode(initialUiState ?? getInitialInterviewUiState(mode, responseMode), responseMode)
   );
@@ -1088,7 +1174,6 @@ export function ParticipantInterviewScreen({
   );
   const [voiceCaptureStatus, setVoiceCaptureStatus] = useState<VoiceCaptureStatus>("idle");
   const [voiceCaptureTranscript, setVoiceCaptureTranscript] = useState("");
-  const [answerCount, setAnswerCount] = useState(0);
   const [transcriptDraft, setTranscriptDraft] = useState(latestSpokenTranscript ?? "");
   const [typedDraft, setTypedDraft] = useState("");
   const [displayQuestion, setDisplayQuestion] = useState(getDisplayQuestionText(aiQuestion));
@@ -1125,9 +1210,7 @@ export function ParticipantInterviewScreen({
     uiState !== "completed" &&
     (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
   const canUseCardBackButton = shouldShowInterviewCardBackButton({
-    canReturnToPreviousCard,
-    lastVoiceResponseMode,
-    responseMode
+    canReturnToPreviousCard
   });
   const interviewLayoutClassName = shouldShowCurrentQuestion
     ? "interview-layout interview-layout-with-question"
@@ -1172,14 +1255,16 @@ export function ParticipantInterviewScreen({
           })
     );
 
-    interviewHistoryIndexRef.current = entry.index;
-    setCanReturnToPreviousCard(entry.index > 0);
-    replaceInterviewHistoryEntry(entry);
+    const normalizedEntry = normalizeInterviewHistoryEntryForWrittenPermission(entry, allowWrittenResponses);
 
-    if (entry.uiState !== uiState || entry.responseMode !== responseMode) {
-      setResponseMode(entry.responseMode);
-      onResponseModeChange(entry.responseMode);
-      setUiState(normalizeInterviewUiStateForResponseMode(entry.uiState, entry.responseMode));
+    interviewHistoryIndexRef.current = normalizedEntry.index;
+    setCanReturnToPreviousCard(normalizedEntry.index > 0);
+    replaceInterviewHistoryEntry(normalizedEntry);
+
+    if (normalizedEntry.uiState !== uiState || normalizedEntry.responseMode !== responseMode) {
+      setResponseMode(normalizedEntry.responseMode);
+      onResponseModeChange(normalizedEntry.responseMode);
+      setUiState(normalizeInterviewUiStateForResponseMode(normalizedEntry.uiState, normalizedEntry.responseMode));
     }
 
     function handleBrowserBack(event: PopStateEvent) {
@@ -1189,17 +1274,19 @@ export function ParticipantInterviewScreen({
         return;
       }
 
-      interviewHistoryIndexRef.current = historyEntry.index;
-      setCanReturnToPreviousCard(historyEntry.index > 0);
-      setResponseMode(historyEntry.responseMode);
-      onResponseModeChange(historyEntry.responseMode);
-      setUiState(normalizeInterviewUiStateForResponseMode(historyEntry.uiState, historyEntry.responseMode));
+      const normalizedHistoryEntry = normalizeInterviewHistoryEntryForWrittenPermission(historyEntry, allowWrittenResponses);
+
+      interviewHistoryIndexRef.current = normalizedHistoryEntry.index;
+      setCanReturnToPreviousCard(normalizedHistoryEntry.index > 0);
+      setResponseMode(normalizedHistoryEntry.responseMode);
+      onResponseModeChange(normalizedHistoryEntry.responseMode);
+      setUiState(normalizeInterviewUiStateForResponseMode(normalizedHistoryEntry.uiState, normalizedHistoryEntry.responseMode));
     }
 
     window.addEventListener("popstate", handleBrowserBack);
 
     return () => window.removeEventListener("popstate", handleBrowserBack);
-  }, [mode]);
+  }, [allowWrittenResponses, mode]);
 
   useEffect(() => {
     if (latestSpokenTranscript?.trim()) {
@@ -1285,6 +1372,17 @@ export function ParticipantInterviewScreen({
   ]);
 
   useEffect(() => {
+    if (allowWrittenResponses || responseMode !== "typing") {
+      return;
+    }
+
+    const nextResponseMode = lastVoiceResponseMode;
+    setResponseMode(nextResponseMode);
+    onResponseModeChange(nextResponseMode);
+    setUiState((currentState) => normalizeInterviewUiStateForResponseMode(currentState, nextResponseMode));
+  }, [allowWrittenResponses, lastVoiceResponseMode, onResponseModeChange, responseMode]);
+
+  useEffect(() => {
     if (!isPushToTalkAiSpeaking) {
       return;
     }
@@ -1321,16 +1419,11 @@ export function ParticipantInterviewScreen({
     }
 
     const timeout = window.setTimeout(() => {
-      setUiState(
-        normalizeInterviewUiStateForResponseMode(
-          answerCount > 0 && answerCount % 3 === 0 ? "break_prompt" : "ai_speaking",
-          responseMode
-        )
-      );
+      setUiState(normalizeInterviewUiStateForResponseMode("ai_speaking", responseMode));
     }, 850);
 
     return () => window.clearTimeout(timeout);
-  }, [answerCount, responseMode, uiState]);
+  }, [responseMode, uiState]);
 
   function startVoiceCapture() {
     clearVoiceCaptureTimeout();
@@ -1363,20 +1456,24 @@ export function ParticipantInterviewScreen({
     readonly nextUiState: InterviewUiState;
     readonly replace?: boolean;
   }) {
+    const normalizedNextResponseMode = normalizeInterviewResponseModeForWrittenPermission(
+      nextResponseMode,
+      allowWrittenResponses
+    );
     const nextIndex = replace ? interviewHistoryIndexRef.current : interviewHistoryIndexRef.current + 1;
-    const normalizedNextUiState = normalizeInterviewUiStateForResponseMode(nextUiState, nextResponseMode);
+    const normalizedNextUiState = normalizeInterviewUiStateForResponseMode(nextUiState, normalizedNextResponseMode);
     const nextEntry = createInterviewHistoryEntry({
       mode,
-      responseMode: nextResponseMode,
+      responseMode: normalizedNextResponseMode,
       uiState: normalizedNextUiState,
       index: nextIndex
     });
 
     interviewHistoryIndexRef.current = nextEntry.index;
     setCanReturnToPreviousCard(nextEntry.index > 0);
-    setResponseMode(nextResponseMode);
-    if (nextResponseMode !== responseMode) {
-      onResponseModeChange(nextResponseMode);
+    setResponseMode(normalizedNextResponseMode);
+    if (normalizedNextResponseMode !== responseMode) {
+      onResponseModeChange(normalizedNextResponseMode);
     }
     setUiState(normalizedNextUiState);
 
@@ -1460,7 +1557,6 @@ export function ParticipantInterviewScreen({
       onConfirmAnswer({ aiQuestion: displayQuestion, responseText: confirmedAnswer });
     }
 
-    setAnswerCount((count) => count + 1);
     setTranscriptDraft("");
     setTypedDraft("");
     setInterruptionNotice("");
@@ -1473,15 +1569,24 @@ export function ParticipantInterviewScreen({
   }
 
   function handleSelectResponseMode(nextResponseMode: InterviewResponseMode) {
-    setResponseMode(nextResponseMode);
-    onResponseModeChange(nextResponseMode);
+    const normalizedResponseMode = normalizeInterviewResponseModeForWrittenPermission(
+      nextResponseMode,
+      allowWrittenResponses
+    );
 
-    if (nextResponseMode !== "typing") {
-      setLastVoiceResponseMode(nextResponseMode);
+    setResponseMode(normalizedResponseMode);
+    onResponseModeChange(normalizedResponseMode);
+
+    if (normalizedResponseMode !== "typing") {
+      setLastVoiceResponseMode(normalizedResponseMode);
     }
   }
 
   function switchToTyping() {
+    if (!allowWrittenResponses) {
+      return;
+    }
+
     if (responseMode !== "typing") {
       setLastVoiceResponseMode(responseMode);
     }
@@ -1531,7 +1636,9 @@ export function ParticipantInterviewScreen({
             The interview may take up to {maxInterviewMinutes} minutes. You will need to stay connected to the internet during the interview.
           </p>
           <p>
-            You are always in control: you can pause, skip, redo, or type your answers at any time.
+            {allowWrittenResponses
+              ? "You are always in control: you can pause, skip, redo, or type your answers at any time."
+              : "You are always in control: you can pause, skip, or redo your answers at any time."}
           </p>
           <p>
             Thank you for taking part. Your voice matters, and we appreciate your contribution to this research.
@@ -1571,7 +1678,7 @@ export function ParticipantInterviewScreen({
               disabled={!hasCompletedVoiceCapture(voiceCaptureStatus)}
               onClick={() => {
                 stopVoiceCapture();
-                navigateToInterviewCard({ nextUiState: "mode_selection" });
+                navigateToInterviewCard({ nextResponseMode: "natural", nextUiState: "mode_selection" });
               }}
               type="button"
             >
@@ -1586,6 +1693,7 @@ export function ParticipantInterviewScreen({
       return (
         <InterviewStageCard eyebrow="Response mode" title="Choose how you want to answer">
           <InterviewResponseModeOptions
+            allowWrittenResponses={allowWrittenResponses}
             legendLabel="Response mode"
             responseMode={responseMode}
             onChange={handleSelectResponseMode}
@@ -1605,6 +1713,7 @@ export function ParticipantInterviewScreen({
         <InterviewStageCard eyebrow="Paused" title="Interview paused">
           <p>Take your time. Your interview is paused.</p>
           <InterviewResponseModeOptions
+            allowWrittenResponses={allowWrittenResponses}
             disabled={isActionPending}
             legendLabel="Resume response mode"
             responseMode={responseMode}
@@ -1643,26 +1752,14 @@ export function ParticipantInterviewScreen({
       );
     }
 
-    if (uiState === "break_prompt") {
-      return (
-        <InterviewStageCard eyebrow="Optional break" title="Would you like a short break?">
-          <p>You are doing fine. You can pause for a moment or keep going.</p>
-          <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
-            <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
-              Take a break
-            </button>
-            <button className="primary-button" onClick={() => navigateToInterviewCard({ nextUiState: "ai_speaking" })} type="button">
-              Keep going
-            </button>
-          </InterviewCardActions>
-        </InterviewStageCard>
-      );
-    }
-
     if (uiState === "student_paused") {
       return (
         <InterviewStageCard eyebrow="Your turn" title="Want to add anything?">
-          <p>We noticed a pause. You can continue, add more, redo, or type instead.</p>
+          <p>
+            {allowWrittenResponses
+              ? "We noticed a pause. You can continue, add more, redo, or type instead."
+              : "We noticed a pause. You can continue, add more, or redo."}
+          </p>
           <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Continue
@@ -1673,13 +1770,15 @@ export function ParticipantInterviewScreen({
             <button className="secondary-button" onClick={handleRedoAnswer} type="button">
               Redo
             </button>
-            <button
-              className="secondary-button"
-              onClick={switchToTyping}
-              type="button"
-            >
-              Type instead
-            </button>
+            {allowWrittenResponses ? (
+              <button
+                className="secondary-button"
+                onClick={switchToTyping}
+                type="button"
+              >
+                Type instead
+              </button>
+            ) : null}
           </InterviewCardActions>
         </InterviewStageCard>
       );
@@ -1702,16 +1801,18 @@ export function ParticipantInterviewScreen({
             <button className="secondary-button" onClick={handleRedoAnswer} type="button">
               Redo
             </button>
-            <button
-              className="secondary-button"
-              onClick={() => {
-                setTypedDraft(transcriptDraft);
-                navigateToInterviewCard({ nextResponseMode: "typing", nextUiState: "student_turn" });
-              }}
-              type="button"
-            >
-              Edit by typing
-            </button>
+            {allowWrittenResponses ? (
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setTypedDraft(transcriptDraft);
+                  navigateToInterviewCard({ nextResponseMode: "typing", nextUiState: "student_turn" });
+                }}
+                type="button"
+              >
+                Edit by typing
+              </button>
+            ) : null}
           </InterviewCardActions>
         </InterviewStageCard>
       );
@@ -1758,13 +1859,15 @@ export function ParticipantInterviewScreen({
             <button className="primary-button" onClick={handleFinishSpeaking} type="button">
               Stop Talking
             </button>
-            <button
-              className="secondary-button"
-              onClick={switchToTyping}
-              type="button"
-            >
-              Type instead
-            </button>
+            {allowWrittenResponses ? (
+              <button
+                className="secondary-button"
+                onClick={switchToTyping}
+                type="button"
+              >
+                Type instead
+              </button>
+            ) : null}
             <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
               Pause
             </button>
@@ -1797,13 +1900,15 @@ export function ParticipantInterviewScreen({
                 I'm done
               </button>
             ) : null}
-            <button
-              className="secondary-button"
-              onClick={switchToTyping}
-              type="button"
-            >
-              Type instead
-            </button>
+            {allowWrittenResponses ? (
+              <button
+                className="secondary-button"
+                onClick={switchToTyping}
+                type="button"
+              >
+                Type instead
+              </button>
+            ) : null}
             <button className="secondary-button" disabled={isActionPending} onClick={handlePause} type="button">
               Pause
             </button>
@@ -1899,6 +2004,10 @@ function hasCompletedVoiceCapture(status: VoiceCaptureStatus) {
   return status === "heard" || status === "captured";
 }
 
+function hasScrolledToConsentBottom(element: Pick<HTMLDivElement, "clientHeight" | "scrollHeight" | "scrollTop">) {
+  return element.scrollTop + element.clientHeight >= element.scrollHeight - 2;
+}
+
 const interviewResponseModes: readonly {
   readonly value: InterviewResponseMode;
   readonly label: string;
@@ -1986,20 +2095,26 @@ function InterviewCardActions({
 }
 
 function InterviewResponseModeOptions({
+  allowWrittenResponses,
   disabled = false,
   legendLabel,
   onChange,
   responseMode
 }: {
+  readonly allowWrittenResponses: boolean;
   readonly disabled?: boolean;
   readonly legendLabel: string;
   readonly onChange: (responseMode: InterviewResponseMode) => void;
   readonly responseMode: InterviewResponseMode;
 }) {
+  const options = allowWrittenResponses
+    ? interviewResponseModes
+    : interviewResponseModes.filter((option) => option.value !== "typing");
+
   return (
     <fieldset className="interview-mode-options">
       <legend className="visually-hidden">{legendLabel}</legend>
-      {interviewResponseModes.map((option) => (
+      {options.map((option) => (
         <label className="interview-mode-option" key={option.value}>
           <input
             checked={responseMode === option.value}
@@ -2085,7 +2200,6 @@ const interviewUiStates: readonly InterviewUiState[] = [
   "student_paused",
   "transcript_review",
   "paused",
-  "break_prompt",
   "completed"
 ];
 
@@ -2165,6 +2279,25 @@ function normalizeInterviewHistoryEntry(entry: InterviewHistoryEntry): Interview
   };
 }
 
+function normalizeInterviewHistoryEntryForWrittenPermission(
+  entry: InterviewHistoryEntry,
+  allowWrittenResponses: boolean
+): InterviewHistoryEntry {
+  const responseMode = normalizeInterviewResponseModeForWrittenPermission(entry.responseMode, allowWrittenResponses);
+
+  return normalizeInterviewHistoryEntry({
+    ...entry,
+    responseMode
+  });
+}
+
+function normalizeInterviewResponseModeForWrittenPermission(
+  responseMode: InterviewResponseMode,
+  allowWrittenResponses: boolean
+): InterviewResponseMode {
+  return !allowWrittenResponses && responseMode === "typing" ? "natural" : responseMode;
+}
+
 function normalizeInterviewUiStateForResponseMode(
   uiState: InterviewUiState,
   responseMode: InterviewResponseMode
@@ -2189,15 +2322,11 @@ function getInitialInterviewUiState(mode: InterviewMode, responseMode: Interview
 }
 
 export function shouldShowInterviewCardBackButton({
-  canReturnToPreviousCard,
-  lastVoiceResponseMode,
-  responseMode
+  canReturnToPreviousCard
 }: {
   readonly canReturnToPreviousCard: boolean;
-  readonly lastVoiceResponseMode: Exclude<InterviewResponseMode, "typing">;
-  readonly responseMode: InterviewResponseMode;
 }) {
-  return canReturnToPreviousCard && responseMode !== "push_to_talk" && lastVoiceResponseMode !== "push_to_talk";
+  return canReturnToPreviousCard;
 }
 
 function useElapsedSeconds(isActive: boolean) {

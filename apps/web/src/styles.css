@@ -1157,6 +1157,31 @@ h3 {
   text-transform: uppercase;
 }
 
+.settings-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #d7e0da;
+  border-radius: 6px;
+  background: #fbfcfa;
+  padding: 12px;
+}
+
+.settings-toggle input {
+  width: auto;
+  margin-top: 4px;
+}
+
+.settings-toggle span {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-toggle small {
+  color: #566173;
+}
+
 .study-setup-tabs {
   display: flex;
   flex-wrap: wrap;

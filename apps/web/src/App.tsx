@@ -47,6 +47,7 @@ export interface StudyShell {
   readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
+  readonly allowWrittenInterviewResponses?: boolean;
   readonly activeConsentVersionId?: string;
   readonly activeSurveyVersionId?: string;
   readonly activePersonaVersionId: string;
@@ -968,6 +969,9 @@ export function App() {
   const [interviewerInstructions, setInterviewerInstructions] = useState<string>(defaultStudyShellForm.interviewerInstructions);
   const [freshnessDays, setFreshnessDays] = useState<number>(defaultStudyShellForm.freshnessDays);
   const [maxInterviewMinutes, setMaxInterviewMinutes] = useState<number>(defaultStudyShellForm.maxInterviewMinutes);
+  const [allowWrittenInterviewResponses, setAllowWrittenInterviewResponses] = useState<boolean>(
+    defaultStudyShellForm.allowWrittenInterviewResponses
+  );
   const [studyError, setStudyError] = useState("");
   const [isSavingStudy, setIsSavingStudy] = useState(false);
   const [studyTitleFocusRequest, setStudyTitleFocusRequest] = useState(0);
@@ -1251,6 +1255,7 @@ export function App() {
     setInterviewerInstructions(studyShellForm.interviewerInstructions);
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
+    setAllowWrittenInterviewResponses(studyShellForm.allowWrittenInterviewResponses);
     setStudyError("");
     setParticipantCode("");
     setParticipantSlotCsv("");
@@ -1292,6 +1297,7 @@ export function App() {
     setInterviewerInstructions(studyShellForm.interviewerInstructions);
     setFreshnessDays(studyShellForm.freshnessDays);
     setMaxInterviewMinutes(studyShellForm.maxInterviewMinutes);
+    setAllowWrittenInterviewResponses(studyShellForm.allowWrittenInterviewResponses);
     setStudyError("");
     setParticipantCode("");
     setParticipantSlotCsv("");
@@ -1384,7 +1390,8 @@ export function App() {
             description: studyDescription,
             interviewerInstructions,
             defaultFreshnessDays: freshnessDays,
-            defaultMaxInterviewMinutes: maxInterviewMinutes
+            defaultMaxInterviewMinutes: maxInterviewMinutes,
+            allowWrittenInterviewResponses
           })
         }
       );
@@ -2556,11 +2563,13 @@ export function App() {
         interviewPanel={
           <ResearcherInterview
             activeStudySetupTab={activeStudySetupTab}
+            allowWrittenInterviewResponses={allowWrittenInterviewResponses}
             isSavingStudy={isSavingStudy}
             interviewerInstructions={interviewerInstructions}
             maxInterviewMinutes={maxInterviewMinutes}
             selectedStudy={selectedStudy}
             studyError={studyError}
+            onAllowWrittenInterviewResponsesChange={setAllowWrittenInterviewResponses}
             onInterviewerInstructionsChange={setInterviewerInstructions}
             onMaxInterviewMinutesChange={setMaxInterviewMinutes}
             onSaveStudy={handleSaveStudy}

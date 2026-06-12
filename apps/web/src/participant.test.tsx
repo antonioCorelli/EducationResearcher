@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  ParticipantConsentScreen,
   ParticipantSurveyScreen,
   ParticipantInterviewScreen,
   createInterviewArtifactBatches,
@@ -36,6 +37,53 @@ const surveyLayoutItems = [
     }
   }
 ] as const;
+
+describe("ParticipantConsentScreen", () => {
+  it("asks signature participants to sign below and keeps continue disabled before the consent text is fully reviewed", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantConsentScreen
+        accepted={false}
+        consentError=""
+        consentMethod="electronic_signature"
+        consentText="Consent text"
+        hasScrolledConsentText={false}
+        isSubmittingConsent={false}
+        signatureText=""
+        onAcceptedChange={noop}
+        onConsentTextScrollStateChange={noop}
+        onSignatureTextChange={noop}
+        onSubmit={noop}
+      />
+    );
+
+    expect(markup).toContain("Please sign below");
+    expect(markup).not.toContain("Electronic signature");
+    expect(markup).toContain("Review the full consent form to continue.");
+    expect(markup).toContain("<button class=\"primary-button\" disabled=\"\" type=\"submit\">Continue</button>");
+  });
+
+  it("enables consent submission once the consent text has been reviewed", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantConsentScreen
+        accepted
+        consentError=""
+        consentMethod="checkmark"
+        consentText="Consent text"
+        hasScrolledConsentText
+        isSubmittingConsent={false}
+        signatureText=""
+        onAcceptedChange={noop}
+        onConsentTextScrollStateChange={noop}
+        onSignatureTextChange={noop}
+        onSubmit={noop}
+      />
+    );
+
+    expect(markup).toContain("I have read the consent information and agree to participate.");
+    expect(markup).toContain("<button class=\"primary-button\" type=\"submit\">Continue</button>");
+    expect(markup).not.toContain("Review the full consent form to continue.");
+  });
+});
 
 describe("ParticipantSurveyScreen", () => {
   it("asks participants to confirm before locking survey answers and moving to the interview", () => {
@@ -387,6 +435,66 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toContain("Resume interview");
   });
 
+  it("selects Talk naturally by default in the response mode step", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialUiState="mode_selection"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="ready"
+        realtimeConnectionState="idle"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toMatch(/checked="" value="natural"/);
+    expect(markup).not.toMatch(/checked="" value="push_to_talk"/);
+    expect(markup).not.toMatch(/checked="" value="typing"/);
+  });
+
+  it("hides written response options when the run does not allow typed interview answers", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        allowWrittenResponses={false}
+        error=""
+        initialResponseMode="typing"
+        initialUiState="mode_selection"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="ready"
+        realtimeConnectionState="idle"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Talk naturally");
+    expect(markup).toContain("Press to record each answer");
+    expect(markup).not.toContain("Type my answers");
+    expect(markup).not.toContain("Type your answer");
+    expect(markup).not.toContain("Type instead");
+  });
+
   it("shows the paused screen immediately while a natural pause action is pending", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
@@ -419,28 +527,17 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("What part of your survey answer would you like to explain more?");
   });
 
-  it("does not show card back controls in push-to-talk flows", () => {
+  it("shows card back controls whenever interview history can return to the previous card", () => {
     expect(
       shouldShowInterviewCardBackButton({
-        canReturnToPreviousCard: true,
-        lastVoiceResponseMode: "push_to_talk",
-        responseMode: "push_to_talk"
-      })
-    ).toBe(false);
-    expect(
-      shouldShowInterviewCardBackButton({
-        canReturnToPreviousCard: true,
-        lastVoiceResponseMode: "push_to_talk",
-        responseMode: "typing"
-      })
-    ).toBe(false);
-    expect(
-      shouldShowInterviewCardBackButton({
-        canReturnToPreviousCard: true,
-        lastVoiceResponseMode: "natural",
-        responseMode: "natural"
+        canReturnToPreviousCard: true
       })
     ).toBe(true);
+    expect(
+      shouldShowInterviewCardBackButton({
+        canReturnToPreviousCard: false
+      })
+    ).toBe(false);
   });
 
   it("parses realtime AI audio transcript deltas without exposing participant transcripts", () => {

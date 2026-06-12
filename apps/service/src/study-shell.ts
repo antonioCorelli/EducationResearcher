@@ -33,6 +33,7 @@ export interface StudyShell {
   readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
+  readonly allowWrittenInterviewResponses: boolean;
   readonly activeConsentVersionId?: string;
   readonly activeSurveyVersionId?: string;
   readonly activePersonaVersionId: string;
@@ -54,6 +55,7 @@ export interface CreateStudyShellInput {
   readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
+  readonly allowWrittenInterviewResponses?: boolean;
 }
 
 export interface UpdateStudyShellInput {
@@ -62,6 +64,7 @@ export interface UpdateStudyShellInput {
   readonly interviewerInstructions?: string;
   readonly defaultFreshnessDays?: number;
   readonly defaultMaxInterviewMinutes?: number;
+  readonly allowWrittenInterviewResponses?: boolean;
 }
 
 export interface StudyShellStore {
@@ -85,6 +88,7 @@ interface StudyShellItem {
   readonly interviewerGoals?: string;
   readonly defaultFreshnessDays: number;
   readonly defaultMaxInterviewMinutes: number;
+  readonly allowWrittenInterviewResponses?: boolean;
   readonly activeConsentVersionId?: string;
   readonly activeSurveyVersionId?: string;
   readonly activePersonaVersionId: string;
@@ -145,6 +149,7 @@ export class StudyShellService {
         1,
         180
       ),
+      allowWrittenInterviewResponses: input.allowWrittenInterviewResponses ?? true,
       activePersonaVersionId: V1_DEFAULT_PERSONA.id,
       persona: toLockedPersona(),
       status: "active",
@@ -172,6 +177,10 @@ export class StudyShellService {
         input.defaultMaxInterviewMinutes === undefined
           ? study.defaultMaxInterviewMinutes
           : parseIntegerSetting(input.defaultMaxInterviewMinutes, "max interview minutes", undefined, 1, 180),
+      allowWrittenInterviewResponses:
+        input.allowWrittenInterviewResponses === undefined
+          ? study.allowWrittenInterviewResponses
+          : input.allowWrittenInterviewResponses,
       activePersonaVersionId: study.activePersonaVersionId,
       persona: study.persona,
       updatedAt: this.now().toISOString()
@@ -483,6 +492,7 @@ function toStudyShellItem(study: StudyShell): StudyShellItem {
     ...(study.interviewerInstructions ? { interviewerInstructions: study.interviewerInstructions } : {}),
     defaultFreshnessDays: study.defaultFreshnessDays,
     defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes,
+    allowWrittenInterviewResponses: study.allowWrittenInterviewResponses,
     ...(study.activeConsentVersionId ? { activeConsentVersionId: study.activeConsentVersionId } : {}),
     ...(study.activeSurveyVersionId ? { activeSurveyVersionId: study.activeSurveyVersionId } : {}),
     activePersonaVersionId: study.activePersonaVersionId,
@@ -501,6 +511,7 @@ function toStudyShell(item: StudyShellItem): StudyShell {
     interviewerInstructions: item.interviewerInstructions ?? item.interviewerGoals,
     defaultFreshnessDays: item.defaultFreshnessDays,
     defaultMaxInterviewMinutes: item.defaultMaxInterviewMinutes,
+    allowWrittenInterviewResponses: item.allowWrittenInterviewResponses ?? true,
     activeConsentVersionId: item.activeConsentVersionId,
     activeSurveyVersionId: item.activeSurveyVersionId,
     activePersonaVersionId: item.activePersonaVersionId,

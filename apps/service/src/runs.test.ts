@@ -36,6 +36,7 @@ function createFixtureRun(overrides: Partial<Run> = {}): Run {
     objectiveVersionIds: ["objective_version_001"],
     freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
     maxInterviewMinutes: 45,
+    allowWrittenInterviewResponses: true,
     status: "created",
     currentRunForSlot: true,
     createdAt: "2026-05-06T12:00:00.000Z",

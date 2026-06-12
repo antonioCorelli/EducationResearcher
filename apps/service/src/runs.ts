@@ -70,6 +70,7 @@ export interface Run {
   readonly personaVersionId: string;
   readonly objectiveVersionIds: readonly string[];
   readonly interviewerInstructions?: string;
+  readonly allowWrittenInterviewResponses: boolean;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
   readonly status: RunStatus;
@@ -105,6 +106,7 @@ export interface ParticipantRunAccess {
     readonly status: RunStatus;
     readonly freshnessDeadlineAt: string;
     readonly maxInterviewMinutes: number;
+    readonly allowWrittenInterviewResponses: boolean;
     readonly remainingInterviewSeconds: number;
   };
   readonly consentVersion?: ConsentVersion;
@@ -319,6 +321,7 @@ interface RunItem {
   readonly objectiveVersionIds?: readonly string[];
   readonly interviewerInstructions?: string;
   readonly interviewerGoals?: string;
+  readonly allowWrittenInterviewResponses?: boolean;
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
   readonly status: RunStatus;
@@ -579,6 +582,7 @@ export class RunService {
         personaVersionId: study.activePersonaVersionId,
         objectiveVersionIds: activeObjectiveVersionIds,
         interviewerInstructions: study.interviewerInstructions,
+        allowWrittenInterviewResponses: study.allowWrittenInterviewResponses,
         freshnessDeadlineAt: addDays(this.now(), study.defaultFreshnessDays).toISOString(),
         maxInterviewMinutes: study.defaultMaxInterviewMinutes,
         status: "created",
@@ -1138,6 +1142,7 @@ export class RunService {
       status: run.status,
       freshnessDeadlineAt: run.freshnessDeadlineAt,
       maxInterviewMinutes: run.maxInterviewMinutes,
+      allowWrittenInterviewResponses: run.allowWrittenInterviewResponses,
       remainingInterviewSeconds: await this.calculateRemainingInterviewSeconds(run)
     };
   }
@@ -2819,6 +2824,7 @@ function toRunItem(run: Run): RunItem {
     personaVersionId: run.personaVersionId,
     objectiveVersionIds: run.objectiveVersionIds,
     ...(run.interviewerInstructions ? { interviewerInstructions: run.interviewerInstructions } : {}),
+    allowWrittenInterviewResponses: run.allowWrittenInterviewResponses,
     freshnessDeadlineAt: run.freshnessDeadlineAt,
     maxInterviewMinutes: run.maxInterviewMinutes,
     status: run.status,
@@ -2842,6 +2848,7 @@ function toRun(item: RunItem): Run {
     personaVersionId: item.personaVersionId,
     objectiveVersionIds: item.objectiveVersionIds ?? [],
     interviewerInstructions: item.interviewerInstructions ?? item.interviewerGoals,
+    allowWrittenInterviewResponses: item.allowWrittenInterviewResponses ?? true,
     freshnessDeadlineAt: item.freshnessDeadlineAt,
     maxInterviewMinutes: item.maxInterviewMinutes,
     status: item.status,

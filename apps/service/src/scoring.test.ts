@@ -25,6 +25,7 @@ const run: Run = {
   objectiveVersionIds: ["objective_version_001"],
   freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
   maxInterviewMinutes: 45,
+  allowWrittenInterviewResponses: true,
   status: "interview_completed",
   currentRunForSlot: true,
   createdAt: "2026-05-06T12:00:00.000Z",

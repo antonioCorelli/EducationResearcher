@@ -208,6 +208,9 @@ function parseStudyShellInput(body: unknown) {
     ...("defaultFreshnessDays" in record ? { defaultFreshnessDays: record.defaultFreshnessDays } : {}),
     ...("defaultMaxInterviewMinutes" in record
       ? { defaultMaxInterviewMinutes: record.defaultMaxInterviewMinutes }
+      : {}),
+    ...("allowWrittenInterviewResponses" in record
+      ? { allowWrittenInterviewResponses: record.allowWrittenInterviewResponses }
       : {})
   };
 }
@@ -225,7 +228,11 @@ function coerceCreateStudyShellInput(body: unknown): CreateStudyShellInput {
       description: coerceOptionalText(input.description, "Study description"),
       interviewerInstructions: coerceOptionalText(input.interviewerInstructions, "Interviewer instructions"),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
-      defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
+      defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes"),
+      allowWrittenInterviewResponses: coerceOptionalBoolean(
+        input.allowWrittenInterviewResponses,
+        "written interview responses"
+      )
     };
   } catch (error) {
     throw toStudyBodyError(error);
@@ -247,7 +254,15 @@ function coerceUpdateStudyShellInput(body: unknown): UpdateStudyShellInput {
         ? { interviewerInstructions: coerceOptionalText(input.interviewerInstructions, "Interviewer instructions") }
         : {}),
       defaultFreshnessDays: coerceOptionalInteger(input.defaultFreshnessDays, "freshness days"),
-      defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes")
+      defaultMaxInterviewMinutes: coerceOptionalInteger(input.defaultMaxInterviewMinutes, "max interview minutes"),
+      ...("allowWrittenInterviewResponses" in input
+        ? {
+            allowWrittenInterviewResponses: coerceOptionalBoolean(
+              input.allowWrittenInterviewResponses,
+              "written interview responses"
+            )
+          }
+        : {})
     };
   } catch (error) {
     throw toStudyBodyError(error);
@@ -261,6 +276,18 @@ function coerceOptionalText(value: unknown, label: string) {
 
   if (typeof value !== "string") {
     throw new Error(`${label} must be text.`);
+  }
+
+  return value;
+}
+
+function coerceOptionalBoolean(value: unknown, label: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new Error(`${label} must be true or false.`);
   }
 
   return value;
@@ -1281,7 +1308,8 @@ export function buildServer(options: BuildServerOptions = {}) {
       const study = await studyShellService.createStudyShell(request.user!, coerceCreateStudyShellInput(request.body));
       await studyAuthorization.recordStudyAction(request.user!, study.id, "study", study.id, "create", {
         defaultFreshnessDays: study.defaultFreshnessDays,
-        defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes
+        defaultMaxInterviewMinutes: study.defaultMaxInterviewMinutes,
+        allowWrittenInterviewResponses: study.allowWrittenInterviewResponses
       });
 
       return reply.code(201).send({
@@ -1342,7 +1370,8 @@ export function buildServer(options: BuildServerOptions = {}) {
         const updatedStudy = await studyShellService.updateStudyShell(study, coerceUpdateStudyShellInput(request.body));
         await studyAuthorization.recordSensitiveAction(access, "study", updatedStudy.id, "update", {
           defaultFreshnessDays: updatedStudy.defaultFreshnessDays,
-          defaultMaxInterviewMinutes: updatedStudy.defaultMaxInterviewMinutes
+          defaultMaxInterviewMinutes: updatedStudy.defaultMaxInterviewMinutes,
+          allowWrittenInterviewResponses: updatedStudy.allowWrittenInterviewResponses
         });
 
         return {

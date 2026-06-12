@@ -7,9 +7,11 @@ interface ResearcherInterviewProps {
   readonly activeStudySetupTab: StudySetupTab;
   readonly interviewerInstructions: string;
   readonly isSavingStudy: boolean;
+  readonly allowWrittenInterviewResponses: boolean;
   readonly maxInterviewMinutes: number;
   readonly selectedStudy: StudyShell | undefined;
   readonly studyError: string;
+  readonly onAllowWrittenInterviewResponsesChange: (allowWrittenInterviewResponses: boolean) => void;
   readonly onInterviewerInstructionsChange: (interviewerInstructions: string) => void;
   readonly onMaxInterviewMinutesChange: (maxInterviewMinutes: number) => void;
   readonly onSaveStudy: (event: FormEvent<HTMLFormElement>) => void;
@@ -17,11 +19,13 @@ interface ResearcherInterviewProps {
 
 export function ResearcherInterview({
   activeStudySetupTab,
+  allowWrittenInterviewResponses,
   interviewerInstructions,
   isSavingStudy,
   maxInterviewMinutes,
   selectedStudy,
   studyError,
+  onAllowWrittenInterviewResponsesChange,
   onInterviewerInstructionsChange,
   onMaxInterviewMinutesChange,
   onSaveStudy
@@ -76,6 +80,18 @@ export function ResearcherInterview({
         concepts to clarify, experiences to elicit, and participant-safe follow-ups that matter for this study; do not
         write a rigid script.
       </p>
+      <label className="settings-toggle">
+        <input
+          checked={allowWrittenInterviewResponses}
+          disabled={!selectedStudy}
+          onChange={(event) => onAllowWrittenInterviewResponsesChange(event.target.checked)}
+          type="checkbox"
+        />
+        <span>
+          <strong>Allow written responses in interviews</strong>
+          <small>Participants can type answers or switch from voice to typing when this is on.</small>
+        </span>
+      </label>
       <label>
         Interviewer persona
         <textarea readOnly value={selectedStudy?.persona.stylePrompt ?? defaultPersonaStylePrompt} />
