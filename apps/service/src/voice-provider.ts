@@ -5,8 +5,11 @@ import type { SurveyVersion } from "./survey.js";
 
 export const REALTIME_INTERVIEW_PROMPT_VERSION = "realtime-interview-v1";
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime";
+export const DEFAULT_NEW_REALTIME_MODEL = "gpt-realtime-2.1";
 export const DEFAULT_REALTIME_VOICE = "marin";
 export const OPENAI_REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
+
+export type RealtimeVoiceExperience = "standard" | "new_voice";
 
 export type RealtimeVoiceProviderErrorCategory =
   | "missing_configuration"
@@ -38,6 +41,7 @@ export interface RealtimeVoiceSessionRequest {
   readonly promptInput: RealtimeInterviewPromptInput;
   readonly instructions: string;
   readonly promptVersion: string;
+  readonly voiceExperience: RealtimeVoiceExperience;
 }
 
 export interface RealtimeVoiceSession {
@@ -78,7 +82,7 @@ export class FakeRealtimeVoiceProvider implements RealtimeVoiceProvider {
   async createSession(request: RealtimeVoiceSessionRequest): Promise<RealtimeVoiceSession> {
     return {
       provider: "fake",
-      model: "fake-realtime-voice",
+      model: request.voiceExperience === "new_voice" ? "fake-new-realtime-voice" : "fake-realtime-voice",
       voice: "fake-voice",
       clientSecret: "fake-realtime-client-secret",
       realtimeUrl: OPENAI_REALTIME_CALLS_URL,
@@ -93,6 +97,7 @@ export class OpenAiRealtimeVoiceProvider implements RealtimeVoiceProvider {
     private readonly options: {
       readonly apiKey?: string;
       readonly model?: string;
+      readonly newModel?: string;
       readonly voice?: string;
       readonly fetch?: typeof fetch;
       readonly createServiceRequestId?: () => string;
@@ -111,7 +116,10 @@ export class OpenAiRealtimeVoiceProvider implements RealtimeVoiceProvider {
       });
     }
 
-    const model = this.options.model ?? process.env.OPENAI_REALTIME_MODEL ?? DEFAULT_REALTIME_MODEL;
+    const model =
+      request.voiceExperience === "new_voice"
+        ? this.options.newModel ?? process.env.OPENAI_NEW_REALTIME_MODEL ?? DEFAULT_NEW_REALTIME_MODEL
+        : this.options.model ?? process.env.OPENAI_REALTIME_MODEL ?? DEFAULT_REALTIME_MODEL;
     const voice = this.options.voice ?? process.env.OPENAI_REALTIME_VOICE ?? DEFAULT_REALTIME_VOICE;
     const fetchImplementation = this.options.fetch ?? fetch;
     let response: Response;

@@ -80,4 +80,19 @@ describe("production runtime config validation", () => {
       "Invalid production service configuration: missing ARTIFACT_STORAGE_BUCKET_NAME; invalid INTERVIEW_AUDIO_STORAGE_BACKEND."
     );
   });
+
+  it("accepts a boolean new-voice flag and rejects deployment typos", () => {
+    for (const [name, value] of Object.entries(requiredProductionConfig)) {
+      vi.stubEnv(name, value);
+    }
+
+    vi.stubEnv("NEW_VOICE_MODEL_ENABLED", "true");
+    expect(() => validateProductionRuntimeConfig()).not.toThrow();
+
+    vi.stubEnv("NEW_VOICE_MODEL_ENABLED", "false");
+    expect(() => validateProductionRuntimeConfig()).not.toThrow();
+
+    vi.stubEnv("NEW_VOICE_MODEL_ENABLED", "enable");
+    expect(() => validateProductionRuntimeConfig()).toThrow("invalid NEW_VOICE_MODEL_ENABLED");
+  });
 });

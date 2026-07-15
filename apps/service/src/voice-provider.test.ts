@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  FakeRealtimeVoiceProvider,
   OpenAiRealtimeVoiceProvider,
   RealtimeVoiceProviderError,
   buildRealtimeInterviewInstructions,
@@ -143,7 +144,8 @@ describe("realtime voice provider", () => {
     const session = await provider.createSession({
       promptInput,
       instructions,
-      promptVersion: "realtime-interview-v1"
+      promptVersion: "realtime-interview-v1",
+      voiceExperience: "standard"
     });
 
     expect(session).toEqual({
@@ -179,6 +181,66 @@ describe("realtime voice provider", () => {
     expect(JSON.stringify(session)).not.toContain("test-api-key");
   });
 
+  it("mints the new voice experience with the new realtime model without exposing the API key", async () => {
+    const requests: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+    const provider = new OpenAiRealtimeVoiceProvider({
+      apiKey: "test-api-key",
+      voice: "marin",
+      createServiceRequestId: () => "req_new_realtime_001",
+      fetch: (async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+
+        return new Response(
+          JSON.stringify({
+            client_secret: {
+              value: "new-ephemeral-client-secret",
+              expires_at: 1_800_000_000
+            }
+          }),
+          { status: 200 }
+        );
+      }) as typeof fetch
+    });
+
+    const session = await provider.createSession({
+      promptInput,
+      instructions: buildRealtimeInterviewInstructions(promptInput),
+      promptVersion: "realtime-interview-v1",
+      voiceExperience: "new_voice"
+    });
+
+    expect(session).toMatchObject({
+      provider: "openai",
+      model: "gpt-realtime-2.1",
+      voice: "marin",
+      clientSecret: "new-ephemeral-client-secret",
+      serviceRequestId: "req_new_realtime_001"
+    });
+    expect(JSON.parse(String(requests[0]?.init.body))).toMatchObject({
+      session: {
+        type: "realtime",
+        model: "gpt-realtime-2.1"
+      }
+    });
+    expect(JSON.stringify(session)).not.toContain("test-api-key");
+    expect(String(requests[0]?.init.body)).not.toContain("test-api-key");
+  });
+
+  it("uses distinct deterministic fake models for each voice experience", async () => {
+    const provider = new FakeRealtimeVoiceProvider();
+    const request = {
+      promptInput,
+      instructions: buildRealtimeInterviewInstructions(promptInput),
+      promptVersion: "realtime-interview-v1"
+    } as const;
+
+    const standardSession = await provider.createSession({ ...request, voiceExperience: "standard" });
+    const newVoiceSession = await provider.createSession({ ...request, voiceExperience: "new_voice" });
+
+    expect(standardSession.model).toBe("fake-realtime-voice");
+    expect(newVoiceSession.model).toBe("fake-new-realtime-voice");
+  });
+
   it("categorizes missing OpenAI realtime configuration without calling the provider", async () => {
     const provider = new OpenAiRealtimeVoiceProvider({
       apiKey: "",
@@ -192,7 +254,8 @@ describe("realtime voice provider", () => {
       provider.createSession({
         promptInput,
         instructions: buildRealtimeInterviewInstructions(promptInput),
-        promptVersion: "realtime-interview-v1"
+        promptVersion: "realtime-interview-v1",
+        voiceExperience: "standard"
       })
     ).rejects.toMatchObject({
       name: "RealtimeVoiceProviderError",
@@ -220,7 +283,8 @@ describe("realtime voice provider", () => {
       .createSession({
         promptInput,
         instructions: buildRealtimeInterviewInstructions(promptInput),
-        promptVersion: "realtime-interview-v1"
+        promptVersion: "realtime-interview-v1",
+        voiceExperience: "standard"
       })
       .catch((error: unknown) => error);
 

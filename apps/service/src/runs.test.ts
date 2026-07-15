@@ -130,6 +130,7 @@ function createSurveyVersion(): SurveyVersion {
 function createParticipantRunService(input: {
   readonly runStore: InMemoryRunStore;
   readonly createInterviewSessionId?: () => string;
+  readonly newVoiceModelEnabled?: boolean;
   readonly now?: () => Date;
 }) {
   const rawToken = createParticipantAccessTokenForTest({
@@ -163,6 +164,7 @@ function createParticipantRunService(input: {
       {
         createInterviewSessionId: input.createInterviewSessionId,
         createSurveyResponseId: () => "survey_response_fixture_001",
+        newVoiceModelEnabled: input.newVoiceModelEnabled,
         now: input.now ?? (() => new Date("2026-05-06T12:20:00.000Z")),
         participantAccessTokenSecret: "test-participant-secret"
       }
@@ -498,6 +500,7 @@ describe("survey to interview readiness", () => {
     });
     const runStore = new InMemoryRunStore([activeRun]);
     const capturedInstructions: string[] = [];
+    const capturedVoiceExperiences: string[] = [];
     await runStore.submitSurvey(
       [
         {
@@ -531,12 +534,77 @@ describe("survey to interview readiness", () => {
       "interview_in_progress"
     );
     const { rawToken, service } = createParticipantRunService({
+      newVoiceModelEnabled: true,
       runStore
     });
 
+    await service.createParticipantRealtimeVoiceSession(
+      rawToken,
+      {
+        async createSession(request) {
+          capturedInstructions.push(request.instructions);
+          capturedVoiceExperiences.push(request.voiceExperience);
+
+          return {
+            provider: "fake",
+            model: "fake-realtime",
+            voice: "fake-voice",
+            clientSecret: "client-secret",
+            realtimeUrl: "https://api.openai.com/v1/realtime/calls",
+            serviceRequestId: "req_realtime_fixture_001",
+            promptVersion: request.promptVersion
+          };
+        }
+      },
+      { voiceExperience: "new_voice" }
+    );
+
+    expect(capturedVoiceExperiences).toEqual(["new_voice"]);
+    expect(capturedInstructions[0]).toContain("Clarify learner confidence and gather concrete examples.");
+    expect(capturedInstructions[0]).toContain("Researcher instructions for interviewer planning only");
+    expect(capturedInstructions[0]).not.toContain("Reasoning Quality");
+    expect(capturedInstructions[0]).not.toContain("intermediate artifact");
+  });
+
+  it("fails closed when the new voice model is disabled or the requested experience is invalid", async () => {
+    const activeRun = createFixtureRun({ status: "interview_in_progress" });
+    const runStore = new InMemoryRunStore([activeRun]);
+    await runStore.createInterviewSession(
+      {
+        id: "interview_session_new_voice_flag_001",
+        studyId: activeRun.studyId,
+        participantSlotId: activeRun.participantSlotId,
+        runId: activeRun.id,
+        sessionNumber: 1,
+        status: "active",
+        startedAt: "2026-05-06T12:18:00.000Z",
+        createdAt: "2026-05-06T12:18:00.000Z",
+        updatedAt: "2026-05-06T12:18:00.000Z"
+      },
+      activeRun,
+      "interview_in_progress"
+    );
+    const { rawToken, service } = createParticipantRunService({ runStore });
+    const provider = {
+      async createSession() {
+        throw new Error("Realtime provider should not be called.");
+      }
+    };
+
+    await expect(
+      service.createParticipantRealtimeVoiceSession(rawToken, provider, { voiceExperience: "new_voice" })
+    ).rejects.toMatchObject({
+      safeMessage: "This voice option is not available."
+    });
+    await expect(
+      service.createParticipantRealtimeVoiceSession(rawToken, provider, { voiceExperience: "arbitrary-model" })
+    ).rejects.toMatchObject({
+      safeMessage: "Voice experience is invalid."
+    });
+    const standardExperiences: string[] = [];
     await service.createParticipantRealtimeVoiceSession(rawToken, {
       async createSession(request) {
-        capturedInstructions.push(request.instructions);
+        standardExperiences.push(request.voiceExperience);
 
         return {
           provider: "fake",
@@ -544,16 +612,18 @@ describe("survey to interview readiness", () => {
           voice: "fake-voice",
           clientSecret: "client-secret",
           realtimeUrl: "https://api.openai.com/v1/realtime/calls",
-          serviceRequestId: "req_realtime_fixture_001",
+          serviceRequestId: "req_realtime_standard_001",
           promptVersion: request.promptVersion
         };
       }
     });
 
-    expect(capturedInstructions[0]).toContain("Clarify learner confidence and gather concrete examples.");
-    expect(capturedInstructions[0]).toContain("Researcher instructions for interviewer planning only");
-    expect(capturedInstructions[0]).not.toContain("Reasoning Quality");
-    expect(capturedInstructions[0]).not.toContain("intermediate artifact");
+    expect(standardExperiences).toEqual(["standard"]);
+    await expect(service.validateParticipantAccess(rawToken)).resolves.toMatchObject({
+      run: {
+        newVoiceModelEnabled: false
+      }
+    });
   });
 });
 

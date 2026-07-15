@@ -46,7 +46,8 @@ export function validateProductionRuntimeConfig(env: NodeJS.ProcessEnv = process
     ...validateExpectedValue(env, "PARTICIPANT_ACCESS_BASE_URL", "https://voxaria.io"),
     ...validateExpectedValue(env, "INTERVIEW_AUDIO_STORAGE_BACKEND", "s3"),
     ...validateStoreModes(env),
-    ...validateCorsOrigins(env.CORS_ORIGIN)
+    ...validateCorsOrigins(env.CORS_ORIGIN),
+    ...validateOptionalBooleanFlag(env, "NEW_VOICE_MODEL_ENABLED")
   ];
 
   if (missing.length > 0 || invalid.length > 0) {
@@ -91,4 +92,14 @@ function validateCorsOrigins(corsOrigin: string | undefined) {
   }
 
   return configuredOrigins.every((origin) => ALLOWED_PRODUCTION_CORS_ORIGINS.has(origin)) ? [] : ["CORS_ORIGIN"];
+}
+
+function validateOptionalBooleanFlag(env: NodeJS.ProcessEnv, name: string) {
+  const value = env[name]?.trim().toLowerCase();
+
+  if (value === undefined || value === "true" || value === "false") {
+    return [];
+  }
+
+  return [name];
 }

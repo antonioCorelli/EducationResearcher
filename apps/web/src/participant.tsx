@@ -65,6 +65,7 @@ interface ParticipantRunSummary {
   readonly freshnessDeadlineAt: string;
   readonly maxInterviewMinutes: number;
   readonly allowWrittenInterviewResponses: boolean;
+  readonly newVoiceModelEnabled?: boolean;
   readonly remainingInterviewSeconds: number;
 }
 
@@ -80,6 +81,11 @@ type ParticipantAccessState =
 
 type InterviewMode = "ready" | "active" | "paused";
 type InterviewResponseMode = "natural" | "push_to_talk" | "typing";
+type RealtimeVoiceExperience = "standard" | "new_voice";
+interface InterviewResponseSelection {
+  readonly responseMode: InterviewResponseMode;
+  readonly voiceExperience: RealtimeVoiceExperience;
+}
 type VoiceCaptureStatus = "idle" | "capturing" | "heard" | "captured";
 type InterviewUiState =
   | "onboarding"
@@ -159,6 +165,8 @@ export function Participant() {
   const lastPersistedSurveyDraftSnapshotRef = useRef<string | undefined>(undefined);
   const [interviewResponseMode, setInterviewResponseMode] = useState<InterviewResponseMode>("natural");
   const interviewResponseModeRef = useRef<InterviewResponseMode>("natural");
+  const [realtimeVoiceExperience, setRealtimeVoiceExperience] = useState<RealtimeVoiceExperience>("standard");
+  const realtimeVoiceExperienceRef = useRef<RealtimeVoiceExperience>("standard");
   const [accessState, setAccessState] = useState<ParticipantAccessState>(() => {
     const accessToken = getParticipantAccessTokenFromPath();
 
@@ -384,6 +392,11 @@ export function Participant() {
     updateRealtimeResponseMode(dataChannelRef.current, responseMode);
   }
 
+  function updateRealtimeVoiceExperience(voiceExperience: RealtimeVoiceExperience) {
+    realtimeVoiceExperienceRef.current = voiceExperience;
+    setRealtimeVoiceExperience(voiceExperience);
+  }
+
   function finishPushToTalkAnswer() {
     if (interviewResponseModeRef.current !== "push_to_talk") {
       return;
@@ -419,7 +432,11 @@ export function Participant() {
     const startedAt = performance.now();
 
     try {
-      const realtimeSession = await fetchRealtimeVoiceSession(accessToken, pendingInterviewTurnsRef.current);
+      const realtimeSession = await fetchRealtimeVoiceSession(
+        accessToken,
+        realtimeVoiceExperienceRef.current,
+        pendingInterviewTurnsRef.current
+      );
       activeServiceRequestId = realtimeSession.serviceRequestId;
       setRealtimeServiceRequestId(realtimeSession.serviceRequestId);
       await reportAudioConnectionState(accessToken, realtimeSession.serviceRequestId, "connecting", {
@@ -482,6 +499,17 @@ export function Participant() {
   }
 
   async function retryRealtimeVoice() {
+    await retryRealtimeVoiceWithExperience(realtimeVoiceExperienceRef.current, realtimeRetryCount + 1);
+  }
+
+  async function retryWithStandardVoice() {
+    await retryRealtimeVoiceWithExperience("standard", 0);
+  }
+
+  async function retryRealtimeVoiceWithExperience(
+    voiceExperience: RealtimeVoiceExperience,
+    retryCount: number
+  ) {
     const accessToken = getParticipantAccessTokenFromPath();
 
     if (!accessToken) {
@@ -489,13 +517,12 @@ export function Participant() {
       return;
     }
 
-    const nextRetryCount = realtimeRetryCount + 1;
-
-    setRealtimeRetryCount(nextRetryCount);
+    updateRealtimeVoiceExperience(voiceExperience);
+    setRealtimeRetryCount(retryCount);
     setInterviewError("");
 
     try {
-      await connectRealtimeVoice(accessToken, nextRetryCount);
+      await connectRealtimeVoice(accessToken, retryCount);
     } catch (error) {
       setInterviewError(error instanceof Error ? error.message : "Unable to reconnect the voice interview.");
     }
@@ -972,9 +999,11 @@ export function Participant() {
           isActionPending={isSubmittingInterviewAction}
           isRecording={isRecording}
           initialResponseMode={interviewResponseMode}
+          initialVoiceExperience={realtimeVoiceExperience}
           latestSpokenTranscript={latestParticipantTranscript}
           maxInterviewMinutes={accessState.run.maxInterviewMinutes}
           mode={interviewMode}
+          newVoiceModelEnabled={accessState.run.newVoiceModelEnabled === true}
           realtimeConnectionState={realtimeConnectionState}
           realtimeVoiceActivity={realtimeVoiceActivity}
           remainingInterviewSeconds={accessState.run.remainingInterviewSeconds}
@@ -985,8 +1014,10 @@ export function Participant() {
           onPause={() => void submitInterviewAction("pause")}
           onRecordingChange={setInterviewRecording}
           onResponseModeChange={updateInterviewResponseMode}
+          onVoiceExperienceChange={updateRealtimeVoiceExperience}
           onResume={() => void submitInterviewAction("resume")}
           onRetry={() => void retryRealtimeVoice()}
+          onUseStandardVoice={() => void retryWithStandardVoice()}
           onStart={() => void submitInterviewAction("start")}
           onStopAfterFailure={() => void stopAfterTechnicalFailure()}
           retryCount={realtimeRetryCount}
@@ -1115,12 +1146,14 @@ export function ParticipantInterviewScreen({
   allowWrittenResponses = true,
   error,
   initialResponseMode,
+  initialVoiceExperience = "standard",
   initialUiState,
   isActionPending,
   isRecording,
   latestSpokenTranscript,
   maxInterviewMinutes,
   mode,
+  newVoiceModelEnabled = false,
   realtimeConnectionState,
   realtimeVoiceActivity = "idle",
   onComplete,
@@ -1129,10 +1162,12 @@ export function ParticipantInterviewScreen({
   onPause,
   onRecordingChange,
   onResponseModeChange = () => undefined,
+  onVoiceExperienceChange = () => undefined,
   onResume,
   onRetry,
   onStart,
   onStopAfterFailure,
+  onUseStandardVoice = () => undefined,
   remainingInterviewSeconds: initialRemainingInterviewSeconds,
   retryCount
 }: {
@@ -1140,12 +1175,14 @@ export function ParticipantInterviewScreen({
   readonly allowWrittenResponses?: boolean;
   readonly error: string;
   readonly initialResponseMode?: InterviewResponseMode;
+  readonly initialVoiceExperience?: RealtimeVoiceExperience;
   readonly initialUiState?: InterviewUiState;
   readonly isActionPending: boolean;
   readonly isRecording: boolean;
   readonly latestSpokenTranscript?: string;
   readonly maxInterviewMinutes: number;
   readonly mode: InterviewMode;
+  readonly newVoiceModelEnabled?: boolean;
   readonly realtimeConnectionState: RealtimeConnectionState;
   readonly realtimeVoiceActivity?: RealtimeVoiceActivity;
   readonly onComplete: () => void;
@@ -1154,10 +1191,12 @@ export function ParticipantInterviewScreen({
   readonly onPause: () => void;
   readonly onRecordingChange: (recording: boolean) => void;
   readonly onResponseModeChange?: (responseMode: InterviewResponseMode) => void;
+  readonly onVoiceExperienceChange?: (voiceExperience: RealtimeVoiceExperience) => void;
   readonly onResume: () => void;
   readonly onRetry: () => void;
   readonly onStart: () => void;
   readonly onStopAfterFailure: () => void;
+  readonly onUseStandardVoice?: () => void;
   readonly remainingInterviewSeconds?: number;
   readonly retryCount: number;
 }) {
@@ -1165,6 +1204,9 @@ export function ParticipantInterviewScreen({
   const hasRecoverableFailure = isActive && realtimeConnectionState === "failed";
   const [responseMode, setResponseMode] = useState<InterviewResponseMode>(
     normalizeInterviewResponseModeForWrittenPermission(initialResponseMode ?? "natural", allowWrittenResponses)
+  );
+  const [voiceExperience, setVoiceExperience] = useState<RealtimeVoiceExperience>(
+    normalizeRealtimeVoiceExperienceForResponseMode(initialVoiceExperience, responseMode, newVoiceModelEnabled)
   );
   const [uiState, setUiState] = useState<InterviewUiState>(() =>
     normalizeInterviewUiStateForResponseMode(initialUiState ?? getInitialInterviewUiState(mode, responseMode), responseMode)
@@ -1250,20 +1292,31 @@ export function ParticipantInterviewScreen({
         : createInterviewHistoryEntry({
             mode,
             responseMode,
+            voiceExperience,
             uiState,
             index: 0
           })
     );
 
-    const normalizedEntry = normalizeInterviewHistoryEntryForWrittenPermission(entry, allowWrittenResponses);
+    const normalizedEntry = normalizeInterviewHistoryEntryForAvailability(
+      entry,
+      allowWrittenResponses,
+      newVoiceModelEnabled
+    );
 
     interviewHistoryIndexRef.current = normalizedEntry.index;
     setCanReturnToPreviousCard(normalizedEntry.index > 0);
     replaceInterviewHistoryEntry(normalizedEntry);
 
-    if (normalizedEntry.uiState !== uiState || normalizedEntry.responseMode !== responseMode) {
+    if (
+      normalizedEntry.uiState !== uiState ||
+      normalizedEntry.responseMode !== responseMode ||
+      normalizedEntry.voiceExperience !== voiceExperience
+    ) {
       setResponseMode(normalizedEntry.responseMode);
       onResponseModeChange(normalizedEntry.responseMode);
+      setVoiceExperience(normalizedEntry.voiceExperience);
+      onVoiceExperienceChange(normalizedEntry.voiceExperience);
       setUiState(normalizeInterviewUiStateForResponseMode(normalizedEntry.uiState, normalizedEntry.responseMode));
     }
 
@@ -1274,19 +1327,25 @@ export function ParticipantInterviewScreen({
         return;
       }
 
-      const normalizedHistoryEntry = normalizeInterviewHistoryEntryForWrittenPermission(historyEntry, allowWrittenResponses);
+      const normalizedHistoryEntry = normalizeInterviewHistoryEntryForAvailability(
+        historyEntry,
+        allowWrittenResponses,
+        newVoiceModelEnabled
+      );
 
       interviewHistoryIndexRef.current = normalizedHistoryEntry.index;
       setCanReturnToPreviousCard(normalizedHistoryEntry.index > 0);
       setResponseMode(normalizedHistoryEntry.responseMode);
       onResponseModeChange(normalizedHistoryEntry.responseMode);
+      setVoiceExperience(normalizedHistoryEntry.voiceExperience);
+      onVoiceExperienceChange(normalizedHistoryEntry.voiceExperience);
       setUiState(normalizeInterviewUiStateForResponseMode(normalizedHistoryEntry.uiState, normalizedHistoryEntry.responseMode));
     }
 
     window.addEventListener("popstate", handleBrowserBack);
 
     return () => window.removeEventListener("popstate", handleBrowserBack);
-  }, [allowWrittenResponses, mode]);
+  }, [allowWrittenResponses, mode, newVoiceModelEnabled]);
 
   useEffect(() => {
     if (latestSpokenTranscript?.trim()) {
@@ -1449,10 +1508,12 @@ export function ParticipantInterviewScreen({
 
   function navigateToInterviewCard({
     nextResponseMode = responseMode,
+    nextVoiceExperience = voiceExperience,
     nextUiState,
     replace = false
   }: {
     readonly nextResponseMode?: InterviewResponseMode;
+    readonly nextVoiceExperience?: RealtimeVoiceExperience;
     readonly nextUiState: InterviewUiState;
     readonly replace?: boolean;
   }) {
@@ -1461,10 +1522,16 @@ export function ParticipantInterviewScreen({
       allowWrittenResponses
     );
     const nextIndex = replace ? interviewHistoryIndexRef.current : interviewHistoryIndexRef.current + 1;
+    const normalizedNextVoiceExperience = normalizeRealtimeVoiceExperienceForResponseMode(
+      nextVoiceExperience,
+      normalizedNextResponseMode,
+      newVoiceModelEnabled
+    );
     const normalizedNextUiState = normalizeInterviewUiStateForResponseMode(nextUiState, normalizedNextResponseMode);
     const nextEntry = createInterviewHistoryEntry({
       mode,
       responseMode: normalizedNextResponseMode,
+      voiceExperience: normalizedNextVoiceExperience,
       uiState: normalizedNextUiState,
       index: nextIndex
     });
@@ -1474,6 +1541,10 @@ export function ParticipantInterviewScreen({
     setResponseMode(normalizedNextResponseMode);
     if (normalizedNextResponseMode !== responseMode) {
       onResponseModeChange(normalizedNextResponseMode);
+    }
+    setVoiceExperience(normalizedNextVoiceExperience);
+    if (normalizedNextVoiceExperience !== voiceExperience) {
+      onVoiceExperienceChange(normalizedNextVoiceExperience);
     }
     setUiState(normalizedNextUiState);
 
@@ -1494,6 +1565,7 @@ export function ParticipantInterviewScreen({
   function handleStartInterview() {
     setInterruptionNotice("");
     onResponseModeChange(responseMode);
+    onVoiceExperienceChange(voiceExperience);
     onStart();
   }
 
@@ -1502,6 +1574,7 @@ export function ParticipantInterviewScreen({
     setTranscriptDraft("");
     setTypedDraft("");
     onResponseModeChange(responseMode);
+    onVoiceExperienceChange(voiceExperience);
 
     if (responseMode === "push_to_talk" && realtimeVoiceActivity === "ai_speaking") {
       navigateToInterviewCard({ nextUiState: "student_turn" });
@@ -1568,14 +1641,27 @@ export function ParticipantInterviewScreen({
     onPause();
   }
 
-  function handleSelectResponseMode(nextResponseMode: InterviewResponseMode) {
+  function handleUseStandardVoice() {
+    setVoiceExperience("standard");
+    onVoiceExperienceChange("standard");
+    onUseStandardVoice();
+  }
+
+  function handleSelectResponseMode(selection: InterviewResponseSelection) {
     const normalizedResponseMode = normalizeInterviewResponseModeForWrittenPermission(
-      nextResponseMode,
+      selection.responseMode,
       allowWrittenResponses
+    );
+    const normalizedVoiceExperience = normalizeRealtimeVoiceExperienceForResponseMode(
+      selection.voiceExperience,
+      normalizedResponseMode,
+      newVoiceModelEnabled
     );
 
     setResponseMode(normalizedResponseMode);
     onResponseModeChange(normalizedResponseMode);
+    setVoiceExperience(normalizedVoiceExperience);
+    onVoiceExperienceChange(normalizedVoiceExperience);
 
     if (normalizedResponseMode !== "typing") {
       setLastVoiceResponseMode(normalizedResponseMode);
@@ -1695,7 +1781,9 @@ export function ParticipantInterviewScreen({
           <InterviewResponseModeOptions
             allowWrittenResponses={allowWrittenResponses}
             legendLabel="Response mode"
+            newVoiceModelEnabled={newVoiceModelEnabled}
             responseMode={responseMode}
+            voiceExperience={voiceExperience}
             onChange={handleSelectResponseMode}
           />
           <p className="privacy-note">Your voice is only captured during your answer.</p>
@@ -1716,7 +1804,9 @@ export function ParticipantInterviewScreen({
             allowWrittenResponses={allowWrittenResponses}
             disabled={isActionPending}
             legendLabel="Resume response mode"
+            newVoiceModelEnabled={newVoiceModelEnabled}
             responseMode={responseMode}
+            voiceExperience={voiceExperience}
             onChange={handleSelectResponseMode}
           />
           <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
@@ -1972,6 +2062,16 @@ export function ParticipantInterviewScreen({
               <button className="primary-button" disabled={isActionPending} onClick={onRetry} type="button">
                 Retry connection
               </button>
+              {voiceExperience === "new_voice" ? (
+                <button
+                  className="secondary-button"
+                  disabled={isActionPending}
+                  onClick={handleUseStandardVoice}
+                  type="button"
+                >
+                  Try standard voice
+                </button>
+              ) : null}
               <button className="secondary-button" disabled={isActionPending} onClick={onStopAfterFailure} type="button">
                 End session
               </button>
@@ -2009,22 +2109,41 @@ function hasScrolledToConsentBottom(element: Pick<HTMLDivElement, "clientHeight"
 }
 
 const interviewResponseModes: readonly {
-  readonly value: InterviewResponseMode;
+  readonly value: string;
+  readonly responseMode: InterviewResponseMode;
+  readonly voiceExperience: RealtimeVoiceExperience;
   readonly label: string;
   readonly description: string;
+  readonly badge?: string;
+  readonly className?: string;
 }[] = [
   {
     value: "natural",
+    responseMode: "natural",
+    voiceExperience: "standard",
     label: "Talk naturally",
     description: "Voice capture stays on during your answer and waits briefly when you pause."
   },
   {
+    value: "new_voice",
+    responseMode: "natural",
+    voiceExperience: "new_voice",
+    label: "Voxaria Live",
+    description: "Our newest conversational voice, tuned for smoother pauses, background noise, and interruptions.",
+    badge: "NEW",
+    className: "interview-mode-option-new-voice"
+  },
+  {
     value: "push_to_talk",
+    responseMode: "push_to_talk",
+    voiceExperience: "standard",
     label: "Press to record each answer",
     description: "You choose exactly when each answer starts and stops."
   },
   {
     value: "typing",
+    responseMode: "typing",
+    voiceExperience: "standard",
     label: "Type my answers",
     description: "Do the interview without speaking aloud."
   }
@@ -2098,37 +2217,57 @@ function InterviewResponseModeOptions({
   allowWrittenResponses,
   disabled = false,
   legendLabel,
+  newVoiceModelEnabled,
   onChange,
-  responseMode
+  responseMode,
+  voiceExperience
 }: {
   readonly allowWrittenResponses: boolean;
   readonly disabled?: boolean;
   readonly legendLabel: string;
-  readonly onChange: (responseMode: InterviewResponseMode) => void;
+  readonly newVoiceModelEnabled: boolean;
+  readonly onChange: (selection: InterviewResponseSelection) => void;
   readonly responseMode: InterviewResponseMode;
+  readonly voiceExperience: RealtimeVoiceExperience;
 }) {
-  const options = allowWrittenResponses
-    ? interviewResponseModes
-    : interviewResponseModes.filter((option) => option.value !== "typing");
+  const options = interviewResponseModes.filter(
+    (option) =>
+      (allowWrittenResponses || option.responseMode !== "typing") &&
+      (newVoiceModelEnabled || option.voiceExperience !== "new_voice")
+  );
 
   return (
     <fieldset className="interview-mode-options">
       <legend className="visually-hidden">{legendLabel}</legend>
-      {options.map((option) => (
-        <label className="interview-mode-option" key={option.value}>
-          <input
-            checked={responseMode === option.value}
-            disabled={disabled}
-            onChange={() => onChange(option.value)}
-            type="radio"
-            value={option.value}
-          />
-          <span>
-            <strong>{option.label}</strong>
-            <small>{option.description}</small>
-          </span>
-        </label>
-      ))}
+      {options.map((option) => {
+        const checked =
+          responseMode === option.responseMode &&
+          (option.responseMode === "typing" || voiceExperience === option.voiceExperience);
+
+        return (
+          <label className={["interview-mode-option", option.className].filter(Boolean).join(" ")} key={option.value}>
+            <input
+              checked={checked}
+              disabled={disabled}
+              onChange={() =>
+                onChange({
+                  responseMode: option.responseMode,
+                  voiceExperience: option.voiceExperience
+                })
+              }
+              type="radio"
+              value={option.value}
+            />
+            <span>
+              <span className="interview-mode-option-heading">
+                <strong>{option.label}</strong>
+                {option.badge ? <small className="interview-mode-new-badge">{option.badge}</small> : null}
+              </span>
+              <small>{option.description}</small>
+            </span>
+          </label>
+        );
+      })}
     </fieldset>
   );
 }
@@ -2184,6 +2323,7 @@ interface InterviewHistoryEntry {
   readonly index: number;
   readonly mode: InterviewMode;
   readonly responseMode: InterviewResponseMode;
+  readonly voiceExperience: RealtimeVoiceExperience;
   readonly uiState: InterviewUiState;
 }
 
@@ -2204,6 +2344,7 @@ const interviewUiStates: readonly InterviewUiState[] = [
 ];
 
 const interviewResponseModeValues: readonly InterviewResponseMode[] = ["natural", "push_to_talk", "typing"];
+const realtimeVoiceExperienceValues: readonly RealtimeVoiceExperience[] = ["standard", "new_voice"];
 
 const interviewModeValues: readonly InterviewMode[] = ["ready", "active", "paused"];
 
@@ -2234,11 +2375,13 @@ function getInterviewHistoryEntry(state: unknown): InterviewHistoryEntry | undef
   }
 
   const { index, mode, responseMode, uiState } = entry;
+  const voiceExperience = entry.voiceExperience ?? "standard";
 
   if (
     typeof index !== "number" ||
     !isInterviewMode(mode) ||
     !isInterviewResponseMode(responseMode) ||
+    !isRealtimeVoiceExperience(voiceExperience) ||
     !isInterviewUiState(uiState)
   ) {
     return undefined;
@@ -2248,6 +2391,7 @@ function getInterviewHistoryEntry(state: unknown): InterviewHistoryEntry | undef
     index,
     mode,
     responseMode,
+    voiceExperience,
     uiState
   };
 }
@@ -2268,6 +2412,10 @@ function isInterviewResponseMode(value: unknown): value is InterviewResponseMode
   return typeof value === "string" && interviewResponseModeValues.includes(value as InterviewResponseMode);
 }
 
+function isRealtimeVoiceExperience(value: unknown): value is RealtimeVoiceExperience {
+  return typeof value === "string" && realtimeVoiceExperienceValues.includes(value as RealtimeVoiceExperience);
+}
+
 function isInterviewUiState(value: unknown): value is InterviewUiState {
   return typeof value === "string" && interviewUiStates.includes(value as InterviewUiState);
 }
@@ -2279,15 +2427,21 @@ function normalizeInterviewHistoryEntry(entry: InterviewHistoryEntry): Interview
   };
 }
 
-function normalizeInterviewHistoryEntryForWrittenPermission(
+function normalizeInterviewHistoryEntryForAvailability(
   entry: InterviewHistoryEntry,
-  allowWrittenResponses: boolean
+  allowWrittenResponses: boolean,
+  newVoiceModelEnabled: boolean
 ): InterviewHistoryEntry {
   const responseMode = normalizeInterviewResponseModeForWrittenPermission(entry.responseMode, allowWrittenResponses);
 
   return normalizeInterviewHistoryEntry({
     ...entry,
-    responseMode
+    responseMode,
+    voiceExperience: normalizeRealtimeVoiceExperienceForResponseMode(
+      entry.voiceExperience,
+      responseMode,
+      newVoiceModelEnabled
+    )
   });
 }
 
@@ -2296,6 +2450,14 @@ function normalizeInterviewResponseModeForWrittenPermission(
   allowWrittenResponses: boolean
 ): InterviewResponseMode {
   return !allowWrittenResponses && responseMode === "typing" ? "natural" : responseMode;
+}
+
+export function normalizeRealtimeVoiceExperienceForResponseMode(
+  voiceExperience: RealtimeVoiceExperience,
+  responseMode: InterviewResponseMode,
+  newVoiceModelEnabled: boolean
+): RealtimeVoiceExperience {
+  return newVoiceModelEnabled && responseMode !== "typing" ? voiceExperience : "standard";
 }
 
 function normalizeInterviewUiStateForResponseMode(
@@ -2899,18 +3061,17 @@ async function fetchParticipantAccess(accessToken: string) {
   };
 }
 
-async function fetchRealtimeVoiceSession(accessToken: string, currentTurns: readonly PendingInterviewTurn[] = []) {
+async function fetchRealtimeVoiceSession(
+  accessToken: string,
+  voiceExperience: RealtimeVoiceExperience,
+  currentTurns: readonly PendingInterviewTurn[] = []
+) {
   const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/realtime-session`, {
     method: "POST",
     headers: {
       "content-type": "application/json"
     },
-    body: JSON.stringify({
-      currentTurns: currentTurns.map((turn) => ({
-        speaker: turn.speaker,
-        text: turn.text
-      }))
-    })
+    body: JSON.stringify(createRealtimeVoiceSessionRequestBody(voiceExperience, currentTurns))
   });
   const payload = (await response.json()) as {
     realtimeSession?: RealtimeVoiceSession;
@@ -2922,6 +3083,19 @@ async function fetchRealtimeVoiceSession(accessToken: string, currentTurns: read
   }
 
   return payload.realtimeSession;
+}
+
+export function createRealtimeVoiceSessionRequestBody(
+  voiceExperience: RealtimeVoiceExperience,
+  currentTurns: readonly PendingInterviewTurn[] = []
+) {
+  return {
+    voiceExperience,
+    currentTurns: currentTurns.map((turn) => ({
+      speaker: turn.speaker,
+      text: turn.text
+    }))
+  };
 }
 
 async function uploadParticipantInterviewAudio(accessToken: string, audioUpload: PendingInterviewAudioUpload) {

@@ -53,6 +53,8 @@ OBJECTIVE_VERSION_STORE=dynamodb
 RUN_LIFECYCLE_STORE=dynamodb
 OPERATIONS_STORE=dynamodb
 PARTICIPANT_ACCESS_BASE_URL=https://voxaria.io
+NEW_VOICE_MODEL_ENABLED=false
+OPENAI_NEW_REALTIME_MODEL=gpt-realtime-2.1
 ```
 
 Set these as managed secret references before production traffic:
@@ -65,6 +67,27 @@ OPENAI_API_KEY=arn:aws:ssm:us-east-1:077317248751:parameter/education-researcher
 
 Production participant voice interviews require `OPENAI_API_KEY`. Store the value as a SecureString parameter and expose it
 through Elastic Beanstalk environment secrets; never commit or print the key value.
+
+`NEW_VOICE_MODEL_ENABLED` is the server-authoritative rollout switch for the participant-facing **Voxaria Live** choice.
+It defaults to `false`, controls both capability discovery and session creation, and must be enabled only after a
+non-real-data interview smoke test confirms account access to `OPENAI_NEW_REALTIME_MODEL`. The browser sends the fixed
+`new_voice` experience name; only the service can map that name to a provider model ID.
+The July 2026 GPT-Live launch is ChatGPT-only at release; do not replace the configured API model with an undocumented
+`gpt-live-*` slug. Upgrade the server-side mapping only after OpenAI publishes an API model and migration contract.
+
+To disable new sessions without rebuilding either app, update the Elastic Beanstalk environment and wait for it to return
+to `Ready`/`Green`:
+
+```bash
+aws elasticbeanstalk update-environment \
+  --application-name education-researcher-service \
+  --environment-name education-researcher-api-prod \
+  --region us-east-1 \
+  --option-settings Namespace=aws:elasticbeanstalk:application:environment,OptionName=NEW_VOICE_MODEL_ENABLED,Value=false
+```
+
+Disabling the flag hides the choice on the next participant access refresh and rejects new `new_voice` session requests.
+An already-connected WebRTC session can continue until it ends or disconnects.
 
 `CORS_ORIGIN` is limited to `https://voxaria.io,https://www.voxaria.io`. If the production Amplify app uses a different
 canonical origin, update the runtime validation and deployment docs intentionally before deploying.

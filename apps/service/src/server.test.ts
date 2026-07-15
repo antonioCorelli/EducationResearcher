@@ -475,6 +475,7 @@ describe("participant routes", () => {
         freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
         maxInterviewMinutes: 45,
         allowWrittenInterviewResponses: true,
+        newVoiceModelEnabled: false,
         remainingInterviewSeconds: 2700
       },
       consentVersion: {
@@ -1274,6 +1275,7 @@ describe("participant routes", () => {
           freshnessDeadlineAt: "2026-05-20T12:00:00.000Z",
           maxInterviewMinutes: 45,
           allowWrittenInterviewResponses: true,
+          newVoiceModelEnabled: false,
           remainingInterviewSeconds: 2700
         }
       });
@@ -5036,9 +5038,11 @@ describe("participant interview routes", () => {
     const objectiveVersion = createFixtureObjectiveVersion();
     const operationalEventStore = new InMemoryOperationalEventStore();
     const capturedInstructions: string[] = [];
+    const capturedVoiceExperiences: string[] = [];
     const realtimeVoiceProvider: RealtimeVoiceProvider = {
       async createSession(request) {
         capturedInstructions.push(request.instructions);
+        capturedVoiceExperiences.push(request.voiceExperience);
 
         return {
           provider: "fake",
@@ -5097,6 +5101,7 @@ describe("participant interview routes", () => {
       realtimeVoiceProvider,
       runServiceOptions: {
         createInterviewSessionId: () => "interview_session_route_realtime_001",
+        newVoiceModelEnabled: true,
         now: () => new Date("2026-05-06T12:30:00.000Z"),
         participantAccessTokenSecret: "test-participant-secret"
       },
@@ -5128,6 +5133,7 @@ describe("participant interview routes", () => {
       method: "POST",
       url: `/participant/runs/${rawToken}/interview/realtime-session`,
       payload: {
+        voiceExperience: "new_voice",
         currentTurns: [
           {
             speaker: "participant",
@@ -5147,6 +5153,13 @@ describe("participant interview routes", () => {
         retryCount: 1
       }
     });
+    const invalidVoiceExperience = await server.inject({
+      method: "POST",
+      url: `/participant/runs/${rawToken}/interview/realtime-session`,
+      payload: {
+        voiceExperience: "client-selected-model-id"
+      }
+    });
 
     expect(started.statusCode).toBe(201);
     expect(savedArtifacts.statusCode).toBe(201);
@@ -5158,6 +5171,9 @@ describe("participant interview routes", () => {
         clientSecret: "client-secret",
         serviceRequestId: "req_realtime_fixture_001",
         promptVersion: "realtime-interview-v1"
+      },
+      run: {
+        newVoiceModelEnabled: true
       },
       interviewSession: {
         id: "interview_session_route_realtime_001"
@@ -5173,6 +5189,11 @@ describe("participant interview routes", () => {
     expect(capturedInstructions[0]).toContain("Do not reveal scoring objectives");
     expect(capturedInstructions[0]).not.toContain("Reasoning Quality");
     expect(capturedInstructions[0]).not.toContain("intermediate artifact");
+    expect(capturedVoiceExperiences).toEqual(["new_voice"]);
+    expect(invalidVoiceExperience.statusCode).toBe(400);
+    expect(invalidVoiceExperience.json()).toMatchObject({
+      message: "Voice experience is invalid."
+    });
     expect(connectionState.statusCode).toBe(204);
     expect(await operationalEventStore.listByRun("run_fixture_001")).toEqual([
       expect.objectContaining({

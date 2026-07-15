@@ -771,7 +771,8 @@ function coerceCreateRealtimeVoiceSessionInput(body: unknown): CreateRealtimeVoi
   const record = body as Record<string, unknown>;
 
   return {
-    currentTurns: record.currentTurns
+    currentTurns: record.currentTurns,
+    voiceExperience: record.voiceExperience
   };
 }
 

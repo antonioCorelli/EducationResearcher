@@ -17,6 +17,7 @@ import {
   REALTIME_INTERVIEW_PROMPT_VERSION,
   buildRealtimeInterviewInstructions,
   type RealtimeInterviewContextTurn,
+  type RealtimeVoiceExperience,
   type RealtimeVoiceProvider
 } from "./voice-provider.js";
 import {
@@ -107,6 +108,7 @@ export interface ParticipantRunAccess {
     readonly freshnessDeadlineAt: string;
     readonly maxInterviewMinutes: number;
     readonly allowWrittenInterviewResponses: boolean;
+    readonly newVoiceModelEnabled: boolean;
     readonly remainingInterviewSeconds: number;
   };
   readonly consentVersion?: ConsentVersion;
@@ -134,6 +136,7 @@ export interface SaveInterviewArtifactsInput {
 
 export interface CreateRealtimeVoiceSessionInput {
   readonly currentTurns?: unknown;
+  readonly voiceExperience?: unknown;
 }
 
 export interface SaveInterviewAudioUploadInput {
@@ -478,6 +481,7 @@ export interface RunServiceOptions {
   readonly maxInterviewAudioUploadBytes?: number;
   readonly participantAccessBaseUrl?: string;
   readonly participantAccessTokenSecret?: string;
+  readonly newVoiceModelEnabled?: boolean;
   readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
   readonly automaticScoringTrigger?: AutomaticRunScoringTrigger;
 }
@@ -495,6 +499,7 @@ export class RunService {
   private readonly maxInterviewAudioUploadBytes: number;
   private readonly participantAccessBaseUrl: string;
   private readonly participantAccessTokenSecret: string;
+  private readonly newVoiceModelEnabled: boolean;
   private readonly staleRunScoringTrigger?: StaleRunScoringTrigger;
   private readonly automaticScoringTrigger?: AutomaticRunScoringTrigger;
 
@@ -523,6 +528,7 @@ export class RunService {
       options.participantAccessBaseUrl ?? process.env.PARTICIPANT_ACCESS_BASE_URL ?? "http://localhost:5173";
     this.participantAccessTokenSecret =
       options.participantAccessTokenSecret ?? getConfiguredParticipantAccessTokenSecret();
+    this.newVoiceModelEnabled = options.newVoiceModelEnabled ?? isNewVoiceModelEnabled();
     this.staleRunScoringTrigger = options.staleRunScoringTrigger;
     this.automaticScoringTrigger = options.automaticScoringTrigger;
   }
@@ -880,6 +886,12 @@ export class RunService {
       throw new ParticipantAccessError("Realtime voice is only available during an active interview.");
     }
 
+    const voiceExperience = parseRealtimeVoiceExperience(input.voiceExperience);
+
+    if (voiceExperience === "new_voice" && !this.newVoiceModelEnabled) {
+      throw new RunValidationError("This voice option is not available.");
+    }
+
     const interviewSession = await this.requireActiveInterviewSession(run.id);
     const remainingSeconds = await this.requireInterviewTimeRemaining(run);
     const surveyVersion = await this.getRunSurveyVersion(run);
@@ -902,7 +914,8 @@ export class RunService {
     const realtimeSession = await voiceProvider.createSession({
       promptInput,
       instructions,
-      promptVersion: REALTIME_INTERVIEW_PROMPT_VERSION
+      promptVersion: REALTIME_INTERVIEW_PROMPT_VERSION,
+      voiceExperience
     });
 
     return {
@@ -1143,6 +1156,7 @@ export class RunService {
       freshnessDeadlineAt: run.freshnessDeadlineAt,
       maxInterviewMinutes: run.maxInterviewMinutes,
       allowWrittenInterviewResponses: run.allowWrittenInterviewResponses,
+      newVoiceModelEnabled: this.newVoiceModelEnabled,
       remainingInterviewSeconds: await this.calculateRemainingInterviewSeconds(run)
     };
   }
@@ -1152,6 +1166,7 @@ export class RunService {
       ...result,
       run: {
         ...result.run,
+        newVoiceModelEnabled: this.newVoiceModelEnabled,
         remainingInterviewSeconds: await this.calculateRemainingInterviewSeconds(result.run)
       }
     };
@@ -2570,6 +2585,22 @@ function parseRealtimeSessionCurrentTurns(value: unknown): RealtimeInterviewCont
     speaker: turn.speaker,
     text: turn.text
   }));
+}
+
+function parseRealtimeVoiceExperience(value: unknown): RealtimeVoiceExperience {
+  if (value === undefined || value === "standard") {
+    return "standard";
+  }
+
+  if (value === "new_voice") {
+    return value;
+  }
+
+  throw new RunValidationError("Voice experience is invalid.");
+}
+
+export function isNewVoiceModelEnabled(env: NodeJS.ProcessEnv = process.env) {
+  return env.NEW_VOICE_MODEL_ENABLED?.trim().toLowerCase() === "true";
 }
 
 function mergeRealtimeInterviewContextTurns(

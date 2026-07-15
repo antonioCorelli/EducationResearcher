@@ -10,8 +10,10 @@ import {
   createSurveyDraftStorageKey,
   createSurveyDraftSnapshot,
   createRealtimeResponseModeSessionUpdate,
+  createRealtimeVoiceSessionRequestBody,
   createRealtimeTypedAnswerEvents,
   getSupportedInterviewAudioMimeType,
+  normalizeRealtimeVoiceExperienceForResponseMode,
   normalizeSurveyDraftResponses,
   persistSurveyDraft,
   parseRealtimeAiTranscriptUpdate,
@@ -463,6 +465,68 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toMatch(/checked="" value="typing"/);
   });
 
+  it("offers the gated Voxaria Live voice experience without changing the safe default", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialUiState="mode_selection"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="ready"
+        newVoiceModelEnabled
+        realtimeConnectionState="idle"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("Voxaria Live");
+    expect(markup).toContain("NEW");
+    expect(markup).toContain("pauses, background noise, and interruptions");
+    expect(markup).toContain("interview-mode-option-new-voice");
+    expect(markup).toMatch(/value="new_voice"/);
+    expect(markup).toMatch(/checked="" value="natural"/);
+    expect(markup).not.toMatch(/checked="" value="new_voice"/);
+  });
+
+  it("keeps the new voice choice hidden when its server capability is off", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Could you share a concrete example?"
+        error=""
+        initialVoiceExperience="new_voice"
+        initialUiState="mode_selection"
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="ready"
+        realtimeConnectionState="idle"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).not.toContain("Voxaria Live");
+    expect(markup).not.toMatch(/value="new_voice"/);
+    expect(markup).toMatch(/checked="" value="natural"/);
+  });
+
   it("hides written response options when the run does not allow typed interview answers", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
@@ -757,6 +821,34 @@ describe("ParticipantInterviewScreen", () => {
     });
   });
 
+  it("sends only the allowlisted voice experience instead of a client model ID", () => {
+    expect(
+      createRealtimeVoiceSessionRequestBody("new_voice", [
+        {
+          speaker: "participant",
+          text: "I would like to add one more example.",
+          audioStartMs: 120,
+          audioEndMs: 850
+        }
+      ])
+    ).toEqual({
+      voiceExperience: "new_voice",
+      currentTurns: [
+        {
+          speaker: "participant",
+          text: "I would like to add one more example."
+        }
+      ]
+    });
+    expect(JSON.stringify(createRealtimeVoiceSessionRequestBody("new_voice"))).not.toContain("gpt-realtime");
+  });
+
+  it("uses the standard model whenever typing is the selected response mode", () => {
+    expect(normalizeRealtimeVoiceExperienceForResponseMode("new_voice", "typing", true)).toBe("standard");
+    expect(normalizeRealtimeVoiceExperienceForResponseMode("new_voice", "natural", true)).toBe("new_voice");
+    expect(normalizeRealtimeVoiceExperienceForResponseMode("new_voice", "natural", false)).toBe("standard");
+  });
+
   it("adds typed answers to realtime voice context before requesting a follow-up", () => {
     expect(createRealtimeTypedAnswerEvents("  I would explain this with a classroom example.  ")).toEqual([
       {
@@ -919,10 +1011,12 @@ describe("ParticipantInterviewScreen", () => {
       <ParticipantInterviewScreen
         aiQuestion="Could you share a concrete example?"
         error="We had trouble keeping the voice interview connected. Your responses so far are saved."
+        initialVoiceExperience="new_voice"
         isActionPending={false}
         isRecording={false}
         maxInterviewMinutes={45}
         mode="active"
+        newVoiceModelEnabled
         realtimeConnectionState="failed"
         onComplete={noop}
         onConfirmAnswer={noop}
@@ -937,6 +1031,7 @@ describe("ParticipantInterviewScreen", () => {
     );
 
     expect(markup).toContain("Retry connection");
+    expect(markup).toContain("Try standard voice");
     expect(markup).toContain("End session");
     expect(markup).toContain("Your responses so far are saved");
     expect(markup).not.toMatch(/openai|stack|diagnostic|provider/i);

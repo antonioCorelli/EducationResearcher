@@ -367,9 +367,37 @@ textarea {
   margin-top: 4px;
 }
 
+.interview-mode-option-new-voice {
+  border-color: #9f8df1;
+  background: linear-gradient(135deg, #f7f5ff 0%, #eefaf8 100%);
+  box-shadow: inset 3px 0 0 #6d5bd0;
+}
+
+.interview-mode-option-new-voice input {
+  accent-color: #6d5bd0;
+}
+
 .interview-mode-option span {
   display: grid;
   gap: 2px;
+}
+
+.interview-mode-option .interview-mode-option-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.interview-mode-option .interview-mode-new-badge {
+  border-radius: 999px;
+  background: #6d5bd0;
+  color: #fff;
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
 }
 
 .interview-mode-option small,
