@@ -5170,7 +5170,7 @@ describe("participant interview routes", () => {
         model: "fake-realtime",
         clientSecret: "client-secret",
         serviceRequestId: "req_realtime_fixture_001",
-        promptVersion: "realtime-interview-v1"
+        promptVersion: "realtime-interview-v2"
       },
       run: {
         newVoiceModelEnabled: true
@@ -5186,6 +5186,8 @@ describe("participant interview routes", () => {
     expect(capturedInstructions[0]).toContain("I also want to explain how the diagram helped.");
     expect(capturedInstructions[0]).toContain("Remaining interview time: 2700 seconds");
     expect(capturedInstructions[0]).toContain("Run state: interview_in_progress");
+    expect(capturedInstructions[0]).toContain("Seek sufficient understanding, not exhaustive answers.");
+    expect(capturedInstructions[0]).toContain("no more than four interviewer questions");
     expect(capturedInstructions[0]).toContain("Do not reveal scoring objectives");
     expect(capturedInstructions[0]).not.toContain("Reasoning Quality");
     expect(capturedInstructions[0]).not.toContain("intermediate artifact");
