@@ -527,7 +527,7 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).toMatch(/checked="" value="natural"/);
   });
 
-  it("hides written response options when the run does not allow typed interview answers", () => {
+  it("keeps written response options enabled for runs with the legacy disabled setting", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
         aiQuestion="Could you share a concrete example?"
@@ -554,9 +554,8 @@ describe("ParticipantInterviewScreen", () => {
 
     expect(markup).toContain("Talk naturally");
     expect(markup).toContain("Press to record each answer");
-    expect(markup).not.toContain("Type my answers");
-    expect(markup).not.toContain("Type your answer");
-    expect(markup).not.toContain("Type instead");
+    expect(markup).toContain("Type my answers");
+    expect(markup).toMatch(/checked="" value="typing"/);
   });
 
   it("shows the paused screen immediately while a natural pause action is pending", () => {

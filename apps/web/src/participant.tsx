@@ -1143,7 +1143,6 @@ export function ParticipantConsentScreen({
 
 export function ParticipantInterviewScreen({
   aiQuestion,
-  allowWrittenResponses = true,
   error,
   initialResponseMode,
   initialVoiceExperience = "standard",
@@ -1200,6 +1199,8 @@ export function ParticipantInterviewScreen({
   readonly remainingInterviewSeconds?: number;
   readonly retryCount: number;
 }) {
+  // Keep the legacy run field in the payload shape, but make typing a standard participant response mode.
+  const allowWrittenResponses = true;
   const isActive = mode === "active";
   const hasRecoverableFailure = isActive && realtimeConnectionState === "failed";
   const [responseMode, setResponseMode] = useState<InterviewResponseMode>(
