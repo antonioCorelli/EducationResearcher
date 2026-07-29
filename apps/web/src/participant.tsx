@@ -375,7 +375,6 @@ export function Participant() {
           return currentValue;
         }
 
-        updateRealtimeResponseMode(dataChannelRef.current, "push_to_talk");
         startPushToTalkInput(dataChannelRef.current);
         startInterviewAudioRecording();
       }
@@ -387,9 +386,16 @@ export function Participant() {
   }
 
   function updateInterviewResponseMode(responseMode: InterviewResponseMode) {
+    const previousResponseMode = interviewResponseModeRef.current;
+
+    if (previousResponseMode !== responseMode) {
+      // Stop new microphone frames while the ordered Realtime transition drains stale input.
+      setMicrophoneEnabled(false);
+    }
+
     interviewResponseModeRef.current = responseMode;
     setInterviewResponseMode(responseMode);
-    updateRealtimeResponseMode(dataChannelRef.current, responseMode);
+    updateRealtimeResponseMode(dataChannelRef.current, previousResponseMode, responseMode);
   }
 
   function updateRealtimeVoiceExperience(voiceExperience: RealtimeVoiceExperience) {
@@ -3229,7 +3235,7 @@ async function connectOpenAiRealtimeVoice(
   });
 
   await dataChannelOpen;
-  updateRealtimeResponseMode(dataChannel, getResponseMode());
+  updateRealtimeResponseMode(dataChannel, undefined, getResponseMode());
   sendRealtimeEvent(dataChannel, { type: "response.create" });
 
   return {
@@ -3289,16 +3295,36 @@ function waitForRealtimeDataChannelOpen(dataChannel: RTCDataChannel) {
   });
 }
 
-function updateRealtimeResponseMode(dataChannel: RTCDataChannel | undefined, responseMode: InterviewResponseMode) {
+function updateRealtimeResponseMode(
+  dataChannel: RTCDataChannel | undefined,
+  previousResponseMode: InterviewResponseMode | undefined,
+  nextResponseMode: InterviewResponseMode
+) {
   if (!dataChannel) {
     return;
   }
 
-  sendRealtimeEvent(dataChannel, createRealtimeResponseModeSessionUpdate(responseMode));
-
-  if (responseMode !== "push_to_talk") {
-    sendRealtimeEvent(dataChannel, { type: "input_audio_buffer.clear" });
+  for (const event of createRealtimeResponseModeTransitionEvents(previousResponseMode, nextResponseMode)) {
+    sendRealtimeEvent(dataChannel, event);
   }
+}
+
+export function createRealtimeResponseModeTransitionEvents(
+  previousResponseMode: InterviewResponseMode | undefined,
+  nextResponseMode: InterviewResponseMode
+) {
+  if (previousResponseMode === nextResponseMode) {
+    return [];
+  }
+
+  const clearAudioBuffer = { type: "input_audio_buffer.clear" };
+  const nextSessionUpdate = createRealtimeResponseModeSessionUpdate(nextResponseMode);
+
+  // Clear before enabling VAD, but disable an active VAD before clearing so buffered
+  // audio cannot be committed as a participant turn during either transition.
+  return previousResponseMode === "natural"
+    ? [nextSessionUpdate, clearAudioBuffer]
+    : [clearAudioBuffer, nextSessionUpdate];
 }
 
 function startPushToTalkInput(dataChannel: RTCDataChannel | undefined) {
@@ -3362,6 +3388,9 @@ export function createRealtimeResponseModeSessionUpdate(responseMode: InterviewR
       type: "realtime",
       audio: {
         input: {
+          noise_reduction: {
+            type: "far_field"
+          },
           transcription: {
             model: "gpt-4o-transcribe"
           },
@@ -3369,7 +3398,7 @@ export function createRealtimeResponseModeSessionUpdate(responseMode: InterviewR
             responseMode === "natural"
               ? {
                   type: "semantic_vad",
-                  eagerness: "low",
+                  eagerness: "auto",
                   create_response: true,
                   interrupt_response: true
                 }

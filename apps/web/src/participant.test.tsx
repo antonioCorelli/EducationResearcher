@@ -9,6 +9,7 @@ import {
   createInterviewAudioUploadHeaders,
   createSurveyDraftStorageKey,
   createSurveyDraftSnapshot,
+  createRealtimeResponseModeTransitionEvents,
   createRealtimeResponseModeSessionUpdate,
   createRealtimeVoiceSessionRequestBody,
   createRealtimeTypedAnswerEvents,
@@ -783,13 +784,16 @@ describe("ParticipantInterviewScreen", () => {
     ).toBe(false);
   });
 
-  it("uses manual realtime turn control for push-to-talk mode", () => {
+  it("uses manual realtime turn control outside natural conversation mode", () => {
     expect(createRealtimeResponseModeSessionUpdate("push_to_talk")).toEqual({
       type: "session.update",
       session: {
         type: "realtime",
         audio: {
           input: {
+            noise_reduction: {
+              type: "far_field"
+            },
             transcription: {
               model: "gpt-4o-transcribe"
             },
@@ -805,12 +809,15 @@ describe("ParticipantInterviewScreen", () => {
         type: "realtime",
         audio: {
           input: {
+            noise_reduction: {
+              type: "far_field"
+            },
             transcription: {
               model: "gpt-4o-transcribe"
             },
             turn_detection: {
               type: "semantic_vad",
-              eagerness: "low",
+              eagerness: "auto",
               create_response: true,
               interrupt_response: true
             }
@@ -818,6 +825,77 @@ describe("ParticipantInterviewScreen", () => {
         }
       }
     });
+
+    expect(createRealtimeResponseModeSessionUpdate("typing")).toEqual(
+      createRealtimeResponseModeSessionUpdate("push_to_talk")
+    );
+  });
+
+  it("clears text and push-to-talk audio before enabling automatic natural turn detection", () => {
+    const clearAudioBuffer = { type: "input_audio_buffer.clear" };
+    const manualSessionUpdate = createRealtimeResponseModeSessionUpdate("push_to_talk");
+    const naturalSessionUpdate = createRealtimeResponseModeSessionUpdate("natural");
+
+    expect(createRealtimeResponseModeTransitionEvents("typing", "push_to_talk")).toEqual([
+      clearAudioBuffer,
+      manualSessionUpdate
+    ]);
+    expect(createRealtimeResponseModeTransitionEvents("push_to_talk", "natural")).toEqual([
+      clearAudioBuffer,
+      naturalSessionUpdate
+    ]);
+  });
+
+  it("disables automatic turn detection before clearing audio when leaving natural mode", () => {
+    const clearAudioBuffer = { type: "input_audio_buffer.clear" };
+
+    expect(createRealtimeResponseModeTransitionEvents("natural", "push_to_talk")).toEqual([
+      createRealtimeResponseModeSessionUpdate("push_to_talk"),
+      clearAudioBuffer
+    ]);
+    expect(createRealtimeResponseModeTransitionEvents("natural", "typing")).toEqual([
+      createRealtimeResponseModeSessionUpdate("typing"),
+      clearAudioBuffer
+    ]);
+  });
+
+  it("does not reset a live audio buffer when the selected response mode has not changed", () => {
+    expect(createRealtimeResponseModeTransitionEvents("natural", "natural")).toEqual([]);
+    expect(createRealtimeResponseModeTransitionEvents("push_to_talk", "push_to_talk")).toEqual([]);
+    expect(createRealtimeResponseModeTransitionEvents("typing", "typing")).toEqual([]);
+  });
+
+  it("sanitizes a fresh realtime connection before applying its response mode", () => {
+    expect(createRealtimeResponseModeTransitionEvents(undefined, "natural")).toEqual([
+      { type: "input_audio_buffer.clear" },
+      createRealtimeResponseModeSessionUpdate("natural")
+    ]);
+    expect(createRealtimeResponseModeTransitionEvents(undefined, "push_to_talk")).toEqual([
+      { type: "input_audio_buffer.clear" },
+      createRealtimeResponseModeSessionUpdate("push_to_talk")
+    ]);
+    expect(createRealtimeResponseModeTransitionEvents(undefined, "typing")).toEqual([
+      { type: "input_audio_buffer.clear" },
+      createRealtimeResponseModeSessionUpdate("typing")
+    ]);
+  });
+
+  it("never commits audio or creates an AI response as a side effect of changing modes", () => {
+    const responseModes = ["natural", "push_to_talk", "typing"] as const;
+    const previousResponseModes = [undefined, ...responseModes] as const;
+
+    for (const previousResponseMode of previousResponseModes) {
+      for (const nextResponseMode of responseModes) {
+        const events = createRealtimeResponseModeTransitionEvents(previousResponseMode, nextResponseMode);
+        const eventTypes = events.map((event) => event.type);
+
+        expect(eventTypes).not.toContain("input_audio_buffer.commit");
+        expect(eventTypes).not.toContain("response.create");
+        expect(eventTypes.filter((eventType) => eventType === "input_audio_buffer.clear")).toHaveLength(
+          previousResponseMode === nextResponseMode ? 0 : 1
+        );
+      }
+    }
   });
 
   it("sends only the allowlisted voice experience instead of a client model ID", () => {
