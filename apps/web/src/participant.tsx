@@ -80,6 +80,7 @@ type ParticipantAccessState =
   | { readonly status: "blocked"; readonly message: string };
 
 type InterviewMode = "ready" | "active" | "paused";
+type InterviewAction = "start" | "pause" | "resume" | "complete";
 type InterviewResponseMode = "natural" | "push_to_talk" | "typing";
 type RealtimeVoiceExperience = "standard" | "new_voice";
 interface InterviewResponseSelection {
@@ -114,6 +115,66 @@ const speechPauseVoiceLevelThreshold = 0.025;
 const speechPauseSilenceMs = 6500;
 const surveyDraftAutosaveDelayMs = 8000;
 const surveyDraftStorageKeyPrefix = "education-researcher:participant-survey-draft:v1";
+const interviewCompletionStorageKeyPrefix = "education-researcher:interview-completion:v1";
+const realtimeInterviewCompletionToolName = "signal_interview_complete";
+
+export async function prepareInterviewArtifactsForStateChange({
+  flushPendingArtifacts,
+  stopRealtimeVoice
+}: {
+  readonly flushPendingArtifacts: () => Promise<void>;
+  readonly stopRealtimeVoice: () => Promise<void>;
+}) {
+  await stopRealtimeVoice();
+  await flushPendingArtifacts();
+}
+
+export function shouldFlushPendingInterviewArtifacts(action: InterviewAction, runStatus: RunStatus) {
+  return action === "pause" || (action === "complete" && runStatus === "interview_in_progress");
+}
+
+type InterviewCompletionStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
+
+export function createInterviewCompletionStorageKey(accessToken: string) {
+  return `${interviewCompletionStorageKeyPrefix}:${encodeURIComponent(accessToken)}`;
+}
+
+export function readStoredInterviewCompletion(
+  storage: InterviewCompletionStorage | undefined,
+  accessToken: string
+) {
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    return storage.getItem(createInterviewCompletionStorageKey(accessToken)) === "ready";
+  } catch {
+    return false;
+  }
+}
+
+export function persistInterviewCompletion(
+  storage: InterviewCompletionStorage | undefined,
+  accessToken: string,
+  completionAvailable: boolean
+) {
+  if (!storage) {
+    return;
+  }
+
+  try {
+    const key = createInterviewCompletionStorageKey(accessToken);
+
+    if (completionAvailable) {
+      storage.setItem(key, "ready");
+    } else {
+      storage.removeItem(key);
+    }
+  } catch {
+    // Storage can be unavailable in privacy-restricted browsers; in-memory state still works.
+  }
+}
 
 interface RealtimeVoiceSession {
   readonly provider: "fake" | "openai";
@@ -143,6 +204,13 @@ export function Participant() {
   const [isRecording, setIsRecording] = useState(false);
   const [interviewError, setInterviewError] = useState("");
   const [isSubmittingInterviewAction, setIsSubmittingInterviewAction] = useState(false);
+  const [isInterviewCompletionAvailable, setIsInterviewCompletionAvailable] = useState(() => {
+    const accessToken = getParticipantAccessTokenFromPath();
+
+    return accessToken
+      ? readStoredInterviewCompletion(getInterviewCompletionStorage(), accessToken)
+      : false;
+  });
   const [latestAiQuestionTranscript, setLatestAiQuestionTranscript] = useState("");
   const [realtimeConnectionState, setRealtimeConnectionState] = useState<RealtimeConnectionState>("idle");
   const [realtimeServiceRequestId, setRealtimeServiceRequestId] = useState<string>();
@@ -156,6 +224,8 @@ export function Participant() {
   const pendingInterviewTurnsRef = useRef<PendingInterviewTurn[]>([]);
   const audioRecorderRef = useRef<MediaRecorder | undefined>(undefined);
   const audioRecorderStopPromiseRef = useRef<Promise<PendingInterviewAudioUpload | undefined> | undefined>(undefined);
+  const audioCaptureFinalizePromiseRef = useRef<Promise<void> | undefined>(undefined);
+  const realtimeDisconnectPromiseRef = useRef<Promise<void> | undefined>(undefined);
   const audioRecorderChunksRef = useRef<Blob[]>([]);
   const audioRecordingStartedAtRef = useRef<number | undefined>(undefined);
   const pendingInterviewAudioUploadsRef = useRef<PendingInterviewAudioUpload[]>([]);
@@ -190,6 +260,11 @@ export function Participant() {
         const payload = await fetchParticipantAccess(confirmedAccessToken);
 
         if (!cancelled) {
+          if (payload.run.status !== "interview_in_progress") {
+            persistInterviewCompletion(getInterviewCompletionStorage(), confirmedAccessToken, false);
+            setIsInterviewCompletionAvailable(false);
+          }
+
           setAccessState({ status: "ready", ...payload });
         }
       } catch (error) {
@@ -315,7 +390,7 @@ export function Participant() {
 
   useEffect(() => () => disconnectRealtimeVoice("closed"), []);
 
-  async function submitInterviewAction(action: "start" | "pause" | "resume" | "complete") {
+  async function submitInterviewAction(action: InterviewAction) {
     setInterviewError("");
 
     const accessToken = getParticipantAccessTokenFromPath();
@@ -329,7 +404,12 @@ export function Participant() {
 
     try {
       if (action === "pause" || action === "complete") {
-        await flushPendingInterviewArtifacts(accessToken);
+        await prepareInterviewArtifactsForStateChange({
+          stopRealtimeVoice: () => stopRealtimeVoice("closed"),
+          flushPendingArtifacts: shouldFlushPendingInterviewArtifacts(action, accessState.run.status)
+            ? () => flushPendingInterviewArtifacts(accessToken)
+            : async () => undefined
+        });
       }
 
       const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/${action}`, {
@@ -347,13 +427,18 @@ export function Participant() {
       setAccessState({ status: "ready", run: payload.run });
       setIsRecording(false);
 
+      if (action === "complete") {
+        persistInterviewCompletion(getInterviewCompletionStorage(), accessToken, false);
+        setIsInterviewCompletionAvailable(false);
+      }
+
       if (action === "start" || action === "resume") {
+        persistInterviewCompletion(getInterviewCompletionStorage(), accessToken, false);
+        setIsInterviewCompletionAvailable(false);
         setLatestAiQuestionTranscript("");
         setRealtimeRetryCount(0);
         setLatestParticipantTranscript("");
         await connectRealtimeVoice(accessToken, 0);
-      } else {
-        disconnectRealtimeVoice("closed");
       }
     } catch (error) {
       setInterviewError(error instanceof Error ? error.message : "Unable to update the interview.");
@@ -409,11 +494,7 @@ export function Participant() {
     }
 
     setMicrophoneEnabled(false);
-    void stopInterviewAudioRecording().then((audioUpload) => {
-      if (audioUpload) {
-        queueParticipantAudioUpload(audioUpload);
-      }
-    });
+    void finalizeInterviewAudioCapture();
     finishPushToTalkInput(dataChannelRef.current);
   }
 
@@ -432,7 +513,7 @@ export function Participant() {
   }
 
   async function connectRealtimeVoice(accessToken: string, retryCount = realtimeRetryCount) {
-    disconnectRealtimeVoice("closed");
+    await stopRealtimeVoice("closed");
     setRealtimeConnectionState("connecting");
     let activeServiceRequestId = realtimeServiceRequestId;
     const startedAt = performance.now();
@@ -471,7 +552,14 @@ export function Participant() {
           }
         },
         handleRealtimeVoiceActivity,
-        setLatestAiQuestionTranscript
+        setLatestAiQuestionTranscript,
+        () => {
+          persistInterviewCompletion(getInterviewCompletionStorage(), accessToken, true);
+          setIsInterviewCompletionAvailable(true);
+          setIsRecording(false);
+          setMicrophoneEnabled(false);
+          void finalizeInterviewAudioCapture();
+        }
       );
       peerConnectionRef.current = connection.peerConnection;
       dataChannelRef.current = connection.dataChannel;
@@ -540,7 +628,10 @@ export function Participant() {
     latencyMs?: number,
     retryCount = realtimeRetryCount
   ) {
-    await flushPendingInterviewArtifacts(accessToken);
+    await prepareInterviewArtifactsForStateChange({
+      stopRealtimeVoice: () => stopRealtimeVoice("closed"),
+      flushPendingArtifacts: () => flushPendingInterviewArtifacts(accessToken)
+    });
 
     const response = await fetch(`${serviceBaseUrl}/participant/runs/${accessToken}/interview/interrupt`, {
       method: "POST",
@@ -602,11 +693,7 @@ export function Participant() {
       return;
     }
 
-    void stopInterviewAudioRecording().then((audioUpload) => {
-      if (audioUpload) {
-        queueParticipantAudioUpload(audioUpload);
-      }
-    });
+    void finalizeInterviewAudioCapture();
   }
 
   function appendParticipantTranscriptTurn(turn: PendingInterviewTurn) {
@@ -640,11 +727,7 @@ export function Participant() {
   }
 
   async function flushPendingInterviewArtifacts(accessToken: string) {
-    const activeAudioUpload = await stopInterviewAudioRecording();
-
-    if (activeAudioUpload) {
-      queueParticipantAudioUpload(activeAudioUpload);
-    }
+    await finalizeInterviewAudioCapture();
 
     const turns = pendingInterviewTurnsRef.current;
     const audioUploads = pendingInterviewAudioUploadsRef.current;
@@ -750,6 +833,30 @@ export function Participant() {
     return audioUpload;
   }
 
+  async function finalizeInterviewAudioCapture() {
+    if (audioCaptureFinalizePromiseRef.current) {
+      return audioCaptureFinalizePromiseRef.current;
+    }
+
+    const finalizePromise = (async () => {
+      const audioUpload = await stopInterviewAudioRecording();
+
+      if (audioUpload) {
+        queueParticipantAudioUpload(audioUpload);
+      }
+    })();
+
+    audioCaptureFinalizePromiseRef.current = finalizePromise;
+
+    try {
+      await finalizePromise;
+    } finally {
+      if (audioCaptureFinalizePromiseRef.current === finalizePromise) {
+        audioCaptureFinalizePromiseRef.current = undefined;
+      }
+    }
+  }
+
   function createStoppedInterviewAudioUpload(
     recorder: MediaRecorder,
     stoppedAt: number
@@ -775,12 +882,35 @@ export function Participant() {
     return undefined;
   }
 
-  function disconnectRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
-    void stopInterviewAudioRecording().then((audioUpload) => {
-      if (audioUpload) {
-        queueParticipantAudioUpload(audioUpload);
+  async function stopRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
+    if (realtimeDisconnectPromiseRef.current) {
+      return realtimeDisconnectPromiseRef.current;
+    }
+
+    const disconnectPromise = (async () => {
+      setMicrophoneEnabled(false);
+      const audioFinalizePromise = finalizeInterviewAudioCapture();
+
+      closeRealtimeVoiceTransport(state);
+      await audioFinalizePromise;
+    })();
+
+    realtimeDisconnectPromiseRef.current = disconnectPromise;
+
+    try {
+      await disconnectPromise;
+    } finally {
+      if (realtimeDisconnectPromiseRef.current === disconnectPromise) {
+        realtimeDisconnectPromiseRef.current = undefined;
       }
-    });
+    }
+  }
+
+  function disconnectRealtimeVoice(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
+    void stopRealtimeVoice(state);
+  }
+
+  function closeRealtimeVoiceTransport(state: Extract<RealtimeConnectionState, "closed" | "disconnected">) {
     dataChannelRef.current?.close();
     peerConnectionRef.current?.close();
     mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1001,6 +1131,7 @@ export function Participant() {
       return (
         <ParticipantInterviewScreen
           aiQuestion={latestAiQuestionTranscript}
+          completionAvailable={isInterviewCompletionAvailable}
           error={interviewError}
           isActionPending={isSubmittingInterviewAction}
           isRecording={isRecording}
@@ -1149,6 +1280,7 @@ export function ParticipantConsentScreen({
 
 export function ParticipantInterviewScreen({
   aiQuestion,
+  completionAvailable = false,
   error,
   initialResponseMode,
   initialVoiceExperience = "standard",
@@ -1178,6 +1310,7 @@ export function ParticipantInterviewScreen({
 }: {
   readonly aiQuestion: string;
   readonly allowWrittenResponses?: boolean;
+  readonly completionAvailable?: boolean;
   readonly error: string;
   readonly initialResponseMode?: InterviewResponseMode;
   readonly initialVoiceExperience?: RealtimeVoiceExperience;
@@ -1208,7 +1341,7 @@ export function ParticipantInterviewScreen({
   // Keep the legacy run field in the payload shape, but make typing a standard participant response mode.
   const allowWrittenResponses = true;
   const isActive = mode === "active";
-  const hasRecoverableFailure = isActive && realtimeConnectionState === "failed";
+  const hasRecoverableFailure = isActive && !completionAvailable && realtimeConnectionState === "failed";
   const [responseMode, setResponseMode] = useState<InterviewResponseMode>(
     normalizeInterviewResponseModeForWrittenPermission(initialResponseMode ?? "natural", allowWrittenResponses)
   );
@@ -1228,20 +1361,27 @@ export function ParticipantInterviewScreen({
   const [displayQuestion, setDisplayQuestion] = useState(getDisplayQuestionText(aiQuestion));
   const [interruptionNotice, setInterruptionNotice] = useState("");
   const [canReturnToPreviousCard, setCanReturnToPreviousCard] = useState(false);
+  const [hasRequestedCompletion, setHasRequestedCompletion] = useState(false);
   const interviewHistoryIndexRef = useRef(0);
   const voiceCaptureTimeoutRef = useRef<number | undefined>(undefined);
   const hasRequestedTimeLimitCompletionRef = useRef(false);
 
   const isNaturalRealtimeConversation =
-    isActive && uiState !== "paused" && responseMode === "natural" && realtimeConnectionState === "connected";
-  const interviewTimerIsRunning = isActive && uiState !== "paused" && uiState !== "completed";
+    isActive &&
+    !completionAvailable &&
+    uiState !== "paused" &&
+    responseMode === "natural" &&
+    realtimeConnectionState === "connected";
+  const interviewTimerIsRunning =
+    isActive && !completionAvailable && uiState !== "paused" && uiState !== "completed";
   const totalInterviewSeconds = maxInterviewMinutes * 60;
   const remainingInterviewSeconds = useRemainingSeconds(
     initialRemainingInterviewSeconds ?? totalInterviewSeconds,
     interviewTimerIsRunning
   );
   const elapsedSeconds = useElapsedSeconds(uiState === "student_speaking" || (uiState === "student_turn" && responseMode === "natural"));
-  const shouldCaptureSpeech = isActive && uiState === "student_speaking" && responseMode !== "typing";
+  const shouldCaptureSpeech =
+    isActive && !completionAvailable && uiState === "student_speaking" && responseMode !== "typing";
   const isCapturingVoiceCheck = mode === "ready" && uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus);
   const speechTranscript = useBrowserSpeechTranscript(shouldCaptureSpeech || isCapturingVoiceCheck);
   const microphoneLevel = useMicrophoneLevel(
@@ -1249,12 +1389,20 @@ export function ParticipantInterviewScreen({
       shouldCaptureSpeech ||
       isNaturalRealtimeConversation
   );
-  const participantVoiceState = isNaturalRealtimeConversation
-    ? getNaturalConversationTitle(realtimeVoiceActivity)
-    : getParticipantVoiceState(uiState, responseMode, isActive);
+  const participantVoiceState = completionAvailable
+    ? "Interview questions complete"
+    : isNaturalRealtimeConversation
+      ? getNaturalConversationTitle(realtimeVoiceActivity)
+      : getParticipantVoiceState(uiState, responseMode, isActive);
+  const isCompletingInterview = isActionPending && (completionAvailable || hasRequestedCompletion);
   const shouldShowInterviewControls =
-    mode === "active" && uiState !== "completed" && uiState !== "paused" && !isNaturalRealtimeConversation;
+    mode === "active" &&
+    !completionAvailable &&
+    uiState !== "completed" &&
+    uiState !== "paused" &&
+    !isNaturalRealtimeConversation;
   const shouldShowCurrentQuestion =
+    !completionAvailable &&
     uiState !== "paused" &&
     uiState !== "completed" &&
     (mode !== "ready" || !["onboarding", "mic_check", "mode_selection"].includes(uiState));
@@ -1265,13 +1413,13 @@ export function ParticipantInterviewScreen({
     ? "interview-layout interview-layout-with-question"
     : "interview-layout interview-layout-centered";
   const shouldWatchForStudentPause = shouldNoticeStudentPause({
-    isActive,
+    isActive: isActive && !completionAvailable,
     microphoneLevel,
     responseMode,
     uiState
   });
   const isPushToTalkAiSpeaking = shouldPausePushToTalkForAiSpeech({
-    isActive,
+    isActive: isActive && !completionAvailable,
     realtimeVoiceActivity,
     responseMode,
     uiState
@@ -1282,14 +1430,25 @@ export function ParticipantInterviewScreen({
   }, [aiQuestion]);
 
   useEffect(() => {
-    if (!isActive || remainingInterviewSeconds > 0 || hasRequestedTimeLimitCompletionRef.current) {
+    if (!isActionPending) {
+      setHasRequestedCompletion(false);
+    }
+  }, [isActionPending]);
+
+  useEffect(() => {
+    if (
+      !isActive ||
+      completionAvailable ||
+      remainingInterviewSeconds > 0 ||
+      hasRequestedTimeLimitCompletionRef.current
+    ) {
       return;
     }
 
     hasRequestedTimeLimitCompletionRef.current = true;
     setUiState("completed");
     onComplete();
-  }, [isActive, onComplete, remainingInterviewSeconds]);
+  }, [completionAvailable, isActive, onComplete, remainingInterviewSeconds]);
 
   useEffect(() => {
     const currentEntry = getInterviewHistoryEntry(window.history.state);
@@ -1417,17 +1576,19 @@ export function ParticipantInterviewScreen({
     }
 
     const shouldRecord =
+      !completionAvailable &&
       realtimeConnectionState !== "failed" &&
-      (responseMode === "natural" &&
+      ((responseMode === "natural" &&
         (isNaturalRealtimeConversation ||
           uiState === "student_turn" ||
           uiState === "student_speaking")) ||
-      (responseMode === "push_to_talk" && uiState === "student_speaking" && !isPushToTalkAiSpeaking) ||
-      (uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus));
+        (responseMode === "push_to_talk" && uiState === "student_speaking" && !isPushToTalkAiSpeaking) ||
+        (uiState === "mic_check" && isVoiceCaptureActive(voiceCaptureStatus)));
 
     onRecordingChange(shouldRecord);
   }, [
     isActive,
+    completionAvailable,
     isNaturalRealtimeConversation,
     isPushToTalkAiSpeaking,
     onRecordingChange,
@@ -1648,6 +1809,11 @@ export function ParticipantInterviewScreen({
     onPause();
   }
 
+  function handleComplete() {
+    setHasRequestedCompletion(true);
+    onComplete();
+  }
+
   function handleUseStandardVoice() {
     setVoiceExperience("standard");
     onVoiceExperienceChange("standard");
@@ -1694,6 +1860,20 @@ export function ParticipantInterviewScreen({
   }
 
   function renderMainPanel() {
+    if (completionAvailable) {
+      return (
+        <InterviewStageCard eyebrow="Questions complete" title="That’s everything">
+          <p>Thank you for sharing your thoughts. The interviewer has finished asking questions, even if a little time remains.</p>
+          <p>Select Complete interview to save your responses and finish.</p>
+          <InterviewCardActions canGoBack={false} onBack={() => undefined}>
+            <button autoFocus className="primary-button" disabled={isActionPending} onClick={handleComplete} type="button">
+              {isCompletingInterview ? "Completing interview" : "Complete interview"}
+            </button>
+          </InterviewCardActions>
+        </InterviewStageCard>
+      );
+    }
+
     if (isNaturalRealtimeConversation) {
       const participantIsSpeaking = realtimeVoiceActivity === "participant_speaking" || microphoneLevel > speechPauseVoiceLevelThreshold;
 
@@ -1818,10 +1998,10 @@ export function ParticipantInterviewScreen({
           />
           <InterviewCardActions canGoBack={canUseCardBackButton} onBack={returnToPreviousInterviewCard}>
             <button className="primary-button" disabled={isActionPending} onClick={onResume} type="button">
-              {isActionPending ? "Resuming" : "Resume interview"}
+              {isActionPending && !hasRequestedCompletion ? "Resuming" : "Resume interview"}
             </button>
-            <button className="secondary-button" disabled={isActionPending} onClick={onComplete} type="button">
-              End interview
+            <button className="secondary-button" disabled={isActionPending} onClick={handleComplete} type="button">
+              {isCompletingInterview ? "Completing interview" : "Complete interview"}
             </button>
           </InterviewCardActions>
         </InterviewStageCard>
@@ -2030,6 +2210,7 @@ export function ParticipantInterviewScreen({
             <p className="eyebrow">AI Guided Interview</p>
           </div>
           <InterviewTimeIndicator
+            isComplete={completionAvailable || uiState === "completed"}
             isPaused={mode === "paused" || uiState === "paused"}
             maxInterviewMinutes={maxInterviewMinutes}
             remainingSeconds={remainingInterviewSeconds}
@@ -2037,7 +2218,7 @@ export function ParticipantInterviewScreen({
         </div>
 
         <div className="participant-reassurance" role="note">
-          Share your thinking in your own words.
+          {completionAvailable ? "Thank you. Your interview is ready to complete." : "Share your thinking in your own words."}
         </div>
 
         <div className={interviewLayoutClassName}>
@@ -2090,8 +2271,8 @@ export function ParticipantInterviewScreen({
 
         {shouldShowInterviewControls ? (
           <div className="participant-interview-controls" aria-label="Interview controls">
-            <button className="secondary-button" disabled={isActionPending} onClick={onComplete} type="button">
-              End interview
+            <button className="secondary-button" disabled={isActionPending} onClick={handleComplete} type="button">
+              {isCompletingInterview ? "Completing interview" : "End interview"}
             </button>
           </div>
         ) : null}
@@ -2298,27 +2479,34 @@ function InterviewStageCard({
 }
 
 function InterviewTimeIndicator({
+  isComplete,
   isPaused,
   maxInterviewMinutes,
   remainingSeconds
 }: {
+  readonly isComplete: boolean;
   readonly isPaused: boolean;
   readonly maxInterviewMinutes: number;
   readonly remainingSeconds: number;
 }) {
   const totalSeconds = Math.max(1, maxInterviewMinutes * 60);
   const elapsedSeconds = Math.max(0, totalSeconds - remainingSeconds);
-  const progressPercent = Math.min(100, Math.round((elapsedSeconds / totalSeconds) * 100));
+  const progressPercent = isComplete ? 100 : Math.min(100, Math.round((elapsedSeconds / totalSeconds) * 100));
+  const className = isComplete
+    ? "interview-time-indicator completed-interview-time-indicator"
+    : isPaused
+      ? "interview-time-indicator paused-interview-time-indicator"
+      : "interview-time-indicator";
 
   return (
     <div
-      aria-label="Interview time remaining"
-      className={isPaused ? "interview-time-indicator paused-interview-time-indicator" : "interview-time-indicator"}
-      role="timer"
+      aria-label={isComplete ? "Interview questions complete" : "Interview time remaining"}
+      className={className}
+      role={isComplete ? "status" : "timer"}
     >
-      <span>{isPaused ? "Paused" : "Time remaining"}</span>
-      <strong>{formatElapsedSeconds(remainingSeconds)}</strong>
-      <small>{maxInterviewMinutes} min max</small>
+      <span>{isComplete ? "Questions complete" : isPaused ? "Paused" : "Time remaining"}</span>
+      <strong>{isComplete ? "Ready to finish" : formatElapsedSeconds(remainingSeconds)}</strong>
+      <small>{isComplete ? "Finished early is okay" : `${maxInterviewMinutes} min max`}</small>
       <div className="interview-time-track" aria-hidden="true">
         <span style={{ "--interview-time-progress": `${progressPercent}%` } as CSSProperties} />
       </div>
@@ -3146,7 +3334,8 @@ async function connectOpenAiRealtimeVoice(
   getResponseMode: () => InterviewResponseMode,
   onTranscriptTurn: (turn: PendingInterviewTurn) => void,
   onVoiceActivity: (activity: RealtimeVoiceActivity) => void,
-  onAiQuestionTranscriptChange: (transcript: string) => void
+  onAiQuestionTranscriptChange: (transcript: string) => void,
+  onInterviewCompletionAvailable: () => void
 ) {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("Microphone access is not available in this browser.");
@@ -3207,6 +3396,10 @@ async function connectOpenAiRealtimeVoice(
 
     if (turn) {
       onTranscriptTurn(turn);
+    }
+
+    if (parseRealtimeInterviewCompletionSignal(realtimeEvent)) {
+      onInterviewCompletionAvailable();
     }
   });
   const offer = await peerConnection.createOffer();
@@ -3429,6 +3622,26 @@ function parseRealtimeServerEvent(value: unknown): Record<string, unknown> | und
   return event;
 }
 
+export function parseRealtimeInterviewCompletionSignal(event: Record<string, unknown> | undefined) {
+  if (!event || event.type !== "response.done" || !isObjectRecord(event.response)) {
+    return false;
+  }
+
+  const response = event.response;
+
+  if (response.status !== "completed" || !Array.isArray(response.output)) {
+    return false;
+  }
+
+  return response.output.some(
+    (item) =>
+      isObjectRecord(item) &&
+      item.type === "function_call" &&
+      item.status === "completed" &&
+      item.name === realtimeInterviewCompletionToolName
+  );
+}
+
 export function parseRealtimeAiTranscriptUpdate(
   event: Record<string, unknown> | undefined
 ):
@@ -3585,6 +3798,14 @@ function shouldAutosaveSurveyDraft(
 function getSurveyDraftStorage() {
   try {
     return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function getInterviewCompletionStorage() {
+  try {
+    return window.sessionStorage;
   } catch {
     return undefined;
   }

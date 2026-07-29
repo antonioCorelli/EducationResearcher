@@ -5,6 +5,7 @@ import {
   ParticipantConsentScreen,
   ParticipantSurveyScreen,
   ParticipantInterviewScreen,
+  createInterviewCompletionStorageKey,
   createInterviewArtifactBatches,
   createInterviewAudioUploadHeaders,
   createSurveyDraftStorageKey,
@@ -16,9 +17,14 @@ import {
   getSupportedInterviewAudioMimeType,
   normalizeRealtimeVoiceExperienceForResponseMode,
   normalizeSurveyDraftResponses,
+  parseRealtimeInterviewCompletionSignal,
+  persistInterviewCompletion,
   persistSurveyDraft,
   parseRealtimeAiTranscriptUpdate,
+  prepareInterviewArtifactsForStateChange,
+  readStoredInterviewCompletion,
   readStoredSurveyDraft,
+  shouldFlushPendingInterviewArtifacts,
   shouldShowInterviewCardBackButton,
   shouldNoticeStudentPause,
   shouldPausePushToTalkForAiSpeech,
@@ -241,6 +247,22 @@ class FakeStorage {
   }
 }
 
+describe("interview completion persistence", () => {
+  it("restores the final handoff after a refresh and clears it after completion", () => {
+    const storage = new FakeStorage();
+    const accessToken = "participant/token with spaces";
+
+    expect(createInterviewCompletionStorageKey(accessToken)).not.toContain(accessToken);
+    expect(readStoredInterviewCompletion(storage, accessToken)).toBe(false);
+
+    persistInterviewCompletion(storage, accessToken, true);
+    expect(readStoredInterviewCompletion(storage, accessToken)).toBe(true);
+
+    persistInterviewCompletion(storage, accessToken, false);
+    expect(readStoredInterviewCompletion(storage, accessToken)).toBe(false);
+  });
+});
+
 describe("ParticipantInterviewScreen", () => {
   it("starts with a low-friction onboarding flow before the interview begins", () => {
     const markup = renderToStaticMarkup(
@@ -345,6 +367,66 @@ describe("ParticipantInterviewScreen", () => {
     expect(markup).not.toContain("End interview");
   });
 
+  it("offers a calm, explicit completion handoff when the interviewer has no questions left", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Thank you for sharing your thoughts today."
+        completionAvailable
+        error=""
+        isActionPending={false}
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="closed"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toContain("That’s everything");
+    expect(markup).toContain("Complete interview");
+    expect(markup).toContain("Questions complete");
+    expect(markup).toContain('autofocus=""');
+    expect(markup).toContain("interview-layout-centered");
+    expect(markup).not.toContain("Current question");
+    expect(markup).not.toContain("Time remaining");
+    expect(markup).not.toContain(">Pause<");
+    expect(markup).not.toContain("End interview");
+  });
+
+  it("keeps the completion action disabled and clear while the final save is pending", () => {
+    const markup = renderToStaticMarkup(
+      <ParticipantInterviewScreen
+        aiQuestion="Thank you for sharing your thoughts today."
+        completionAvailable
+        error=""
+        isActionPending
+        isRecording={false}
+        maxInterviewMinutes={45}
+        mode="active"
+        realtimeConnectionState="closed"
+        onComplete={noop}
+        onConfirmAnswer={noop}
+        onPause={noop}
+        onRecordingChange={noop}
+        onResume={noop}
+        onRetry={noop}
+        onStart={noop}
+        onStopAfterFailure={noop}
+        retryCount={0}
+      />
+    );
+
+    expect(markup).toMatch(/<button[^>]*autofocus=""[^>]*disabled=""[^>]*>Completing interview<\/button>/);
+  });
+
   it("shows remaining interview time in the active voice UI", () => {
     const markup = renderToStaticMarkup(
       <ParticipantInterviewScreen
@@ -400,11 +482,13 @@ describe("ParticipantInterviewScreen", () => {
 
     expect(markup).toContain("Interview paused");
     expect(markup).toContain("Resume interview");
+    expect(markup).toContain("Complete interview");
     expect(markup).not.toContain("Current question");
     expect(markup).not.toContain("What part of your survey answer would you like to explain more?");
     expect(markup).not.toContain("Repeat question");
     expect(markup).not.toContain("Repeat</button>");
     expect(markup).not.toContain("I stopped - go ahead");
+    expect(markup).not.toContain("End interview");
   });
 
   it("lets paused participants choose a different response mode before resuming", () => {
@@ -627,6 +711,83 @@ describe("ParticipantInterviewScreen", () => {
         transcript: "This is the participant answer."
       })
     ).toBeUndefined();
+  });
+
+  it("detects a completed interview signal only from a successful realtime response", () => {
+    expect(
+      parseRealtimeInterviewCompletionSignal({
+        type: "response.done",
+        response: {
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              status: "completed"
+            },
+            {
+              type: "function_call",
+              status: "completed",
+              name: "signal_interview_complete",
+              call_id: "call_complete_001",
+              arguments: "{}"
+            }
+          ]
+        }
+      })
+    ).toBe(true);
+
+    expect(
+      parseRealtimeInterviewCompletionSignal({
+        type: "response.done",
+        response: {
+          status: "incomplete",
+          output: [
+            {
+              type: "function_call",
+              status: "incomplete",
+              name: "signal_interview_complete"
+            }
+          ]
+        }
+      })
+    ).toBe(false);
+
+    expect(
+      parseRealtimeInterviewCompletionSignal({
+        type: "response.done",
+        response: {
+          status: "completed",
+          output: [
+            {
+              type: "function_call",
+              status: "completed",
+              name: "unrelated_tool"
+            }
+          ]
+        }
+      })
+    ).toBe(false);
+  });
+
+  it("stops realtime capture before flushing artifacts for pause or completion", async () => {
+    const operations: string[] = [];
+
+    await prepareInterviewArtifactsForStateChange({
+      stopRealtimeVoice: async () => {
+        operations.push("stop");
+      },
+      flushPendingArtifacts: async () => {
+        operations.push("flush");
+      }
+    });
+
+    expect(operations).toEqual(["stop", "flush"]);
+  });
+
+  it("does not let a stale paused-session upload block interview completion", () => {
+    expect(shouldFlushPendingInterviewArtifacts("pause", "interview_in_progress")).toBe(true);
+    expect(shouldFlushPendingInterviewArtifacts("complete", "interview_in_progress")).toBe(true);
+    expect(shouldFlushPendingInterviewArtifacts("complete", "interview_paused")).toBe(false);
   });
 
   it("hides the current question section through voice capture setup and response mode setup", () => {

@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { InterviewSession, InterviewTurnSpeaker, Run, SurveyResponse } from "./runs.js";
 import type { SurveyVersion } from "./survey.js";
 
-export const REALTIME_INTERVIEW_PROMPT_VERSION = "realtime-interview-v2";
+export const REALTIME_INTERVIEW_PROMPT_VERSION = "realtime-interview-v3";
+export const REALTIME_INTERVIEW_COMPLETION_TOOL_NAME = "signal_interview_complete";
 export const DEFAULT_REALTIME_MODEL = "gpt-realtime";
 export const DEFAULT_NEW_REALTIME_MODEL = "gpt-realtime-2.1";
 export const DEFAULT_REALTIME_VOICE = "marin";
@@ -136,6 +137,21 @@ export class OpenAiRealtimeVoiceProvider implements RealtimeVoiceProvider {
             type: "realtime",
             model,
             instructions: request.instructions,
+            tools: [
+              {
+                type: "function",
+                name: REALTIME_INTERVIEW_COMPLETION_TOOL_NAME,
+                description:
+                  "Signal that every useful interview question is finished so the participant can be shown the Complete interview button.",
+                parameters: {
+                  type: "object",
+                  properties: {},
+                  required: [],
+                  additionalProperties: false
+                }
+              }
+            ],
+            tool_choice: "auto",
             audio: {
               input: {
                 transcription: {
@@ -292,6 +308,8 @@ export function buildRealtimeInterviewInstructions(input: RealtimeInterviewPromp
     "- Do not reveal scoring objectives, rubrics, grades, hidden progress, or any evaluation strategy.",
     "- The maximum interview duration is a cap, not a target. Continue only while questions produce genuinely new information. Do not fill time or try to reach an assumed duration; close warmly as soon as useful lines of inquiry are complete.",
     "- If time is nearly over, ask the single highest-value remaining question only if it is still useful, and then close warmly.",
+    `- When no useful unanswered line of inquiry remains, give a brief warm spoken closing such as: "Thank you. That is everything I wanted to ask. Please select Complete interview to finish." Then, in the same response, call ${REALTIME_INTERVIEW_COMPLETION_TOOL_NAME} exactly once.`,
+    "- Do not ask another question after deciding to close, do not wait for the participant to speak again, and do not continue the conversation after calling the completion tool.",
     "",
     `Run state: ${input.run.status}`,
     `Remaining interview time: ${input.remainingSeconds} seconds`,

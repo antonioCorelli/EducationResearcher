@@ -853,6 +853,7 @@ describe("interview session lifecycle", () => {
 
     await service.startParticipantInterview(rawToken);
     await scoringService.completeParticipantInterview(rawToken);
+    await scoringService.completeParticipantInterview(rawToken);
 
     expect(automaticScoringTriggers).toEqual([
       expect.objectContaining({

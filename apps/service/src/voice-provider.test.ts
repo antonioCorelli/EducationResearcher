@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FakeRealtimeVoiceProvider,
   OpenAiRealtimeVoiceProvider,
+  REALTIME_INTERVIEW_COMPLETION_TOOL_NAME,
   REALTIME_INTERVIEW_PROMPT_VERSION,
   RealtimeVoiceProviderError,
   buildRealtimeInterviewInstructions,
@@ -82,7 +83,7 @@ const promptInput: RealtimeInterviewPromptInput = {
 
 describe("realtime voice provider", () => {
   it("uses the adaptive interviewer prompt version", () => {
-    expect(REALTIME_INTERVIEW_PROMPT_VERSION).toBe("realtime-interview-v2");
+    expect(REALTIME_INTERVIEW_PROMPT_VERSION).toBe("realtime-interview-v3");
   });
 
   it("builds interview instructions with context and participant-safe boundaries", () => {
@@ -112,6 +113,16 @@ describe("realtime voice provider", () => {
     expect(instructions).toContain("maximum interview duration is a cap, not a target");
     expect(instructions).toContain("Do not fill time");
     expect(instructions).toContain("close warmly");
+  });
+
+  it("turns an exhausted interview into an explicit participant completion handoff", () => {
+    const instructions = buildRealtimeInterviewInstructions(promptInput);
+
+    expect(instructions).toContain("brief warm spoken closing");
+    expect(instructions).toContain(REALTIME_INTERVIEW_COMPLETION_TOOL_NAME);
+    expect(instructions).toContain("exactly once");
+    expect(instructions).toContain("Do not ask another question");
+    expect(instructions).toContain("Complete interview");
   });
 
   it("stops an exhausted line after only one genuinely different rephrase", () => {
@@ -221,7 +232,7 @@ describe("realtime voice provider", () => {
       expiresAt: 1_800_000_000,
       realtimeUrl: "https://api.openai.com/v1/realtime/calls",
       serviceRequestId: "req_realtime_001",
-      promptVersion: "realtime-interview-v2"
+      promptVersion: "realtime-interview-v3"
     });
     expect(requests[0]?.url).toBe("https://api.openai.com/v1/realtime/client_secrets");
     expect(requests[0]?.init.headers).toMatchObject({
@@ -241,7 +252,20 @@ describe("realtime voice provider", () => {
           output: {
             voice: "marin"
           }
-        }
+        },
+        tools: [
+          {
+            type: "function",
+            name: REALTIME_INTERVIEW_COMPLETION_TOOL_NAME,
+            parameters: {
+              type: "object",
+              properties: {},
+              required: [],
+              additionalProperties: false
+            }
+          }
+        ],
+        tool_choice: "auto"
       }
     });
     expect(JSON.stringify(session)).not.toContain("test-api-key");

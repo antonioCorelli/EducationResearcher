@@ -209,6 +209,11 @@ textarea {
   background: #8a6a12;
 }
 
+.completed-interview-time-indicator span,
+.completed-interview-time-indicator strong {
+  color: #1f5b49;
+}
+
 .participant-reassurance {
   border: 1px solid #d7e0da;
   border-radius: 999px;

@@ -5170,7 +5170,7 @@ describe("participant interview routes", () => {
         model: "fake-realtime",
         clientSecret: "client-secret",
         serviceRequestId: "req_realtime_fixture_001",
-        promptVersion: "realtime-interview-v2"
+        promptVersion: "realtime-interview-v3"
       },
       run: {
         newVoiceModelEnabled: true
